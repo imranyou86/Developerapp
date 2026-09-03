@@ -39,13 +39,30 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
     "Full interior remodel: kitchen, baths, flooring, paint, updated systems."
   );
   const [costPerSqft, setCostPerSqft] = useState(400);
+  // Ground-up rebuilds aren't bounded by the existing structure's footprint —
+  // what you can actually build depends on the lot's zoning (FAR, setbacks,
+  // lot coverage, height limits), which varies by jurisdiction. Remodels use
+  // the existing home's sqft; ground-up uses this separate, editable target.
+  const [buildableSqft, setBuildableSqft] = useState(() => deal.sqft ?? 2000);
+  const sqftBasis = scope === "ground_up" ? buildableSqft : (deal.sqft ?? buildableSqft);
   const [budget, setBudget] = useState(() => Math.round((deal.sqft ?? 2000) * 400));
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeStatus, setAnalyzeStatus] = useState("");
 
   function handleCostPerSqftChange(value: number) {
     setCostPerSqft(value);
-    if (deal.sqft) setBudget(Math.round(deal.sqft * value));
+    setBudget(Math.round(sqftBasis * value));
+  }
+
+  function handleBuildableSqftChange(value: number) {
+    setBuildableSqft(value);
+    if (scope === "ground_up") setBudget(Math.round(value * costPerSqft));
+  }
+
+  function handleScopeChange(next: DealScope) {
+    setScope(next);
+    const basis = next === "ground_up" ? buildableSqft : (deal.sqft ?? buildableSqft);
+    setBudget(Math.round(basis * costPerSqft));
   }
 
   async function handleStatusChange(next: DealStatus) {
@@ -91,6 +108,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
           zipCode: deal.zip_code,
           listPrice: deal.list_price,
           sqft: deal.sqft,
+          targetSqft: sqftBasis,
           beds: deal.beds,
           baths: deal.baths,
           yearBuilt: deal.year_built,
@@ -230,13 +248,13 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               <div className="flex gap-2">
                 <button
                   className={scope === "remodel" ? "btn-primary flex-1 text-xs" : "btn-outline flex-1 text-xs"}
-                  onClick={() => setScope("remodel")}
+                  onClick={() => handleScopeChange("remodel")}
                 >
                   Remodel
                 </button>
                 <button
                   className={scope === "ground_up" ? "btn-primary flex-1 text-xs" : "btn-outline flex-1 text-xs"}
-                  onClick={() => setScope("ground_up")}
+                  onClick={() => handleScopeChange("ground_up")}
                 >
                   Ground-up rebuild
                 </button>
@@ -247,6 +265,24 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               <label className="label">Scope description</label>
               <textarea className="input" rows={2} value={scopeDescription} onChange={(e) => setScopeDescription(e.target.value)} />
             </div>
+
+            {scope === "ground_up" && (
+              <div>
+                <label className="label">Target buildable sqft</label>
+                <input
+                  className="input"
+                  type="number"
+                  value={buildableSqft}
+                  onChange={(e) => handleBuildableSqftChange(Number(e.target.value) || 0)}
+                />
+                <p className="mt-1 text-xs text-blueprint/50">
+                  A rebuild isn&apos;t limited to the existing home&apos;s {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "footprint"} — what you
+                  can actually build depends on the lot&apos;s zoning (FAR, setbacks, lot coverage, height limits), which varies
+                  by city/county. Check with the local planning department for what&apos;s actually permittable, then set your
+                  target here.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -263,7 +299,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                 <input className="input" type="number" value={budget} onChange={(e) => setBudget(Number(e.target.value) || 0)} />
               </div>
             </div>
-            {!deal.sqft && (
+            {!deal.sqft && scope === "remodel" && (
               <p className="text-xs text-amber-dark">
                 This listing has no square footage on file — enter the construction budget directly.
               </p>
@@ -345,7 +381,7 @@ function AnalysisCard({ analysis, listPrice }: { analysis: DealAnalysis; listPri
         <span className="ml-1 text-xs text-blueprint/50">(before closing costs, selling commissions, and financing)</span>
       </p>
 
-      {analysis.reasoning && <p className="mb-4 text-sm text-blueprint/70">{analysis.reasoning}</p>}
+      {analysis.reasoning && <ReasoningSections text={analysis.reasoning} />}
 
       {analysis.comps.length > 0 && (
         <div>
@@ -371,6 +407,40 @@ function AnalysisCard({ analysis, listPrice }: { analysis: DealAnalysis; listPri
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Renders the "SECTION HEADER\nbody..." blocks evaluate-deal formats its
+// comprehensive analysis into (market context, comp analysis, risks,
+// upside, bottom line), with bullet lines (starting "• ") as a list.
+function ReasoningSections({ text }: { text: string }) {
+  const sections = text.split("\n\n").map((block) => {
+    const [firstLine, ...rest] = block.split("\n");
+    const isHeader = firstLine === firstLine.toUpperCase() && firstLine.trim().length > 0 && rest.length > 0;
+    return isHeader ? { header: firstLine, body: rest.join("\n") } : { header: null, body: block };
+  });
+
+  return (
+    <div className="mb-4 space-y-3">
+      {sections.map((s, i) => {
+        const bulletLines = s.body.split("\n").filter((l) => l.trim().startsWith("• "));
+        const isBulletList = bulletLines.length > 0 && bulletLines.length === s.body.split("\n").filter((l) => l.trim()).length;
+        return (
+          <div key={i}>
+            {s.header && <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-blueprint/50">{s.header}</p>}
+            {isBulletList ? (
+              <ul className="space-y-0.5 text-sm text-blueprint/70">
+                {bulletLines.map((line, li) => (
+                  <li key={li}>{line.trim()}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-blueprint/70">{s.body}</p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

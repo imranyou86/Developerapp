@@ -46,8 +46,45 @@ export async function fetchImageForClaude(url: string): Promise<ClaudeImageBlock
   };
 }
 
+// Claude sometimes writes literal newlines/tabs inside a JSON string value
+// (e.g. a multi-paragraph "reasoning" field) instead of escaping them —
+// valid as text, invalid as JSON. Walk the string tracking whether we're
+// inside a quoted value and escape raw control characters found there.
+function escapeControlCharsInStrings(jsonText: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of jsonText) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === "\\") {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        out += ch;
+        inString = false;
+      } else if (ch === "\n") {
+        out += "\\n";
+      } else if (ch === "\r") {
+        out += "\\r";
+      } else if (ch === "\t") {
+        out += "\\t";
+      } else {
+        out += ch;
+      }
+    } else {
+      out += ch;
+      if (ch === '"') inString = true;
+    }
+  }
+  return out;
+}
+
 // Pulls the first JSON object/array out of a Claude text response, tolerating
-// stray prose or markdown code fences around it.
+// stray prose or markdown code fences around it, and unescaped control
+// characters inside string values.
 export function extractJson<T>(text: string): T {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const raw = fenced ? fenced[1] : text;
@@ -71,5 +108,9 @@ export function extractJson<T>(text: string): T {
     }
   }
   const jsonText = end === -1 ? candidate : candidate.slice(0, end + 1);
-  return JSON.parse(jsonText) as T;
+  try {
+    return JSON.parse(jsonText) as T;
+  } catch {
+    return JSON.parse(escapeControlCharsInStrings(jsonText)) as T;
+  }
 }

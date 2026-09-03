@@ -32,6 +32,15 @@ const STATUS_STYLE: Record<DealStatus, string> = {
   passed: "badge bg-red-50 text-red-600",
 };
 
+// Pursuing (active potential purchases) leads, since that's what you're
+// actually deciding on; passed deals trail as a reference archive.
+const DEAL_SECTIONS: { status: DealStatus; label: string }[] = [
+  { status: "pursuing", label: "Pursuing" },
+  { status: "researching", label: "Researching" },
+  { status: "converted", label: "Converted to a construction" },
+  { status: "passed", label: "Passed" },
+];
+
 function currency(n: number | null): string {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -288,38 +297,48 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
         </div>
       )}
 
-      <div>
-        <h2 className="mb-3 text-lg font-semibold text-blueprint-dark">Saved deals</h2>
+      <div className="space-y-8">
         {deals.length === 0 ? (
           <div className="card p-10 text-center text-sm text-blueprint/60">
             Search a ZIP code above and save a listing to start evaluating it.
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {deals.map((deal) => (
-              <div key={deal.id} className="card p-4">
-                <div className="mb-1 flex items-start justify-between gap-2">
-                  <p className="font-medium text-blueprint-dark">{deal.address}</p>
-                  <span className={STATUS_STYLE[deal.status]}>{deal.status}</span>
-                </div>
-                <p className="text-xs text-blueprint/50">
-                  {deal.city}, {deal.state} {deal.zip_code}
-                </p>
-                <p className="mt-2 text-lg font-semibold text-blueprint-dark">{currency(deal.list_price)}</p>
-                <p className="text-xs text-blueprint/60">
-                  {deal.beds ?? "—"} bd · {deal.baths ?? "—"} ba · {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "sqft n/a"}
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <Link href={`/deals/${deal.id}`} className="btn-primary flex-1 text-center text-xs">
-                    {deal.status === "researching" ? "Analyze" : "View"}
-                  </Link>
-                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(deal)}>
-                    Delete
-                  </button>
+          DEAL_SECTIONS.map(({ status, label }) => {
+            const inSection = deals.filter((d) => d.status === status);
+            if (inSection.length === 0) return null;
+            return (
+              <div key={status}>
+                <h2 className="mb-3 text-lg font-semibold text-blueprint-dark">
+                  {label} <span className="text-sm font-normal text-blueprint/40">({inSection.length})</span>
+                </h2>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {inSection.map((deal) => (
+                    <div key={deal.id} className="card p-4">
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <p className="font-medium text-blueprint-dark">{deal.address}</p>
+                        <span className={STATUS_STYLE[deal.status]}>{deal.status}</span>
+                      </div>
+                      <p className="text-xs text-blueprint/50">
+                        {deal.city}, {deal.state} {deal.zip_code}
+                      </p>
+                      <p className="mt-2 text-lg font-semibold text-blueprint-dark">{currency(deal.list_price)}</p>
+                      <p className="text-xs text-blueprint/60">
+                        {deal.beds ?? "—"} bd · {deal.baths ?? "—"} ba · {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "sqft n/a"}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <Link href={`/deals/${deal.id}`} className="btn-primary flex-1 text-center text-xs">
+                          {deal.status === "researching" ? "Analyze" : "View"}
+                        </Link>
+                        <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(deal)}>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })
         )}
       </div>
 
