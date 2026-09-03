@@ -207,3 +207,30 @@ export interface DealAnalysis {
   created_at: string;
 }
 
+export type QualityTier = "economy" | "standard" | "premium" | "luxury";
+
+export interface CostBreakdownLine {
+  category: string;
+  pct: number;
+  cost: number;
+  description: string;
+}
+
+export interface CostEstimate {
+  id: string;
+  project_id: string;
+  total_sqft: number | null;
+  stories: number | null;
+  quality_tier: QualityTier | null;
+  cost_per_sqft_low: number | null;
+  cost_per_sqft_mid: number | null;
+  cost_per_sqft_high: number | null;
+  total_cost_low: number | null;
+  total_cost_mid: number | null;
+  total_cost_high: number | null;
+  complexity_factors: string[];
+  breakdown: CostBreakdownLine[];
+  reasoning: string | null;
+  created_at: string;
+}
+

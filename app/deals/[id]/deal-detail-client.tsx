@@ -58,6 +58,33 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   const [zone, setZone] = useState(deal.zone ?? "");
   const [lotCoveragePct, setLotCoveragePct] = useState(deal.lot_coverage_pct ?? "");
   const [savingZoning, setSavingZoning] = useState(false);
+  const [lookingUpDetails, setLookingUpDetails] = useState(false);
+
+  async function handleLookupLotSize() {
+    setLookingUpDetails(true);
+    try {
+      const res = await fetch("/api/claude/lookup-property-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: deal.address, city: deal.city, state: deal.state, zipCode: deal.zip_code }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
+      if (json.lot_size == null) {
+        notify("error", "Couldn't find a lot size for this address from public sources.");
+        return;
+      }
+      setLotSize(json.lot_size);
+      notify(
+        "success",
+        `Lot size: ${json.lot_size.toLocaleString()} sqft (${json.confidence} confidence, via ${json.source ?? "web search"}). Review and save.`
+      );
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Lookup failed.");
+    } finally {
+      setLookingUpDetails(false);
+    }
+  }
 
   async function handleSaveZoning() {
     setSavingZoning(true);
@@ -239,7 +266,22 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Lot size</p>
-              <p className="text-lg font-semibold text-blueprint-dark">{deal.lot_size ? `${deal.lot_size.toLocaleString()} sqft` : "—"}</p>
+              <p className="text-lg font-semibold text-blueprint-dark">
+                {lotSize ? `${Number(lotSize).toLocaleString()} sqft` : "—"}
+                {lotSize !== "" && Number(lotSize) !== (deal.lot_size ?? null) && (
+                  <span className="ml-1 text-xs font-normal text-amber-dark">(unsaved)</span>
+                )}
+              </p>
+              <div className="flex gap-2">
+                <button type="button" className="text-xs text-amber-dark hover:underline" onClick={handleLookupLotSize} disabled={lookingUpDetails}>
+                  {lookingUpDetails ? "Looking up…" : "Look up from web ↗"}
+                </button>
+                {lotSize !== "" && Number(lotSize) !== (deal.lot_size ?? null) && (
+                  <button type="button" className="text-xs text-sage-dark hover:underline" onClick={handleSaveZoning} disabled={savingZoning}>
+                    {savingZoning ? "Saving…" : "Save"}
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Beds / Baths</p>

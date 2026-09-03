@@ -73,6 +73,24 @@ create table if not exists finish_scans (
   created_at timestamptz not null default now()
 );
 
+create table if not exists cost_estimates (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  total_sqft numeric,
+  stories int,
+  quality_tier text,
+  cost_per_sqft_low numeric,
+  cost_per_sqft_mid numeric,
+  cost_per_sqft_high numeric,
+  total_cost_low numeric,
+  total_cost_mid numeric,
+  total_cost_high numeric,
+  complexity_factors jsonb not null default '[]'::jsonb,
+  breakdown jsonb not null default '[]'::jsonb,
+  reasoning text,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists renderings (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references rooms (id) on delete cascade,
@@ -190,6 +208,7 @@ create index if not exists idx_tasks_room on tasks (room_id);
 create index if not exists idx_budget_items_room on budget_items (room_id);
 create index if not exists idx_finishes_room on finishes (room_id);
 create index if not exists idx_finish_scans_project on finish_scans (project_id, created_at desc);
+create index if not exists idx_cost_estimates_project on cost_estimates (project_id, created_at desc);
 create index if not exists idx_renderings_room on renderings (room_id);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
@@ -211,6 +230,7 @@ alter table tasks enable row level security;
 alter table budget_items enable row level security;
 alter table finishes enable row level security;
 alter table finish_scans enable row level security;
+alter table cost_estimates enable row level security;
 alter table renderings enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
@@ -246,6 +266,10 @@ create policy "finishes_owner" on finishes
 create policy "finish_scans_owner" on finish_scans
   for all using (exists (select 1 from projects p where p.id = finish_scans.project_id and p.user_id = auth.uid()))
   with check (exists (select 1 from projects p where p.id = finish_scans.project_id and p.user_id = auth.uid()));
+
+create policy "cost_estimates_owner" on cost_estimates
+  for all using (exists (select 1 from projects p where p.id = cost_estimates.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from projects p where p.id = cost_estimates.project_id and p.user_id = auth.uid()));
 
 create policy "renderings_owner" on renderings
   for all using (exists (select 1 from rooms r join projects p on p.id = r.project_id where r.id = renderings.room_id and p.user_id = auth.uid()))

@@ -9,6 +9,7 @@ const TABS = [
   { slug: "finish-id", label: "Finish ID" },
   { slug: "checklist", label: "Checklist" },
   { slug: "budget", label: "Budget" },
+  { slug: "cost", label: "Construction Cost" },
   { slug: "payments", label: "Payments" },
 ];
 
