@@ -76,6 +76,23 @@ export interface Finish {
   created_at: string;
 }
 
+export interface IdentifiedFinish {
+  name: string;
+  category: FinishCategory;
+  description: string;
+  color: string | null;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface FinishScan {
+  id: string;
+  project_id: string;
+  storage_url: string;
+  label: string | null;
+  results: IdentifiedFinish[];
+  created_at: string;
+}
+
 export interface Rendering {
   id: string;
   room_id: string;

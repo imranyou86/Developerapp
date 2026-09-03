@@ -64,6 +64,15 @@ create table if not exists finishes (
   created_at timestamptz not null default now()
 );
 
+create table if not exists finish_scans (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  storage_url text not null,
+  label text,
+  results jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists renderings (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references rooms (id) on delete cascade,
@@ -118,6 +127,7 @@ create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
 create index if not exists idx_budget_items_room on budget_items (room_id);
 create index if not exists idx_finishes_room on finishes (room_id);
+create index if not exists idx_finish_scans_project on finish_scans (project_id, created_at desc);
 create index if not exists idx_renderings_room on renderings (room_id);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
@@ -134,6 +144,7 @@ alter table rooms enable row level security;
 alter table tasks enable row level security;
 alter table budget_items enable row level security;
 alter table finishes enable row level security;
+alter table finish_scans enable row level security;
 alter table renderings enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
@@ -163,6 +174,10 @@ create policy "finishes_owner" on finishes
   for all using (exists (select 1 from rooms r join projects p on p.id = r.project_id where r.id = finishes.room_id and p.user_id = auth.uid()))
   with check (exists (select 1 from rooms r join projects p on p.id = r.project_id where r.id = finishes.room_id and p.user_id = auth.uid()));
 
+create policy "finish_scans_owner" on finish_scans
+  for all using (exists (select 1 from projects p where p.id = finish_scans.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from projects p where p.id = finish_scans.project_id and p.user_id = auth.uid()));
+
 create policy "renderings_owner" on renderings
   for all using (exists (select 1 from rooms r join projects p on p.id = r.project_id where r.id = renderings.room_id and p.user_id = auth.uid()))
   with check (exists (select 1 from rooms r join projects p on p.id = r.project_id where r.id = renderings.room_id and p.user_id = auth.uid()));
@@ -184,7 +199,8 @@ create policy "payment_schedule_items_owner" on payment_schedule_items
   with check (exists (select 1 from bids b join projects p on p.id = b.project_id where b.id = payment_schedule_items.bid_id and p.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
--- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs
+-- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,
+-- finish-scan photos
 -- ---------------------------------------------------------------------------
 
 insert into storage.buckets (id, name, public)
@@ -192,7 +208,8 @@ values
   ('plan-pages', 'plan-pages', true),
   ('rendering-photos', 'rendering-photos', true),
   ('checklist-photos', 'checklist-photos', true),
-  ('bid-files', 'bid-files', true)
+  ('bid-files', 'bid-files', true),
+  ('finish-scans', 'finish-scans', true)
 on conflict (id) do nothing;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -212,3 +229,7 @@ create policy "checklist_photos_storage_owner" on storage.objects
 create policy "bid_files_storage_owner" on storage.objects
   for all using (bucket_id = 'bid-files' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'bid-files' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "finish_scans_storage_owner" on storage.objects
+  for all using (bucket_id = 'finish-scans' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'finish-scans' and (storage.foldername(name))[1] = auth.uid()::text);
