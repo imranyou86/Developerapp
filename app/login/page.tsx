@@ -140,11 +140,6 @@ function LoginForm() {
             )}
           </div>
         </form>
-
-        {/* Temporary debug line — remove once the Vercel env var issue is confirmed fixed. */}
-        <p className="mt-4 break-all rounded-lg bg-white/60 p-2 text-center text-[10px] text-blueprint/50">
-          Debug — NEXT_PUBLIC_SUPABASE_URL: {JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_URL ?? null)}
-        </p>
       </div>
     </div>
   );
