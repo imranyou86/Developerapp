@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
-export const maxDuration = 45;
+export const maxDuration = 60;
 
 interface ProductMatch {
   brand: string;
@@ -80,7 +80,13 @@ export async function POST(req: Request) {
       model: CLAUDE_MODEL,
       max_tokens: 4000,
       system: SYSTEM_PROMPT,
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
+      // Deliberately the basic search tool, not the newer web_search_20260209 —
+      // that variant routes searches through a server-side Python sandbox for
+      // dynamic filtering, which in testing took 60-90+ seconds (including
+      // retries from Claude's own generated code failing) versus ~10-15s here.
+      // That easily exceeds a serverless function's timeout for a feature
+      // that doesn't need dynamic domain filtering anyway.
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
       messages: [
         {
           role: "user",
