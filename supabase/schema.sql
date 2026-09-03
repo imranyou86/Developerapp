@@ -122,6 +122,17 @@ create table if not exists payment_schedule_items (
   paid boolean not null default false
 );
 
+-- Public read-only share links. Anonymous visitors never query this table
+-- (or any project table) directly — the /share/[token] page looks it up
+-- server-side with the service-role key, so no RLS policy grants anon access.
+create table if not exists project_shares (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  token text not null unique,
+  created_at timestamptz not null default now(),
+  revoked_at timestamptz
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -133,6 +144,8 @@ create index if not exists idx_checklist_items_project on checklist_items (proje
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
 create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
+create index if not exists idx_project_shares_project on project_shares (project_id);
+create index if not exists idx_project_shares_token on project_shares (token);
 
 -- ---------------------------------------------------------------------------
 -- Row level security — every row is scoped back to projects.user_id = auth.uid()
@@ -150,6 +163,7 @@ alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
+alter table project_shares enable row level security;
 
 create policy "projects_owner" on projects
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -197,6 +211,14 @@ create policy "bids_owner" on bids
 create policy "payment_schedule_items_owner" on payment_schedule_items
   for all using (exists (select 1 from bids b join projects p on p.id = b.project_id where b.id = payment_schedule_items.bid_id and p.user_id = auth.uid()))
   with check (exists (select 1 from bids b join projects p on p.id = b.project_id where b.id = payment_schedule_items.bid_id and p.user_id = auth.uid()));
+
+-- Only the project owner can create/list/revoke share links. The public
+-- /share/[token] page never queries through the anon key — it looks the
+-- token up server-side with the service-role key, which bypasses RLS
+-- entirely, so no policy here grants anonymous access.
+create policy "project_shares_owner" on project_shares
+  for all using (exists (select 1 from projects p where p.id = project_shares.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from projects p where p.id = project_shares.project_id and p.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,

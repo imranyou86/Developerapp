@@ -141,3 +141,11 @@ export interface PaymentScheduleItem {
   paid: boolean;
 }
 
+export interface ProjectShare {
+  id: string;
+  project_id: string;
+  token: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+

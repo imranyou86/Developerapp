@@ -8,6 +8,12 @@ interface CookieToSet {
 }
 
 export async function updateSession(request: NextRequest) {
+  // Public, unauthenticated read-only project share pages — no session
+  // lookup needed at all, and never redirected to /login.
+  if (request.nextUrl.pathname.startsWith("/share")) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
