@@ -28,6 +28,26 @@ const CONFIDENCE_STYLE: Record<IdentifiedFinish["confidence"], string> = {
   low: "badge bg-blueprint/10 text-blueprint/60",
 };
 
+interface ProductMatch {
+  brand: string;
+  model: string | null;
+  description: string;
+  price: number | null;
+  url: string | null;
+  retailer: string | null;
+  match_confidence: "exact" | "close" | "similar";
+}
+
+const MATCH_CONFIDENCE_STYLE: Record<ProductMatch["match_confidence"], string> = {
+  exact: "badge-sage",
+  close: "badge-amber",
+  similar: "badge bg-blueprint/10 text-blueprint/60",
+};
+
+function currency(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
 export function FinishIdClient({
   projectId,
   rooms,
@@ -212,6 +232,7 @@ function ScanCard({
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<Set<number>>(new Set());
+  const [matchByItem, setMatchByItem] = useState<Record<number, ProductMatch | null>>({});
 
   async function handleAddSelected() {
     if (!roomId || selected.size === 0) return;
@@ -220,11 +241,17 @@ function ScanCard({
       const indices = Array.from(selected);
       for (const i of indices) {
         const item = scan.results[i];
+        const match = matchByItem[i];
+        const brand = match
+          ? `${match.brand}${match.model ? ` ${match.model}` : ""}`
+          : item.color
+            ? `${item.color} — ${item.description}`
+            : item.description;
         const res = await addFinish(projectId, roomId, {
           name: item.name,
           category: item.category as FinishCategory,
-          brand: item.color ? `${item.color} — ${item.description}` : item.description,
-          price: null,
+          brand,
+          price: match?.price ?? null,
         });
         if (!res.ok) throw new Error(res.error ?? `Could not add "${item.name}".`);
       }
@@ -260,32 +287,23 @@ function ScanCard({
             <>
               <div className="space-y-2">
                 {scan.results.map((item, i) => (
-                  <label key={i} className="flex items-start gap-3 rounded-lg border border-blueprint/10 p-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={selected.has(i)}
-                      disabled={added.has(i)}
-                      onChange={(e) =>
-                        setSelected((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(i);
-                          else next.delete(i);
-                          return next;
-                        })
-                      }
-                    />
-                    <span className="flex-1">
-                      <span className="font-medium text-blueprint-dark">{item.name}</span>
-                      <span className={`ml-2 ${CONFIDENCE_STYLE[item.confidence]}`}>{item.confidence} confidence</span>
-                      {added.has(i) && <span className="badge-sage ml-2">added</span>}
-                      <br />
-                      <span className="text-xs text-blueprint/60">
-                        {item.category}
-                        {item.color && ` · ${item.color}`} — {item.description}
-                      </span>
-                    </span>
-                  </label>
+                  <IdentifiedItemRow
+                    key={i}
+                    item={item}
+                    checked={selected.has(i)}
+                    disabled={added.has(i)}
+                    added={added.has(i)}
+                    onCheckedChange={(checked) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(i);
+                        else next.delete(i);
+                        return next;
+                      })
+                    }
+                    selectedMatch={matchByItem[i] ?? null}
+                    onMatchSelected={(match) => setMatchByItem((prev) => ({ ...prev, [i]: match }))}
+                  />
                 ))}
               </div>
 
@@ -311,6 +329,129 @@ function ScanCard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function IdentifiedItemRow({
+  item,
+  checked,
+  disabled,
+  added,
+  onCheckedChange,
+  selectedMatch,
+  onMatchSelected,
+}: {
+  item: IdentifiedFinish;
+  checked: boolean;
+  disabled: boolean;
+  added: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  selectedMatch: ProductMatch | null;
+  onMatchSelected: (match: ProductMatch | null) => void;
+}) {
+  const { notify } = useToast();
+  const [searching, setSearching] = useState(false);
+  const [matches, setMatches] = useState<ProductMatch[] | null>(null);
+
+  async function handleSearch() {
+    setSearching(true);
+    try {
+      const res = await fetch("/api/claude/find-product", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: item.name,
+          category: item.category,
+          description: item.description,
+          color: item.color,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Product search failed.");
+      const found: ProductMatch[] = json.matches ?? [];
+      setMatches(found);
+      if (found.length === 0) {
+        notify("success", "No confident product match found on the web.");
+      }
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Product search failed.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-blueprint/10 p-2 text-sm">
+      <label className="flex items-start gap-3">
+        <input type="checkbox" className="mt-1" checked={checked} disabled={disabled} onChange={(e) => onCheckedChange(e.target.checked)} />
+        <span className="flex-1">
+          <span className="font-medium text-blueprint-dark">{item.name}</span>
+          <span className={`ml-2 ${CONFIDENCE_STYLE[item.confidence]}`}>{item.confidence} confidence</span>
+          {added && <span className="badge-sage ml-2">added</span>}
+          <br />
+          <span className="text-xs text-blueprint/60">
+            {item.category}
+            {item.color && ` · ${item.color}`} — {item.description}
+          </span>
+        </span>
+      </label>
+
+      <div className="ml-7 mt-2">
+        {!matches && (
+          <button className="btn-ghost text-xs" onClick={handleSearch} disabled={searching}>
+            {searching ? "Searching the web…" : "Find real product match ↗"}
+          </button>
+        )}
+
+        {matches && matches.length === 0 && (
+          <p className="text-xs text-blueprint/50">No confident match found on the web.</p>
+        )}
+
+        {matches && matches.length > 0 && (
+          <div className="space-y-1.5">
+            {matches.map((m, mi) => {
+              const isSelected = selectedMatch === m;
+              return (
+                <label
+                  key={mi}
+                  className={`flex items-start gap-2 rounded-lg border p-2 text-xs ${
+                    isSelected ? "border-amber bg-amber/5" : "border-blueprint/10"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    className="mt-0.5"
+                    checked={isSelected}
+                    onChange={() => onMatchSelected(isSelected ? null : m)}
+                  />
+                  <span className="flex-1">
+                    <span className="font-medium text-blueprint-dark">
+                      {m.brand}
+                      {m.model && ` ${m.model}`}
+                    </span>
+                    <span className={`ml-2 ${MATCH_CONFIDENCE_STYLE[m.match_confidence]}`}>{m.match_confidence} match</span>
+                    {m.price != null && <span className="ml-2 text-blueprint/60">{currency(m.price)}</span>}
+                    <br />
+                    <span className="text-blueprint/60">{m.description}</span>
+                    {m.url && (
+                      <>
+                        {" · "}
+                        <a href={m.url} target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
+                          {m.retailer ?? "View product"}
+                        </a>
+                      </>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+            <button className="btn-ghost text-xs" onClick={handleSearch} disabled={searching}>
+              {searching ? "Searching…" : "Search again"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
