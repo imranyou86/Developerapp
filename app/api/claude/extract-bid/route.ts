@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
+import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -71,30 +71,22 @@ export async function POST(req: Request) {
     const anthropic = getAnthropicClient();
     const content: Array<
       | { type: "text"; text: string }
-      | {
-          type: "image";
-          source: { type: "base64"; media_type: "image/png" | "image/jpeg"; data: string };
-        }
+      | { type: "image"; source: { type: "base64"; media_type: "image/jpeg"; data: string } }
     > = [];
 
     if (body.text && body.text.trim().length > 200) {
       // Normal path: text was extracted from the PDF client-side.
       content.push({ type: "text", text: truncatePrioritizingScheduleSection(body.text) });
     } else if (body.pageImageUrls?.length) {
-      // Fallback for scanned/image-only bids: send rendered page images instead.
+      // Fallback for scanned/image-only bids: send rendered page images
+      // instead, downscaled so a long scanned document doesn't blow past the
+      // Messages API's request-size limit.
       for (const url of body.pageImageUrls) {
-        const res = await fetch(url);
-        if (!res.ok) continue;
-        const contentType = res.headers.get("content-type") ?? "image/png";
-        const buffer = Buffer.from(await res.arrayBuffer());
-        content.push({
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: contentType.includes("jpeg") ? "image/jpeg" : "image/png",
-            data: buffer.toString("base64"),
-          },
-        });
+        try {
+          content.push(await fetchImageForClaude(url));
+        } catch (err) {
+          console.warn(`Skipping bid page image ${url}:`, err);
+        }
       }
     } else {
       return NextResponse.json({ error: "No bid text or page images provided." }, { status: 400 });

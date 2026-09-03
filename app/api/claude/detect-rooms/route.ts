@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
+import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -87,24 +87,19 @@ export async function POST(req: Request) {
     const anthropic = getAnthropicClient();
 
     // Every stored plan page is sent together in one call so rooms can be
-    // cross-referenced across sheets (floors, ADUs, etc).
+    // cross-referenced across sheets (floors, ADUs, etc). Pages are stored at
+    // full resolution for on-screen display, but downscaled here before
+    // sending — combined uncompressed, a multi-page plan set can otherwise
+    // exceed the Messages API's request-size limit.
     const imageBlocks = await Promise.all(
       pages.map(async (page) => {
-        const res = await fetch(page.url);
-        if (!res.ok) throw new Error(`Failed to fetch plan page "${page.label}": ${res.status}`);
-        const contentType = res.headers.get("content-type") ?? "image/png";
-        const buffer = Buffer.from(await res.arrayBuffer());
-        return {
-          label: page.label,
-          block: {
-            type: "image" as const,
-            source: {
-              type: "base64" as const,
-              media_type: contentType as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
-              data: buffer.toString("base64"),
-            },
-          },
-        };
+        try {
+          return { label: page.label, block: await fetchImageForClaude(page.url) };
+        } catch (err) {
+          throw new Error(
+            `Failed to prepare plan page "${page.label}": ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       })
     );
 

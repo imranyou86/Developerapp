@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import sharp from "sharp";
 
 let client: Anthropic | null = null;
 
@@ -14,6 +15,36 @@ export function getAnthropicClient(): Anthropic {
 }
 
 export const CLAUDE_MODEL = "claude-sonnet-5";
+
+export interface ClaudeImageBlock {
+  type: "image";
+  source: { type: "base64"; media_type: "image/jpeg"; data: string };
+}
+
+// Fetches an image (e.g. a stored plan page or uploaded photo) and downscales
+// it before sending to Claude. Multi-page plans and phone-camera photos are
+// often large enough on their own — combined into one request they can blow
+// past the Messages API's request-size limit (a 413). Claude also only
+// processes images up to ~1568px on the long edge internally, so sending
+// anything larger wastes bandwidth without improving accuracy.
+const MAX_DIMENSION = 1568;
+
+export async function fetchImageForClaude(url: string): Promise<ClaudeImageBlock> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+
+  const resized = await sharp(buffer)
+    .rotate()
+    .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+
+  return {
+    type: "image",
+    source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") },
+  };
+}
 
 // Pulls the first JSON object/array out of a Claude text response, tolerating
 // stray prose or markdown code fences around it.

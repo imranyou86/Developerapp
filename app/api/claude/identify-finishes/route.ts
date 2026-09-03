@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
+import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 import { FINISH_CATEGORIES } from "@/lib/finishes-db";
 
 export const runtime = "nodejs";
@@ -68,10 +68,9 @@ export async function POST(req: Request) {
   try {
     const anthropic = getAnthropicClient();
 
-    const imgRes = await fetch(body.imageUrl);
-    if (!imgRes.ok) throw new Error(`Could not fetch the uploaded image: ${imgRes.status}`);
-    const contentType = imgRes.headers.get("content-type") ?? "image/png";
-    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    // Downscaled before sending — phone-camera photos can be large enough on
+    // their own to push close to the Messages API's request-size limit.
+    const imageBlock = await fetchImageForClaude(body.imageUrl);
 
     const message = await anthropic.messages.create({
       model: CLAUDE_MODEL,
@@ -81,14 +80,7 @@ export async function POST(req: Request) {
         {
           role: "user",
           content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: contentType.includes("jpeg") ? "image/jpeg" : contentType.includes("webp") ? "image/webp" : "image/png",
-                data: buffer.toString("base64"),
-              },
-            },
+            imageBlock,
             { type: "text", text: "Identify the finishes shown and return the JSON object described in your instructions." },
           ],
         },
