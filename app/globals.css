@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-concrete text-blueprint-dark antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-blueprint/10 bg-white shadow-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-blueprint text-white hover:bg-blueprint-light;
+  }
+
+  .btn-amber {
+    @apply btn bg-amber text-white hover:bg-amber-dark;
+  }
+
+  .btn-outline {
+    @apply btn border border-blueprint/20 bg-white text-blueprint hover:bg-concrete;
+  }
+
+  .btn-ghost {
+    @apply btn text-blueprint hover:bg-blueprint/5;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-blueprint/20 bg-white px-3 py-2 text-sm text-blueprint-dark placeholder:text-blueprint/40 focus:border-amber focus:outline-none focus:ring-1 focus:ring-amber;
+  }
+
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-blueprint/60;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-sage {
+    @apply badge bg-sage/15 text-sage-dark;
+  }
+
+  .badge-amber {
+    @apply badge bg-amber/15 text-amber-dark;
+  }
+}
