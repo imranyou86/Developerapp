@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { convertDealToProject, updateDealStatus } from "@/app/deals/actions";
+import { convertDealToProject, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
 import { saveDealAnalysis } from "@/app/deals/[id]/actions";
 import type { Deal, DealAnalysis, DealScope, DealStatus, DealVerdict } from "@/lib/types";
 
@@ -48,6 +48,41 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   const [budget, setBudget] = useState(() => Math.round((deal.sqft ?? 2000) * 400));
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeStatus, setAnalyzeStatus] = useState("");
+
+  // Zoning — City of Los Angeles-specific (ZIMAS, zimas.lacity.org). No
+  // public API, so entered manually once per deal and remembered from then
+  // on. Used as a starting-point calculator for buildable sqft, not an
+  // authoritative figure — LA single-family zones use a sliding-scale
+  // formula, not a flat lot-coverage %.
+  const [lotSize, setLotSize] = useState(deal.lot_size ?? "");
+  const [zone, setZone] = useState(deal.zone ?? "");
+  const [lotCoveragePct, setLotCoveragePct] = useState(deal.lot_coverage_pct ?? "");
+  const [savingZoning, setSavingZoning] = useState(false);
+
+  async function handleSaveZoning() {
+    setSavingZoning(true);
+    const res = await updateDealZoning(deal.id, {
+      lot_size: lotSize === "" ? null : Number(lotSize),
+      zone: zone.trim() || null,
+      lot_coverage_pct: lotCoveragePct === "" ? null : Number(lotCoveragePct),
+    });
+    setSavingZoning(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save zoning info.");
+    } else {
+      notify("success", "Zoning info saved.");
+    }
+  }
+
+  function handleCalculateFromCoverage() {
+    const size = Number(lotSize);
+    const pct = Number(lotCoveragePct);
+    if (!size || !pct) {
+      notify("error", "Enter both lot size and max lot coverage % first.");
+      return;
+    }
+    handleBuildableSqftChange(Math.round(size * (pct / 100)));
+  }
 
   function handleCostPerSqftChange(value: number) {
     setCostPerSqft(value);
@@ -124,6 +159,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
       const saveRes = await saveDealAnalysis(deal.id, {
         scope,
         scope_description: scopeDescription,
+        target_sqft: sqftBasis,
         cost_per_sqft: costPerSqft,
         construction_budget: budget,
         current_value_estimate: json.current_value_estimate,
@@ -145,6 +181,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
           deal_id: deal.id,
           scope,
           scope_description: scopeDescription,
+          target_sqft: sqftBasis,
           cost_per_sqft: costPerSqft,
           construction_budget: budget,
           current_value_estimate: json.current_value_estimate,
@@ -191,14 +228,18 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
 
       <main className="mx-auto max-w-4xl space-y-6 px-6 py-8">
         <div className="card p-5">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">List price</p>
               <p className="text-lg font-semibold text-blueprint-dark">{currency(deal.list_price)}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-blueprint/50">Size</p>
+              <p className="text-xs uppercase tracking-wide text-blueprint/50">Home size</p>
               <p className="text-lg font-semibold text-blueprint-dark">{deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-blueprint/50">Lot size</p>
+              <p className="text-lg font-semibold text-blueprint-dark">{deal.lot_size ? `${deal.lot_size.toLocaleString()} sqft` : "—"}</p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Beds / Baths</p>
@@ -267,20 +308,64 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
             </div>
 
             {scope === "ground_up" && (
-              <div>
-                <label className="label">Target buildable sqft</label>
-                <input
-                  className="input"
-                  type="number"
-                  value={buildableSqft}
-                  onChange={(e) => handleBuildableSqftChange(Number(e.target.value) || 0)}
-                />
-                <p className="mt-1 text-xs text-blueprint/50">
-                  A rebuild isn&apos;t limited to the existing home&apos;s {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "footprint"} — what you
-                  can actually build depends on the lot&apos;s zoning (FAR, setbacks, lot coverage, height limits), which varies
-                  by city/county. Check with the local planning department for what&apos;s actually permittable, then set your
-                  target here.
-                </p>
+              <div className="space-y-3 rounded-lg border border-blueprint/10 p-3">
+                <div>
+                  <label className="label">Target buildable sqft</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={buildableSqft}
+                    onChange={(e) => handleBuildableSqftChange(Number(e.target.value) || 0)}
+                  />
+                  <p className="mt-1 text-xs text-blueprint/50">
+                    A rebuild isn&apos;t limited to the existing home&apos;s {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "footprint"} — what
+                    you can actually build depends on the lot&apos;s zoning. Type it directly if{" "}
+                    <a href="https://zimas.lacity.org/" target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
+                      ZIMAS
+                    </a>{" "}
+                    already reports a max buildable/floor-area figure for this parcel, or calculate it below.
+                  </p>
+                </div>
+
+                <div>
+                  <p className="label mb-2">Or calculate from lot size × max lot coverage %</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-blueprint/50">Lot size (sqft)</label>
+                      <input className="input" type="number" value={lotSize} onChange={(e) => setLotSize(e.target.value === "" ? "" : Number(e.target.value))} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-blueprint/50">Zone (e.g. R1, RD1.5)</label>
+                      <input className="input" value={zone} onChange={(e) => setZone(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-blueprint/50">Max lot coverage %</label>
+                      <input
+                        className="input"
+                        type="number"
+                        value={lotCoveragePct}
+                        onChange={(e) => setLotCoveragePct(e.target.value === "" ? "" : Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-blueprint/50">
+                    Look up this parcel&apos;s zone and lot coverage/floor-area limit on{" "}
+                    <a href="https://zimas.lacity.org/" target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
+                      ZIMAS
+                    </a>{" "}
+                    (search the address → Zoning Information tab). Note: LA single-family zones (R1 and variants) use a
+                    sliding-scale Residential Floor Area formula rather than a flat %, so a directly-reported max is more
+                    accurate there than this calculator — this is a starting point, not an authoritative figure.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" className="btn-outline flex-1 text-xs" onClick={handleCalculateFromCoverage}>
+                      Use lot size × coverage %
+                    </button>
+                    <button type="button" className="btn-ghost text-xs" onClick={handleSaveZoning} disabled={savingZoning}>
+                      {savingZoning ? "Saving…" : "Save zoning info to this deal"}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 

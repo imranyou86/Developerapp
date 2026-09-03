@@ -150,6 +150,13 @@ create table if not exists deals (
   year_built int,
   listing_url text,
   photo_url text,
+  -- Zoning is City of Los Angeles-specific (ZIMAS, zimas.lacity.org has no
+  -- public API — entered manually, once per deal). LAMC zoning is more
+  -- nuanced than a flat lot-coverage % for every zone (single-family lots
+  -- use a sliding-scale Residential Floor Area formula, not a flat %), so
+  -- this is a starting-point calculator input, not an authoritative figure.
+  zone text,
+  lot_coverage_pct numeric,
   status text not null default 'researching' check (status in ('researching', 'pursuing', 'passed', 'converted')),
   project_id uuid references projects (id) on delete set null,
   raw_listing jsonb,
@@ -161,6 +168,7 @@ create table if not exists deal_analyses (
   deal_id uuid not null references deals (id) on delete cascade,
   scope text not null default 'remodel' check (scope in ('remodel', 'ground_up')),
   scope_description text,
+  target_sqft numeric,
   cost_per_sqft numeric not null default 400,
   construction_budget numeric not null,
   current_value_estimate numeric,

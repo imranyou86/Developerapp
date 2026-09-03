@@ -8,6 +8,7 @@ import type { DealComp, DealScope, DealVerdict } from "@/lib/types";
 export interface SaveDealAnalysisInput {
   scope: DealScope;
   scope_description: string;
+  target_sqft: number | null;
   cost_per_sqft: number;
   construction_budget: number;
   current_value_estimate: number | null;

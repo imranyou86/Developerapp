@@ -166,6 +166,8 @@ export interface Deal {
   year_built: number | null;
   listing_url: string | null;
   photo_url: string | null;
+  zone: string | null;
+  lot_coverage_pct: number | null;
   status: DealStatus;
   project_id: string | null;
   created_at: string;
@@ -189,6 +191,7 @@ export interface DealAnalysis {
   deal_id: string;
   scope: DealScope;
   scope_description: string | null;
+  target_sqft: number | null;
   cost_per_sqft: number;
   construction_budget: number;
   current_value_estimate: number | null;

@@ -66,6 +66,7 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
     beds: "",
     baths: "",
     sqft: "",
+    lot_size: "",
     year_built: "",
     listing_url: "",
   });
@@ -84,6 +85,7 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
         beds: manual.beds ? Number(manual.beds) : null,
         baths: manual.baths ? Number(manual.baths) : null,
         sqft: manual.sqft ? Number(manual.sqft) : null,
+        lot_size: manual.lot_size ? Number(manual.lot_size) : null,
         year_built: manual.year_built ? Number(manual.year_built) : null,
         listing_url: manual.listing_url.trim() || null,
       });
@@ -219,7 +221,7 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div>
                 <label className="label">List price</label>
                 <input className="input" type="number" value={manual.list_price} onChange={(e) => setManual((m) => ({ ...m, list_price: e.target.value }))} />
@@ -233,8 +235,12 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
                 <input className="input" type="number" value={manual.baths} onChange={(e) => setManual((m) => ({ ...m, baths: e.target.value }))} />
               </div>
               <div>
-                <label className="label">Sqft</label>
+                <label className="label">Home sqft</label>
                 <input className="input" type="number" value={manual.sqft} onChange={(e) => setManual((m) => ({ ...m, sqft: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Lot size (sqft)</label>
+                <input className="input" type="number" value={manual.lot_size} onChange={(e) => setManual((m) => ({ ...m, lot_size: e.target.value }))} />
               </div>
               <div>
                 <label className="label">Year built</label>

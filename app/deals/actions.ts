@@ -49,6 +49,7 @@ export interface ManualDealInput {
   beds: number | null;
   baths: number | null;
   sqft: number | null;
+  lot_size: number | null;
   year_built: number | null;
   listing_url: string | null;
 }
@@ -74,6 +75,7 @@ export async function saveManualDeal(input: ManualDealInput): Promise<ActionResu
       beds: input.beds,
       baths: input.baths,
       sqft: input.sqft,
+      lot_size: input.lot_size,
       year_built: input.year_built,
       listing_url: input.listing_url,
     })
@@ -83,6 +85,20 @@ export async function saveManualDeal(input: ManualDealInput): Promise<ActionResu
   if (error) return { ok: false, error: error.message };
   revalidatePath("/deals");
   return { ok: true, id: data.id };
+}
+
+export async function updateDealZoning(
+  dealId: string,
+  input: { lot_size: number | null; zone: string | null; lot_coverage_pct: number | null }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("deals")
+    .update({ lot_size: input.lot_size, zone: input.zone, lot_coverage_pct: input.lot_coverage_pct })
+    .eq("id", dealId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/deals/${dealId}`);
+  return { ok: true };
 }
 
 export async function deleteDeal(dealId: string): Promise<ActionResult> {
