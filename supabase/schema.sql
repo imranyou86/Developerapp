@@ -133,6 +133,49 @@ create table if not exists project_shares (
   revoked_at timestamptz
 );
 
+-- Deal Finder — pre-acquisition property research, independent of any
+-- construction project (a deal only becomes a project once pursued).
+create table if not exists deals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  address text not null,
+  city text,
+  state text,
+  zip_code text not null,
+  list_price numeric,
+  beds numeric,
+  baths numeric,
+  sqft numeric,
+  lot_size numeric,
+  year_built int,
+  listing_url text,
+  photo_url text,
+  status text not null default 'researching' check (status in ('researching', 'pursuing', 'passed', 'converted')),
+  project_id uuid references projects (id) on delete set null,
+  raw_listing jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists deal_analyses (
+  id uuid primary key default gen_random_uuid(),
+  deal_id uuid not null references deals (id) on delete cascade,
+  scope text not null default 'remodel' check (scope in ('remodel', 'ground_up')),
+  scope_description text,
+  cost_per_sqft numeric not null default 400,
+  construction_budget numeric not null,
+  current_value_estimate numeric,
+  arv_estimate numeric,
+  arv_low numeric,
+  arv_high numeric,
+  total_cost numeric not null,
+  estimated_profit numeric,
+  profit_margin_pct numeric,
+  verdict text not null check (verdict in ('good_deal', 'marginal', 'pass')),
+  reasoning text,
+  comps jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -146,6 +189,8 @@ create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
 create index if not exists idx_project_shares_project on project_shares (project_id);
 create index if not exists idx_project_shares_token on project_shares (token);
+create index if not exists idx_deals_user on deals (user_id, created_at desc);
+create index if not exists idx_deal_analyses_deal on deal_analyses (deal_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
 -- Row level security — every row is scoped back to projects.user_id = auth.uid()
@@ -164,6 +209,8 @@ alter table checklist_photos enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
 alter table project_shares enable row level security;
+alter table deals enable row level security;
+alter table deal_analyses enable row level security;
 
 create policy "projects_owner" on projects
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -219,6 +266,13 @@ create policy "payment_schedule_items_owner" on payment_schedule_items
 create policy "project_shares_owner" on project_shares
   for all using (exists (select 1 from projects p where p.id = project_shares.project_id and p.user_id = auth.uid()))
   with check (exists (select 1 from projects p where p.id = project_shares.project_id and p.user_id = auth.uid()));
+
+create policy "deals_owner" on deals
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "deal_analyses_owner" on deal_analyses
+  for all using (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()))
+  with check (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,

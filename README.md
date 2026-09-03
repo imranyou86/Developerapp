@@ -37,10 +37,14 @@ NEXT_PUBLIC_SUPABASE_URL=        # Project Settings -> API -> Project URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Project Settings -> API -> anon public key
 SUPABASE_SERVICE_ROLE_KEY=       # Project Settings -> API -> service_role key
 ANTHROPIC_API_KEY=               # console.anthropic.com -> API keys
+RENTCAST_API_KEY=                # rentcast.io -> API keys (Buyers Guide only)
 ```
 
-`ANTHROPIC_API_KEY` is server-only and must never be exposed with a
-`NEXT_PUBLIC_` prefix — it's read only inside `app/api/claude/*` routes.
+`ANTHROPIC_API_KEY` and `RENTCAST_API_KEY` are server-only and must never be
+exposed with a `NEXT_PUBLIC_` prefix — they're read only inside
+`app/api/*` routes. `RENTCAST_API_KEY` is only needed for the Buyers Guide
+tab (ZIP search + comps/value estimates) — the rest of the app works without
+it.
 
 ### 3. Run locally
 
@@ -60,10 +64,17 @@ Variables, then deploy.
 ## Data model
 
 See [`supabase/schema.sql`](./supabase/schema.sql) for the authoritative
-schema. Every table is scoped back to `projects.user_id = auth.uid()`
-through row-level security, so each developer only ever sees their own
-constructions — this is what makes the app safe to use across multiple
-devices.
+schema — this is what a **fresh** Supabase project should run. Every table
+is scoped back to `auth.uid()` through row-level security (via `user_id`
+directly, or via a join up to a `projects`/`deals` row that has one), so
+each developer only ever sees their own data — this is what makes the app
+safe to use across multiple devices.
+
+If you already have a live project and schema.sql has grown since you last
+ran it, don't re-run the whole file — `CREATE POLICY` isn't idempotent and
+will error on anything that already exists. Instead run the numbered files
+under [`supabase/migrations/`](./supabase/migrations/) you haven't applied
+yet; each one only adds what a given feature needed.
 
 ## Feature notes
 
@@ -86,3 +97,26 @@ devices.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
+- **Finish ID tab** — upload any photo/screenshot and Claude (vision) identifies
+  the finishes shown; a "Find real product match" action per item uses
+  Claude's server-side web search tool to ground the guess in a real
+  brand/model/price/link before you add it to a room.
+- **Sharing** — each construction has a "Share" button that issues a random,
+  revocable token for a public `/share/[token]` page — a full read-only
+  mirror of the project, no account needed. That page is served by a
+  service-role admin client (`lib/supabase/admin.ts`) that looks the token
+  up server-side, entirely bypassing RLS for that one path; the browser
+  never gets a Supabase key capable of reading other users' data.
+- **Buyers Guide tab** (top-level, not per-project) — search homes for sale
+  by ZIP via the RentCast API, or paste in a specific address (e.g. from a
+  Zillow listing) directly. Running an analysis estimates construction cost
+  from square footage at an editable $/sqft rate, then uses Claude with web
+  search to find comps (recently sold, prioritizing renovated/new-construction
+  comps) and estimate the after-repair/rebuild value (ARV). The buy/pass
+  verdict and profit margin are computed deterministically from those
+  numbers, not left to the model. A pursued deal converts into a real
+  construction project with one click. Both Claude web-search tool calls in
+  this app deliberately use the **basic** `web_search_20250305` tool type,
+  not the newer sandboxed variant — that one took 60-90+ seconds in testing
+  (routes searches through a server-side Python sandbox), well past a
+  serverless function's timeout.

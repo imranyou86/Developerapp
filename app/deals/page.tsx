@@ -1,50 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
-import { ProjectsClient, type ProjectSummary } from "@/app/projects/projects-client";
+import { DealsClient } from "@/app/deals/deals-client";
 import { TopNav } from "@/components/TopNav";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage() {
+export default async function DealsPage() {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { data, error } = await supabase
-    .from("projects")
-    .select(
-      `id, name, address, created_at,
-       rooms ( id, tasks ( id, done ), budget_items ( id, budgeted, actual ) )`
-    )
+  const { data: deals, error } = await supabase
+    .from("deals")
+    .select("id, address, city, state, zip_code, list_price, beds, baths, sqft, year_built, status, project_id, created_at")
     .order("created_at", { ascending: false });
-
-  const summaries: ProjectSummary[] = (data ?? []).map((p) => {
-    const rooms = p.rooms ?? [];
-    let tasksDone = 0;
-    let tasksTotal = 0;
-    let budgeted = 0;
-    let actual = 0;
-    for (const room of rooms) {
-      for (const t of room.tasks ?? []) {
-        tasksTotal++;
-        if (t.done) tasksDone++;
-      }
-      for (const b of room.budget_items ?? []) {
-        budgeted += Number(b.budgeted ?? 0);
-        actual += Number(b.actual ?? 0);
-      }
-    }
-    return {
-      id: p.id,
-      name: p.name,
-      address: p.address,
-      roomCount: rooms.length,
-      tasksDone,
-      tasksTotal,
-      budgeted,
-      actual,
-    };
-  });
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -69,12 +37,19 @@ export default async function ProjectsPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-blueprint-dark">Buyers Guide</h2>
+          <p className="text-sm text-blueprint/50">
+            Search homes for sale by ZIP code, pull comps, and evaluate whether a remodel or
+            ground-up rebuild pencils out before you buy.
+          </p>
+        </div>
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load projects: {error.message}
+            Could not load saved deals: {error.message}
           </div>
         )}
-        <ProjectsClient projects={summaries} />
+        <DealsClient initialDeals={deals ?? []} />
       </main>
     </div>
   );

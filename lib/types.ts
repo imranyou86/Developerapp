@@ -149,3 +149,58 @@ export interface ProjectShare {
   revoked_at: string | null;
 }
 
+export type DealStatus = "researching" | "pursuing" | "passed" | "converted";
+
+export interface Deal {
+  id: string;
+  user_id: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  zip_code: string;
+  list_price: number | null;
+  beds: number | null;
+  baths: number | null;
+  sqft: number | null;
+  lot_size: number | null;
+  year_built: number | null;
+  listing_url: string | null;
+  photo_url: string | null;
+  status: DealStatus;
+  project_id: string | null;
+  created_at: string;
+}
+
+export type DealVerdict = "good_deal" | "marginal" | "pass";
+export type DealScope = "remodel" | "ground_up";
+
+export interface DealComp {
+  address: string;
+  sold_price: number | null;
+  sold_date: string | null;
+  sqft: number | null;
+  distance_miles: number | null;
+  source: string;
+  url: string | null;
+}
+
+export interface DealAnalysis {
+  id: string;
+  deal_id: string;
+  scope: DealScope;
+  scope_description: string | null;
+  cost_per_sqft: number;
+  construction_budget: number;
+  current_value_estimate: number | null;
+  arv_estimate: number | null;
+  arv_low: number | null;
+  arv_high: number | null;
+  total_cost: number;
+  estimated_profit: number | null;
+  profit_margin_pct: number | null;
+  verdict: DealVerdict;
+  reasoning: string | null;
+  comps: DealComp[];
+  created_at: string;
+}
+
