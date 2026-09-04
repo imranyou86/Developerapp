@@ -101,6 +101,25 @@ export async function updateDealZoning(
   return { ok: true };
 }
 
+export async function updateDealListingDetails(
+  dealId: string,
+  input: {
+    list_price: number | null;
+    beds: number | null;
+    baths: number | null;
+    sqft: number | null;
+    lot_size: number | null;
+    year_built: number | null;
+  }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("deals").update(input).eq("id", dealId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/deals/${dealId}`);
+  revalidatePath("/deals");
+  return { ok: true };
+}
+
 export async function deleteDeal(dealId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("deals").delete().eq("id", dealId);

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { convertDealToProject, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
+import { convertDealToProject, updateDealListingDetails, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
 import { saveDealAnalysis } from "@/app/deals/[id]/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { LA_ZONES } from "@/lib/laZoning";
@@ -40,6 +40,54 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   const [converting, setConverting] = useState(false);
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
 
+  // Mirrors deal.list_price/beds/baths/sqft/year_built locally so "Refresh from
+  // listing" can update the summary card immediately without a full page reload.
+  const [listingDetails, setListingDetails] = useState({
+    list_price: deal.list_price,
+    beds: deal.beds,
+    baths: deal.baths,
+    sqft: deal.sqft,
+    year_built: deal.year_built,
+  });
+  const [refreshingListing, setRefreshingListing] = useState(false);
+  const refreshListingTaskKey = `deal-refresh-listing:${deal.id}`;
+
+  async function handleRefreshListing() {
+    if (!deal.listing_url) return;
+    setRefreshingListing(true);
+    try {
+      await run(refreshListingTaskKey, `Refreshing listing details for ${deal.address}…`, async () => {
+        const res = await fetchWithRetry("/api/claude/lookup-listing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listingUrl: deal.listing_url }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
+
+        const next = {
+          list_price: json.list_price ?? listingDetails.list_price,
+          beds: json.beds ?? listingDetails.beds,
+          baths: json.baths ?? listingDetails.baths,
+          sqft: json.sqft ?? listingDetails.sqft,
+          year_built: json.year_built ?? listingDetails.year_built,
+        };
+        const saveRes = await updateDealListingDetails(deal.id, { ...next, lot_size: lotSize === "" ? null : Number(lotSize) });
+        if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save refreshed details.");
+
+        setListingDetails(next);
+        notify(
+          "success",
+          `Refreshed (${json.confidence} confidence${json.source ? ` via ${json.source}` : ""}) — double-check the price against the actual listing before relying on it.`
+        );
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Lookup failed.");
+    } finally {
+      setRefreshingListing(false);
+    }
+  }
+
   const [scope, setScope] = useState<DealScope>("remodel");
   const [scopeDescription, setScopeDescription] = useState(
     "Full interior remodel: kitchen, baths, flooring, paint, updated systems."
@@ -58,7 +106,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   // lot coverage, height limits), which varies by jurisdiction. Remodels use
   // the existing home's sqft; ground-up uses this separate, editable target.
   const [buildableSqft, setBuildableSqft] = useState(() => deal.sqft ?? 2000);
-  const sqftBasis = scope === "ground_up" ? buildableSqft : (deal.sqft ?? buildableSqft);
+  const sqftBasis = scope === "ground_up" ? buildableSqft : (listingDetails.sqft ?? buildableSqft);
   const [budgetByScope, setBudgetByScope] = useState<Record<DealScope, number>>({
     remodel: Math.round((deal.sqft ?? 2000) * 400),
     ground_up: Math.round((deal.sqft ?? 2000) * 400),
@@ -225,12 +273,12 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
             city: deal.city,
             state: deal.state,
             zipCode: deal.zip_code,
-            listPrice: deal.list_price,
-            sqft: deal.sqft,
+            listPrice: listingDetails.list_price,
+            sqft: listingDetails.sqft,
             targetSqft: sqftBasis,
-            beds: deal.beds,
-            baths: deal.baths,
-            yearBuilt: deal.year_built,
+            beds: listingDetails.beds,
+            baths: listingDetails.baths,
+            yearBuilt: listingDetails.year_built,
             scope,
             scopeDescription,
             costPerSqft,
@@ -316,11 +364,21 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">List price</p>
-              <p className="text-lg font-semibold text-blueprint-dark">{currency(deal.list_price)}</p>
+              <p className="text-lg font-semibold text-blueprint-dark">{currency(listingDetails.list_price)}</p>
+              {deal.listing_url && (
+                <button
+                  type="button"
+                  className="text-xs text-amber-dark hover:underline"
+                  onClick={handleRefreshListing}
+                  disabled={refreshingListing || isRunning(refreshListingTaskKey)}
+                >
+                  {refreshingListing || isRunning(refreshListingTaskKey) ? "Refreshing…" : "Refresh from listing ↗"}
+                </button>
+              )}
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Home size</p>
-              <p className="text-lg font-semibold text-blueprint-dark">{deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "—"}</p>
+              <p className="text-lg font-semibold text-blueprint-dark">{listingDetails.sqft ? `${listingDetails.sqft.toLocaleString()} sqft` : "—"}</p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Lot size</p>
@@ -349,12 +407,12 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Beds / Baths</p>
               <p className="text-lg font-semibold text-blueprint-dark">
-                {deal.beds ?? "—"} / {deal.baths ?? "—"}
+                {listingDetails.beds ?? "—"} / {listingDetails.baths ?? "—"}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-blueprint/50">Year built</p>
-              <p className="text-lg font-semibold text-blueprint-dark">{deal.year_built ?? "—"}</p>
+              <p className="text-lg font-semibold text-blueprint-dark">{listingDetails.year_built ?? "—"}</p>
             </div>
           </div>
 
@@ -423,7 +481,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                     onChange={(e) => handleBuildableSqftChange(Number(e.target.value) || 0)}
                   />
                   <p className="mt-1 text-xs text-blueprint/50">
-                    A rebuild isn&apos;t limited to the existing home&apos;s {deal.sqft ? `${deal.sqft.toLocaleString()} sqft` : "footprint"} — what
+                    A rebuild isn&apos;t limited to the existing home&apos;s {listingDetails.sqft ? `${listingDetails.sqft.toLocaleString()} sqft` : "footprint"} — what
                     you can actually build depends on the lot&apos;s zoning. Type it directly if{" "}
                     <a href="https://zimas.lacity.org/" target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
                       ZIMAS
@@ -543,7 +601,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               Remodel and ground-up each keep their own $/sqft and budget — switching scope above
               won&apos;t overwrite whichever number you&apos;ve entered for the other one.
             </p>
-            {!deal.sqft && scope === "remodel" && (
+            {!listingDetails.sqft && scope === "remodel" && (
               <p className="text-xs text-amber-dark">
                 This listing has no square footage on file — enter the construction budget directly.
               </p>
@@ -561,7 +619,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               {analyses.length > 1 ? "Analysis history (most recent first)" : "Analysis"}
             </h2>
             {analyses.map((a) => (
-              <AnalysisCard key={a.id} analysis={a} listPrice={deal.list_price} />
+              <AnalysisCard key={a.id} analysis={a} listPrice={listingDetails.list_price} />
             ))}
           </div>
         )}
