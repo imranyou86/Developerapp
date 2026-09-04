@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
+import { FeetInchesInput } from "@/components/FeetInchesInput";
 import { addRoom, deleteRoom } from "@/app/projects/[id]/rooms/actions";
 import { RoomCard } from "@/app/projects/[id]/rooms/room-card";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
@@ -131,16 +132,16 @@ function AddRoomModal({
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState(ROOM_TYPES[0]);
-  const [width, setWidth] = useState("");
-  const [depth, setDepth] = useState("");
+  const [width, setWidth] = useState<number | null>(null);
+  const [depth, setDepth] = useState<number | null>(null);
   const [floor, setFloor] = useState("1");
   const [pending, startTransition] = useTransition();
 
   function reset() {
     setName("");
     setType(ROOM_TYPES[0]);
-    setWidth("");
-    setDepth("");
+    setWidth(null);
+    setDepth(null);
     setFloor("1");
   }
 
@@ -165,8 +166,8 @@ function AddRoomModal({
                 await onAdd({
                   name,
                   type,
-                  width: width ? Number(width) : null,
-                  depth: depth ? Number(depth) : null,
+                  width,
+                  depth,
                   floor: floor ? Number(floor) : null,
                 });
                 reset();
@@ -195,12 +196,12 @@ function AddRoomModal({
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div>
-            <label className="label">Width (ft)</label>
-            <input className="input" type="number" value={width} onChange={(e) => setWidth(e.target.value)} />
+            <label className="label">Width</label>
+            <FeetInchesInput value={width} onChange={setWidth} placeholder={`12' 6"`} />
           </div>
           <div>
-            <label className="label">Depth (ft)</label>
-            <input className="input" type="number" value={depth} onChange={(e) => setDepth(e.target.value)} />
+            <label className="label">Depth</label>
+            <FeetInchesInput value={depth} onChange={setDepth} placeholder={`10' 0"`} />
           </div>
           <div>
             <label className="label">Floor</label>

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { formatFeetInches } from "@/lib/feetInches";
 
 function currency(n: number): string {
   return Number(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -90,7 +91,7 @@ export function RoomsSection({ rooms }: { rooms: ShareRoom[] }) {
                     </h3>
                     <p className="text-xs text-blueprint/50">
                       {room.type ?? "Room"} {room.floor != null && `· Floor ${room.floor}`}
-                      {room.width && room.depth && ` · ${room.width}ft × ${room.depth}ft`}
+                      {room.width && room.depth && ` · ${formatFeetInches(room.width)} × ${formatFeetInches(room.depth)}`}
                     </p>
                   </div>
                   <span className="text-xs text-blueprint/50">

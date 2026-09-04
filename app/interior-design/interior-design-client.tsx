@@ -11,6 +11,8 @@ import { STYLE_PALETTES } from "@/lib/styles";
 import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes";
 import { buildInteriorDesignPrompt, describeLayout } from "@/lib/interiorDesignPrompt";
 import { RoomLayoutEditor, clampItemsToRoom } from "@/app/interior-design/room-layout-editor";
+import { FeetInchesInput } from "@/components/FeetInchesInput";
+import { formatFeetInches } from "@/lib/feetInches";
 import { getFixturesForRoomType } from "@/lib/fixtureCatalog";
 import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
 import type { InteriorDesign, PlacedFixture } from "@/lib/types";
@@ -59,17 +61,17 @@ export function InteriorDesignClient({
   const [selectedRoomId, setSelectedRoomId] = useState<string>(rooms[0]?.id ?? "");
   const [roomType, setRoomType] = useState<RoomTypeOption>(rooms[0] ? matchRoomType(rooms[0].type) : "Bedroom");
   const [style, setStyle] = useState<string>(STYLE_PALETTES[0].name);
-  const [width, setWidth] = useState<string>(rooms[0]?.width != null ? String(rooms[0].width) : "");
-  const [depth, setDepth] = useState<string>(rooms[0]?.depth != null ? String(rooms[0].depth) : "");
+  const [width, setWidth] = useState<number | null>(rooms[0]?.width ?? null);
+  const [depth, setDepth] = useState<number | null>(rooms[0]?.depth ?? null);
   const [sqft, setSqft] = useState<string>("");
   const [layout, setLayout] = useState<PlacedFixture[]>([]);
 
-  const numWidth = Number(width);
-  const numDepth = Number(depth);
-  const hasRoomDims = numWidth > 0 && numDepth > 0;
+  const hasRoomDims = width != null && depth != null && width > 0 && depth > 0;
+  const numWidth = width ?? 0;
+  const numDepth = depth ?? 0;
 
   useEffect(() => {
-    if (numWidth > 0 && numDepth > 0) setSqft(String(Math.round(numWidth * numDepth)));
+    if (hasRoomDims) setSqft(String(Math.round(numWidth * numDepth)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, depth]);
 
@@ -97,8 +99,8 @@ export function InteriorDesignClient({
     const room = rooms.find((r) => r.id === roomId);
     if (!room) return;
     setRoomType(matchRoomType(room.type));
-    setWidth(room.width != null ? String(room.width) : "");
-    setDepth(room.depth != null ? String(room.depth) : "");
+    setWidth(room.width);
+    setDepth(room.depth);
   }
 
   async function handleSuggestLayout() {
@@ -193,8 +195,8 @@ export function InteriorDesignClient({
       return;
     }
 
-    const w = width ? Number(width) : null;
-    const d = depth ? Number(depth) : null;
+    const w = width;
+    const d = depth;
     const s = sqft ? Number(sqft) : null;
     const roomId = roomSource === "existing" && selectedRoomId ? selectedRoomId : null;
     const layoutDescription = hasRoomDims ? describeLayout(layout, numWidth, numDepth) : "";
@@ -386,30 +388,14 @@ export function InteriorDesignClient({
                 {rooms.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
-                    {r.width && r.depth ? ` (${r.width}' x ${r.depth}')` : ""}
+                    {r.width && r.depth ? ` (${formatFeetInches(r.width)} × ${formatFeetInches(r.depth)})` : ""}
                   </option>
                 ))}
               </select>
             ) : (
               <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  className="input"
-                  placeholder="Width (ft)"
-                  value={width}
-                  onChange={(e) => setWidth(e.target.value)}
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  className="input"
-                  placeholder="Depth (ft)"
-                  value={depth}
-                  onChange={(e) => setDepth(e.target.value)}
-                />
+                <FeetInchesInput value={width} onChange={setWidth} placeholder={`Width, e.g. 12' 6"`} />
+                <FeetInchesInput value={depth} onChange={setDepth} placeholder={`Depth, e.g. 10' 0"`} />
                 <input
                   type="number"
                   min="0"
@@ -476,7 +462,7 @@ export function InteriorDesignClient({
               </div>
               {(d.width || d.sqft) && (
                 <p className="mb-2 text-xs text-blueprint/50">
-                  {d.width && d.depth ? `${d.width}' x ${d.depth}' — ` : ""}
+                  {d.width && d.depth ? `${formatFeetInches(d.width)} × ${formatFeetInches(d.depth)} — ` : ""}
                   {d.sqft ? `${d.sqft} sqft` : ""}
                   {d.layout.length > 0 ? ` — ${d.layout.length} fixture${d.layout.length === 1 ? "" : "s"} laid out` : ""}
                 </p>

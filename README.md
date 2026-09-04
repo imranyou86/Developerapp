@@ -138,15 +138,34 @@ yet; each one only adds what a given feature needed.
       no longer nudges the size before you've moved the pointer at all).
       Resizing writes a per-instance `width`/`depth` straight onto that
       `PlacedFixture`, independent of the catalog's default footprint.
-      Minimum size is 0.5ft; the handle's own touch target scales with the
+      Minimum size is 3"; the handle's own touch target scales with the
       room size so it stays grabbable in both a tiny closet and a great
       room.
-    - **Measurements** — every placed item shows its current size as a
-      "W' × D'" caption (live-updated during a resize via the same direct
-      DOM writes as the drag, not React state); the room itself gets
-      architectural-style dimension lines with tick marks along its top
-      and left edges showing total width/depth, drawn in a margin added
-      outside the room in the SVG's `viewBox` (`MARGIN` in
+    - **Feet-and-inches accuracy** (`lib/feetInches.ts`) — every size and
+      position is now precise to the nearest inch, not a rounded decimal
+      foot: dragging/resizing snaps to a 1" grid (`SNAP` in
+      `room-layout-editor.tsx`, decoupled from the coarser 1ft visual grid
+      lines, `GRID_SPACING`, so the reference grid doesn't get too dense to
+      read), and every displayed number is formatted as `4'6"` rather than
+      `4.5'` (`formatFeetInches`). This isn't just cosmetic — internally
+      everything still computes in decimal feet (simpler arithmetic; `4'6"`
+      is exactly `4.5`), so switching the display format didn't change any
+      math, only what's shown and what a text input accepts. Every
+      width/depth entry field across the app that feeds this — the Rooms
+      tab's "Add room" form and its inline dimension editor, and the
+      Interior Design form's manual sizing — uses the same
+      `components/FeetInchesInput.tsx` control (parses `4'6"`, `4' 6"`,
+      `4ft 6in`, `54"`, or plain `4.5`; reverts to the last valid value on
+      an unparseable entry rather than silently zeroing a room out), so a
+      room entered precisely on the Rooms tab stays precise everywhere it's
+      read from — Interior Design's "use an existing room" picker, the
+      Rooms tab's own display, and the public share page.
+    - **Measurements on the canvas** — every placed item shows its current
+      size as a "W' D"" caption (live-updated during a resize via the same
+      direct DOM writes as the drag, not React state); the room itself
+      gets architectural-style dimension lines with tick marks along its
+      top and left edges showing total width/depth, drawn in a margin
+      added outside the room in the SVG's `viewBox` (`MARGIN` in
       `room-layout-editor.tsx`) so they don't overlap the fixtures. All
       figures come directly from the same feet-based coordinates the
       drag/resize/clamp math already uses, so what's displayed is what's

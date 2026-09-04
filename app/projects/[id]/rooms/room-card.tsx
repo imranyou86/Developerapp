@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FeetInchesInput } from "@/components/FeetInchesInput";
+import { formatFeetInches } from "@/lib/feetInches";
 import {
   addTask,
   deleteTask,
@@ -26,8 +28,8 @@ export function RoomCard({
 }) {
   const { notify } = useToast();
   const [open, setOpen] = useState(false);
-  const [width, setWidth] = useState(room.width?.toString() ?? "");
-  const [depth, setDepth] = useState(room.depth?.toString() ?? "");
+  const [width, setWidth] = useState<number | null>(room.width);
+  const [depth, setDepth] = useState<number | null>(room.depth);
   const [savingDims, startSavingDims] = useTransition();
   const [newTask, setNewTask] = useState("");
   const [newTaskDue, setNewTaskDue] = useState("");
@@ -38,14 +40,12 @@ export function RoomCard({
 
   function saveDims() {
     startSavingDims(async () => {
-      const w = width ? Number(width) : null;
-      const d = depth ? Number(depth) : null;
-      const res = await updateRoomDimensions(projectId, room.id, w, d);
+      const res = await updateRoomDimensions(projectId, room.id, width, depth);
       if (!res.ok) {
         notify("error", res.error ?? "Could not save dimensions.");
         return;
       }
-      onRoomUpdated({ ...room, width: w, depth: d });
+      onRoomUpdated({ ...room, width, depth });
       notify("success", "Dimensions saved.");
     });
   }
@@ -94,7 +94,7 @@ export function RoomCard({
             </h3>
             <p className="text-xs text-blueprint/50">
               {room.type ?? "Room"} {room.floor != null && `· Floor ${room.floor}`}
-              {room.width && room.depth && ` · ${room.width}ft × ${room.depth}ft`}
+              {room.width && room.depth && ` · ${formatFeetInches(room.width)} × ${formatFeetInches(room.depth)}`}
             </p>
           </div>
         </div>
@@ -109,12 +109,12 @@ export function RoomCard({
         <div className="space-y-6 border-t border-blueprint/10 p-5">
           <div className="flex items-end gap-3">
             <div>
-              <label className="label">Width (ft)</label>
-              <input className="input w-28" type="number" value={width} onChange={(e) => setWidth(e.target.value)} />
+              <label className="label">Width</label>
+              <FeetInchesInput value={width} onChange={setWidth} className="input w-28" />
             </div>
             <div>
-              <label className="label">Depth (ft)</label>
-              <input className="input w-28" type="number" value={depth} onChange={(e) => setDepth(e.target.value)} />
+              <label className="label">Depth</label>
+              <FeetInchesInput value={depth} onChange={setDepth} className="input w-28" />
             </div>
             <button className="btn-outline" onClick={saveDims} disabled={savingDims}>
               {savingDims ? "Saving…" : "Save dimensions"}

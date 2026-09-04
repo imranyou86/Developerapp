@@ -3,10 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getFixturesForRoomType, type FixtureType } from "@/lib/fixtureCatalog";
+import { formatFeetInches } from "@/lib/feetInches";
 import type { PlacedFixture } from "@/lib/types";
 
-const SNAP = 0.5; // feet
-const MIN_SIZE = 0.5; // feet — smallest a fixture can be resized to
+// Position/size snap to the nearest inch — decimal-foot snapping (e.g. the
+// old 0.5ft/6") was too coarse for placing real fixtures accurately.
+// Kept separate from GRID_SPACING (the visible reference lines), since a
+// 1" grid would be far too dense to read at typical room sizes.
+const SNAP = 1 / 12; // feet (1 inch)
+const GRID_SPACING = 1; // feet, visual reference lines only
+const MIN_SIZE = 0.25; // feet (3") — smallest a fixture can be resized to
 const MARGIN = 1.4; // feet of space reserved outside the room for dimension rulers
 
 function snap(n: number): number {
@@ -17,9 +23,7 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(Math.max(n, min), max);
 }
 
-function fmt(n: number): string {
-  return (Math.round(n * 10) / 10).toString().replace(/\.0$/, "");
-}
+const fmt = formatFeetInches;
 
 // Converts a pointer event's screen position into room-relative feet, using
 // the SVG's actual rendered box and its viewBox (which includes MARGIN on
@@ -272,7 +276,7 @@ export function RoomLayoutEditor({
       }
       refs.size.setAttribute("x", String(item.x + finalW / 2));
       refs.size.setAttribute("y", String(item.y + finalD / 2 + Math.min(finalW, finalD) * 0.14));
-      refs.size.textContent = `${fmt(finalW)}' × ${fmt(finalD)}'`;
+      refs.size.textContent = `${fmt(finalW)} × ${fmt(finalD)}`;
       refs.handle.setAttribute("x", String(item.x + finalW - handleSize / 2));
       refs.handle.setAttribute("y", String(item.y + finalD - handleSize / 2));
     }
@@ -347,7 +351,7 @@ export function RoomLayoutEditor({
               style={{ backgroundColor: `${f.color}22`, borderColor: f.color }}
               onPointerDown={(e) => handlePaletteDragStart(e, f)}
             >
-              {f.label} — {fmt(f.width)}&apos; × {fmt(f.depth)}&apos;
+              {f.label} — {fmt(f.width)} × {fmt(f.depth)}
             </button>
           ))}
         </div>
@@ -360,8 +364,9 @@ export function RoomLayoutEditor({
         </button>
       </div>
       <p className="mb-2 text-xs text-blueprint/40">
-        Drag a fixture onto the room, drag it to reposition, or drag its bottom-right corner to resize. All
-        measurements are in feet, to scale with the room.
+        Drag a fixture onto the room, drag it to reposition, or drag its bottom-right corner to resize. Positions
+        and sizes snap to the nearest inch and are shown in feet-inches (e.g. 4&apos;6&quot;), to scale with the
+        room.
       </p>
 
       <svg
@@ -373,15 +378,15 @@ export function RoomLayoutEditor({
       >
         <rect x={0} y={0} width={roomWidth} height={roomDepth} fill="#FAFAF7" stroke="#3A3A38" strokeWidth={0.04} />
 
-        {Array.from({ length: Math.floor(roomWidth / SNAP) + 1 }).map((_, i) => (
-          <line key={`v${i}`} x1={i * SNAP} y1={0} x2={i * SNAP} y2={roomDepth} stroke="#EDE7DD" strokeWidth={0.02} />
+        {Array.from({ length: Math.floor(roomWidth / GRID_SPACING) + 1 }).map((_, i) => (
+          <line key={`v${i}`} x1={i * GRID_SPACING} y1={0} x2={i * GRID_SPACING} y2={roomDepth} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
-        {Array.from({ length: Math.floor(roomDepth / SNAP) + 1 }).map((_, i) => (
-          <line key={`h${i}`} x1={0} y1={i * SNAP} x2={roomWidth} y2={i * SNAP} stroke="#EDE7DD" strokeWidth={0.02} />
+        {Array.from({ length: Math.floor(roomDepth / GRID_SPACING) + 1 }).map((_, i) => (
+          <line key={`h${i}`} x1={0} y1={i * GRID_SPACING} x2={roomWidth} y2={i * GRID_SPACING} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
 
-        <DimensionLine x1={0} y1={-MARGIN * 0.55} x2={roomWidth} y2={-MARGIN * 0.55} label={`${fmt(roomWidth)}'`} />
-        <DimensionLine x1={-MARGIN * 0.55} y1={0} x2={-MARGIN * 0.55} y2={roomDepth} label={`${fmt(roomDepth)}'`} vertical />
+        <DimensionLine x1={0} y1={-MARGIN * 0.55} x2={roomWidth} y2={-MARGIN * 0.55} label={fmt(roomWidth)} />
+        <DimensionLine x1={-MARGIN * 0.55} y1={0} x2={-MARGIN * 0.55} y2={roomDepth} label={fmt(roomDepth)} vertical />
 
         {items.map((item) => {
           const { w, d } = footprint(item);
@@ -426,7 +431,7 @@ export function RoomLayoutEditor({
                 fillOpacity={0.75}
                 className="pointer-events-none select-none"
               >
-                {fmt(w)}&apos; × {fmt(d)}&apos;
+                {fmt(w)} × {fmt(d)}
               </text>
               {isSelected && (
                 <>
@@ -472,7 +477,7 @@ export function RoomLayoutEditor({
       {selected && (
         <div className="mt-2 flex items-center gap-2 text-xs">
           <span className="text-blueprint/60">
-            Selected: {selected.label} ({fmt(footprint(selected).w)}&apos; × {fmt(footprint(selected).d)}&apos;)
+            Selected: {selected.label} ({fmt(footprint(selected).w)} × {fmt(footprint(selected).d)})
           </span>
           <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={handleRotate}>
             Rotate 90°
