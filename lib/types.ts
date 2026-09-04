@@ -64,6 +64,7 @@ export interface BudgetItem {
   item: string;
   budgeted: number;
   actual: number;
+  finish_id: string | null;
   created_at: string;
 }
 
@@ -150,7 +151,7 @@ export interface ProjectShare {
   revoked_at: string | null;
 }
 
-export type FileCategory = "plan" | "bid" | "checklist_photo" | "rendering" | "finish_scan";
+export type FileCategory = "plan" | "bid" | "checklist_photo" | "rendering" | "finish_scan" | "document" | "photo";
 
 export interface ProjectFile {
   id: string;
@@ -158,8 +159,8 @@ export interface ProjectFile {
   storage_url: string;
   file_name: string;
   category: FileCategory;
-  source_table: string;
-  source_id: string;
+  source_table: string | null;
+  source_id: string | null;
   notes: string | null;
   created_at: string;
 }

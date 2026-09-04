@@ -56,6 +56,10 @@ create table if not exists budget_items (
   item text not null,
   budgeted numeric not null default 0,
   actual numeric not null default 0,
+  -- Set when this line was auto-created from adding a priced finish (see
+  -- addFinish), so deleting that finish also removes the budget line it
+  -- generated. Null for lines the user added by hand.
+  finish_id uuid references finishes (id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
@@ -220,14 +224,18 @@ create table if not exists deal_analyses (
 -- (replacing a photo) deletes-then-reinserts rather than accumulating stale
 -- duplicates. This table is a convenience index, not a second source of
 -- truth — the feature tables above remain authoritative for their own data.
+-- 'document'/'photo' rows are uploaded directly from the Files tab itself,
+-- with no originating feature row — source_table/source_id are null for
+-- those (the unique index below treats null/null as distinct every time,
+-- so manual uploads are never deduped against each other).
 create table if not exists project_files (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan')),
-  source_table text not null,
-  source_id uuid not null,
+  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo')),
+  source_table text,
+  source_id uuid,
   notes text,
   created_at timestamptz not null default now()
 );
@@ -237,6 +245,7 @@ create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
 create index if not exists idx_budget_items_room on budget_items (room_id);
 create index if not exists idx_finishes_room on finishes (room_id);
+create index if not exists idx_budget_items_finish on budget_items (finish_id);
 create index if not exists idx_finish_scans_project on finish_scans (project_id, created_at desc);
 create index if not exists idx_cost_estimates_project on cost_estimates (project_id, created_at desc);
 create index if not exists idx_renderings_room on renderings (room_id);
@@ -354,7 +363,8 @@ values
   ('rendering-photos', 'rendering-photos', true),
   ('checklist-photos', 'checklist-photos', true),
   ('bid-files', 'bid-files', true),
-  ('finish-scans', 'finish-scans', true)
+  ('finish-scans', 'finish-scans', true),
+  ('project-files', 'project-files', true)
 on conflict (id) do nothing;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -378,3 +388,7 @@ create policy "bid_files_storage_owner" on storage.objects
 create policy "finish_scans_storage_owner" on storage.objects
   for all using (bucket_id = 'finish-scans' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'finish-scans' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "project_files_storage_owner" on storage.objects
+  for all using (bucket_id = 'project-files' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'project-files' and (storage.foldername(name))[1] = auth.uid()::text);

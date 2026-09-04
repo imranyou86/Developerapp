@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import {
   addDetectedRooms,
   addPlanPage,
@@ -179,7 +180,7 @@ export function PlanClient({
     }
     setDetecting(true);
     try {
-      const res = await fetch("/api/claude/detect-rooms", {
+      const res = await fetchWithRetry("/api/claude/detect-rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

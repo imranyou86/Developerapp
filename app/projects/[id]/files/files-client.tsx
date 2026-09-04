@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
-import { updateFileNotes } from "@/app/projects/[id]/files/actions";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { deleteProjectFile, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { FileCategory, ProjectFile } from "@/lib/types";
 
 const CATEGORY_LABEL: Record<FileCategory, string> = {
@@ -12,6 +15,8 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   checklist_photo: "Checklist photo",
   rendering: "Rendering",
   finish_scan: "Finish scan",
+  document: "Document",
+  photo: "Photo",
 };
 
 const CATEGORY_STYLE: Record<FileCategory, string> = {
@@ -20,7 +25,15 @@ const CATEGORY_STYLE: Record<FileCategory, string> = {
   checklist_photo: "badge bg-blueprint/10 text-blueprint/60",
   rendering: "badge bg-blueprint text-white",
   finish_scan: "badge bg-blueprint/10 text-blueprint/60",
+  document: "badge bg-blueprint/10 text-blueprint/60",
+  photo: "badge-sage",
 };
+
+// Categories offered when uploading directly from this tab — the other
+// three (checklist_photo, rendering, finish_scan) only make sense attached
+// to their own workflow (a checklist item, a room rendering, a scan) and
+// are populated automatically from those tabs instead.
+const UPLOAD_CATEGORIES: FileCategory[] = ["plan", "bid", "document", "photo"];
 
 function isImage(url: string): boolean {
   return /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(url);
@@ -33,6 +46,10 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   const [categoryFilter, setCategoryFilter] = useState<FileCategory | "all">("all");
   const [downloading, setDownloading] = useState(false);
   const [savingNotesFor, setSavingNotesFor] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadCategory, setUploadCategory] = useState<FileCategory>("document");
+  const [deleting, setDeleting] = useState<ProjectFile | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(
     () => (categoryFilter === "all" ? files : files.filter((f) => f.category === categoryFilter)),
@@ -66,7 +83,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   async function handleDownloadZip(fileIds: string[] | null) {
     setDownloading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/files/zip`, {
+      const res = await fetchWithRetry(`/api/projects/${projectId}/files/zip`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileIds: fileIds ?? undefined }),
@@ -100,7 +117,58 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
     }
   }
 
-  const categories: (FileCategory | "all")[] = ["all", "plan", "bid", "checklist_photo", "rendering", "finish_scan"];
+  async function handleUpload(file: File) {
+    setUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+
+      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
+      const res = await uploadProjectFile(projectId, pub.publicUrl, file.name, uploadCategory);
+      if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save file.");
+
+      setFiles((prev) => [
+        {
+          id: res.id!,
+          project_id: projectId,
+          storage_url: pub.publicUrl,
+          file_name: file.name,
+          category: uploadCategory,
+          source_table: null,
+          source_id: null,
+          notes: null,
+          created_at: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      notify("success", `Uploaded "${file.name}".`);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  const categories: (FileCategory | "all")[] = [
+    "all",
+    "plan",
+    "bid",
+    "checklist_photo",
+    "rendering",
+    "finish_scan",
+    "document",
+    "photo",
+  ];
 
   return (
     <div className="space-y-4">
@@ -110,10 +178,35 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
             <h2 className="font-semibold text-blueprint-dark">File library</h2>
             <p className="text-sm text-blueprint/60">
               Every plan page, bid, checklist photo, rendering, and finish scan uploaded to this construction, in
-              one place. Add notes, then download individually or in bulk.
+              one place — plus anything you upload directly here (contracts, permits, warranties, extra photos).
+              Add notes, then download individually or in bulk.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="input w-auto text-xs"
+              value={uploadCategory}
+              onChange={(e) => setUploadCategory(e.target.value as FileCategory)}
+              disabled={uploading}
+            >
+              {UPLOAD_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUpload(file);
+              }}
+            />
+            <button className="btn-amber text-xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              {uploading ? "Uploading…" : "Upload file"}
+            </button>
             <button
               className="btn-outline text-xs"
               onClick={() => handleDownloadZip(selected.size > 0 ? Array.from(selected) : null)}
@@ -132,7 +225,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
       {files.length === 0 ? (
         <div className="card p-10 text-center text-sm text-blueprint/60">
           No files yet — uploads from the Plan, Payments, Checklist, Rooms, and Finish ID tabs will show up here
-          automatically.
+          automatically, or use &quot;Upload file&quot; above to add one directly.
         </div>
       ) : (
         <>
@@ -169,12 +262,33 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
                   onToggleSelect={() => toggleSelect(f.id)}
                   savingNotes={savingNotesFor === f.id}
                   onNotesBlur={(notes) => handleNotesBlur(f.id, notes)}
+                  onDelete={f.source_table == null ? () => setDeleting(f) : undefined}
                 />
               ))}
             </div>
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Remove this file?"
+        message={`"${deleting?.file_name}" will be permanently removed from the library.`}
+        confirmLabel="Remove"
+        danger
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (!deleting) return;
+          const res = await deleteProjectFile(projectId, deleting.id);
+          if (!res.ok) {
+            notify("error", res.error ?? "Could not remove file.");
+          } else {
+            setFiles((prev) => prev.filter((f) => f.id !== deleting.id));
+            notify("success", "File removed.");
+          }
+          setDeleting(null);
+        }}
+      />
     </div>
   );
 }
@@ -185,12 +299,14 @@ function FileRow({
   onToggleSelect,
   savingNotes,
   onNotesBlur,
+  onDelete,
 }: {
   file: ProjectFile;
   selected: boolean;
   onToggleSelect: () => void;
   savingNotes: boolean;
   onNotesBlur: (notes: string) => void;
+  onDelete?: () => void;
 }) {
   const [notes, setNotes] = useState(file.notes ?? "");
 
@@ -225,9 +341,16 @@ function FileRow({
         {savingNotes && <p className="mt-0.5 text-xs text-blueprint/40">Saving…</p>}
       </div>
 
-      <a href={`/api/projects/${file.project_id}/files/${file.id}/download`} className="btn-ghost shrink-0 text-xs">
-        Download
-      </a>
+      <div className="flex shrink-0 gap-2">
+        <a href={`/api/projects/${file.project_id}/files/${file.id}/download`} className="btn-ghost text-xs">
+          Download
+        </a>
+        {onDelete && (
+          <button className="text-xs text-red-500 hover:underline" onClick={onDelete}>
+            Remove
+          </button>
+        )}
+      </div>
     </div>
   );
 }

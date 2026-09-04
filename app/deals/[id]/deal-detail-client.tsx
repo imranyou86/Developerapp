@@ -6,6 +6,7 @@ import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { convertDealToProject, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
 import { saveDealAnalysis } from "@/app/deals/[id]/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { Deal, DealAnalysis, DealScope, DealStatus, DealVerdict } from "@/lib/types";
 
 const STATUS_STYLE: Record<DealStatus, string> = {
@@ -63,7 +64,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   async function handleLookupLotSize() {
     setLookingUpDetails(true);
     try {
-      const res = await fetch("/api/claude/lookup-property-details", {
+      const res = await fetchWithRetry("/api/claude/lookup-property-details", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: deal.address, city: deal.city, state: deal.state, zipCode: deal.zip_code }),
@@ -160,7 +161,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
     setAnalyzing(true);
     setAnalyzeStatus("Pulling comps and researching value…");
     try {
-      const res = await fetch("/api/claude/evaluate-deal", {
+      const res = await fetchWithRetry("/api/claude/evaluate-deal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

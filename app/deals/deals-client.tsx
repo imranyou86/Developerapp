@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteDeal, saveDeal, saveManualDeal } from "@/app/deals/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { RentcastListing } from "@/lib/rentcast";
 import type { DealStatus } from "@/lib/types";
 
@@ -110,7 +111,7 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
     setSearching(true);
     setResults(null);
     try {
-      const res = await fetch(`/api/rentcast/search?zip=${zip}`);
+      const res = await fetchWithRetry(`/api/rentcast/search?zip=${zip}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Search failed.");
       setResults(json.listings ?? []);

@@ -149,4 +149,18 @@ yet; each one only adds what a given feature needed.
   a note per file, then download individually (proxied through an API route
   so the correct filename survives cross-origin — a plain link to a public
   Supabase Storage URL won't) or select several and download as one zip
-  (`jszip`, built in-memory server-side).
+  (`jszip`, built in-memory server-side). Files can also be uploaded
+  directly from this tab (any file type — contracts, permits, warranties,
+  extra photos) and tagged Plan/Bid/Document/Photo; those rows have no
+  originating feature-table row (`source_table`/`source_id` are null) and
+  can be removed from this tab directly — auto-mirrored files can't, since
+  removing them here without touching their source tab would desync the two.
+- **Finish ID's product search** — sends the actual scan photo alongside the
+  text description to Claude (vision + web search in one call), and is
+  explicitly instructed to cross-check each search result's own product
+  photos against the real photo rather than matching on the text label
+  alone, downgrading or dropping results that don't actually look right.
+  Adding a matched product with a price to a room auto-creates a budget line
+  for it (`budgeted` = found price, `actual` = 0, linked via
+  `budget_items.finish_id`), marked with a "finish" badge on the Budget tab;
+  deleting that finish removes the budget line it created.

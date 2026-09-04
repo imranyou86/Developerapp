@@ -6,6 +6,7 @@ import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteBid, markPaymentPaid, saveBid, type SaveBidInput } from "@/app/projects/[id]/payments/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 
 interface PaymentLine {
   id: string;
@@ -117,7 +118,7 @@ export function PaymentsClient({ projectId, initialBids }: { projectId: string; 
       }
 
       setExtractStatus("Extracting contractor, total & payment schedule…");
-      const res = await fetch("/api/claude/extract-bid", {
+      const res = await fetchWithRetry("/api/claude/extract-bid", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),

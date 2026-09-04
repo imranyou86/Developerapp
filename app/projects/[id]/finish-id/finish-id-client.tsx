@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { addFinish } from "@/app/projects/[id]/rooms/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { deleteFinishScan, saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
 import type { FinishCategory, IdentifiedFinish } from "@/lib/types";
 
@@ -84,7 +85,7 @@ export function FinishIdClient({
       const { data: pub } = supabase.storage.from("finish-scans").getPublicUrl(path);
 
       setUploadStatus("Identifying finishes…");
-      const res = await fetch("/api/claude/identify-finishes", {
+      const res = await fetchWithRetry("/api/claude/identify-finishes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageUrl: pub.publicUrl }),
@@ -290,6 +291,7 @@ function ScanCard({
                   <IdentifiedItemRow
                     key={i}
                     item={item}
+                    imageUrl={scan.storage_url}
                     checked={selected.has(i)}
                     disabled={added.has(i)}
                     added={added.has(i)}
@@ -335,6 +337,7 @@ function ScanCard({
 
 function IdentifiedItemRow({
   item,
+  imageUrl,
   checked,
   disabled,
   added,
@@ -343,6 +346,7 @@ function IdentifiedItemRow({
   onMatchSelected,
 }: {
   item: IdentifiedFinish;
+  imageUrl: string;
   checked: boolean;
   disabled: boolean;
   added: boolean;
@@ -357,7 +361,7 @@ function IdentifiedItemRow({
   async function handleSearch() {
     setSearching(true);
     try {
-      const res = await fetch("/api/claude/find-product", {
+      const res = await fetchWithRetry("/api/claude/find-product", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,6 +369,7 @@ function IdentifiedItemRow({
           category: item.category,
           description: item.description,
           color: item.color,
+          imageUrl,
         }),
       });
       const json = await res.json();

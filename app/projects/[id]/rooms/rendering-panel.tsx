@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { STYLE_PALETTES, getPalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
 import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projects/[id]/rooms/actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 import type { StyleName } from "@/lib/types";
 
@@ -52,7 +53,7 @@ export function RenderingPanel({
     if (!rendering.image_prompt) return;
     setGeneratingImageFor(rendering.id);
     try {
-      const res = await fetch("/api/openai/generate-room-image", {
+      const res = await fetchWithRetry("/api/openai/generate-room-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: rendering.image_prompt }),
@@ -84,7 +85,7 @@ export function RenderingPanel({
       const palette = getPalette(style);
       const illustration_svg = buildRoomIllustration(room.name, palette);
 
-      const res = await fetch("/api/claude/room-concept", {
+      const res = await fetchWithRetry("/api/claude/room-concept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

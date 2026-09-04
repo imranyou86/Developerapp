@@ -11,6 +11,7 @@ interface BudgetItemRow {
   item: string;
   budgeted: number;
   actual: number;
+  finish_id: string | null;
 }
 
 interface RoomWithBudget {
@@ -58,7 +59,13 @@ export function BudgetClient({
       </div>
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-blueprint-dark">Budget by room</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-blueprint-dark">Budget by room</h2>
+          <p className="text-xs text-blueprint/50">
+            Finishes added with a price (Finish ID or Rooms tab) show up here automatically, marked{" "}
+            <span className="badge-sage">finish</span>.
+          </p>
+        </div>
         <button className="btn-amber" onClick={() => setAddOpen(true)} disabled={rooms.length === 0}>
           + Add line item
         </button>
@@ -94,7 +101,14 @@ export function BudgetClient({
                     <tbody>
                       {room.budget_items.map((item) => (
                         <tr key={item.id} className="border-t border-blueprint/5">
-                          <td className="py-1.5">{item.item}</td>
+                          <td className="py-1.5">
+                            {item.item}
+                            {item.finish_id && (
+                              <span className="badge-sage ml-2" title="Auto-added from a finish">
+                                finish
+                              </span>
+                            )}
+                          </td>
                           <td className="py-1.5">{currency(Number(item.budgeted))}</td>
                           <td className={`py-1.5 ${Number(item.actual) > Number(item.budgeted) ? "text-red-600" : ""}`}>
                             {currency(Number(item.actual))}
@@ -136,7 +150,7 @@ export function BudgetClient({
           }
           const room = rooms.find((r) => r.id === roomId);
           if (room) {
-            updateRoomItems(roomId, [...room.budget_items, { id: res.id, ...input }]);
+            updateRoomItems(roomId, [...room.budget_items, { id: res.id, finish_id: null, ...input }]);
           }
           notify("success", "Line item added.");
           setAddOpen(false);

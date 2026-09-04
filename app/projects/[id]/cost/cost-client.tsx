@@ -6,6 +6,7 @@ import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteCostEstimate, saveCostEstimate } from "@/app/projects/[id]/cost/actions";
 import { COST_TIER_BANDS, COST_TIER_LABEL } from "@/lib/costTiers";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { CostBreakdownLine, CostEstimate, CostTier, QualityTier } from "@/lib/types";
 
 interface PlanPage {
@@ -63,7 +64,7 @@ export function CostClient({
     setEstimating(true);
     setEstimateStatus("Reading plan pages…");
     try {
-      const res = await fetch("/api/claude/estimate-construction-cost", {
+      const res = await fetchWithRetry("/api/claude/estimate-construction-cost", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

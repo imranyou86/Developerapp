@@ -154,16 +154,38 @@ export async function addFinish(
 ): Promise<ActionResult> {
   const supabase = createClient();
   if (!input.name.trim()) return { ok: false, error: "Finish name is required." };
-  const { error } = await supabase.from("finishes").insert({
-    room_id: roomId,
-    name: input.name.trim(),
-    category: input.category,
-    brand: input.brand,
-    price: input.price,
-  });
+  const { error, data } = await supabase
+    .from("finishes")
+    .insert({
+      room_id: roomId,
+      name: input.name.trim(),
+      category: input.category,
+      brand: input.brand,
+      price: input.price,
+    })
+    .select("id")
+    .single();
   if (error) return { ok: false, error: error.message };
+
+  // A priced finish (e.g. from a found product match) becomes a budget line
+  // automatically — budgeted at the found price, nothing spent yet. Linked
+  // via finish_id so deleting the finish removes this line too.
+  if (input.price != null) {
+    const label = input.brand ? `${input.name.trim()} (${input.brand})` : input.name.trim();
+    const { error: budgetError } = await supabase.from("budget_items").insert({
+      room_id: roomId,
+      item: label,
+      budgeted: input.price,
+      actual: 0,
+      finish_id: data.id,
+    });
+    if (budgetError) {
+      return { ok: false, error: `Finish added, but budget line failed: ${budgetError.message}` };
+    }
+  }
+
   revalidate(projectId);
-  return { ok: true };
+  return { ok: true, id: data.id };
 }
 
 export async function deleteFinish(projectId: string, finishId: string): Promise<ActionResult> {

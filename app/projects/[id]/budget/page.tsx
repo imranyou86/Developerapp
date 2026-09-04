@@ -8,7 +8,7 @@ export default async function BudgetPage({ params }: { params: { id: string } })
 
   const { data: rooms, error } = await supabase
     .from("rooms")
-    .select("id, name, budget_items ( id, item, budgeted, actual )")
+    .select("id, name, budget_items ( id, item, budgeted, actual, finish_id )")
     .eq("project_id", params.id)
     .order("name", { ascending: true });
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
+import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -21,13 +22,22 @@ interface FindProductResult {
 
 const SYSTEM_PROMPT = `You are a construction materials and fixtures researcher with real-time
 web search access. You will be given a description of a finish, material, or fixture that was
-identified from a photo — search the web to find the closest real, currently-sold product(s)
-that match it.
+identified from a photo, and usually the actual photo itself — search the web to find the
+closest real, currently-sold product(s) that match it.
+
+When a photo is included, treat it as the source of truth and the text description as a hint,
+not the other way around. Look closely at the photo yourself — exact color/finish (e.g. brushed
+nickel vs. chrome vs. matte black), silhouette/shape, visible logos or model markings, handle or
+knob style, pattern repeat and grout lines for tile, edge profile for countertops — before
+searching, then actively cross-check each web search result's own product photos against what
+you see in the given photo rather than matching on the text label alone. If a search result's
+photo clearly doesn't match (wrong color, wrong shape) even though the name sounds right, don't
+return it as an "exact" or "close" match — downgrade it to "similar" or drop it.
 
 Prefer well-known manufacturers and retailers (e.g. Kohler, Delta, Moen, Daltile, Caesarstone,
 Shaw, Behr, Home Depot, Lowe's, Ferguson, Wayfair, Build.com) and prefer an exact make/model
-match when the description is specific enough to identify one. When it isn't, return the closest
-equivalent products instead.
+match when the photo and description are specific enough to identify one. When they aren't,
+return the closest visual equivalent products instead.
 
 Return up to 3 matches, ranked best first. For each:
 - brand: manufacturer/brand name
@@ -36,11 +46,12 @@ Return up to 3 matches, ranked best first. For each:
 - price: approximate current price in USD as a plain number, or null if unknown
 - url: a URL where this exact product can be viewed, or null if none found
 - retailer: the site/retailer name for that URL, or null
-- match_confidence: "exact" (this is almost certainly the exact product), "close" (same
-  product line/very similar), or "similar" (a reasonable equivalent, not the same product)
+- match_confidence: "exact" (this is almost certainly the exact product — visually confirmed
+  against the photo, not just name-matched), "close" (same product line/very similar, photo
+  mostly consistent), or "similar" (a reasonable equivalent, not the same product)
 
-Be honest — if web search turns up nothing credible, return an empty matches array rather than
-inventing a product.
+Be honest — if web search turns up nothing credible, or nothing that actually looks like the
+photo, return an empty matches array rather than inventing or force-fitting a product.
 
 Respond with ONLY a JSON object, no prose, matching this shape exactly:
 { "matches": [ { "brand": string, "model": string | null, "description": string, "price": number | null, "url": string | null, "retailer": string | null, "match_confidence": "exact" | "close" | "similar" } ] }`;
@@ -59,6 +70,7 @@ export async function POST(req: Request) {
     category?: string;
     description?: string;
     color?: string | null;
+    imageUrl?: string | null;
   };
   if (!body.name) {
     return NextResponse.json({ error: "No item provided." }, { status: 400 });
@@ -76,10 +88,32 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n");
 
+    // The source photo (when available) is included alongside the text so Claude can visually
+    // cross-check search results against it instead of matching on the text label alone — the
+    // text description is Claude's own earlier summary of the photo, so it's lossy on its own.
+    let imageBlock: Anthropic.Messages.ImageBlockParam | null = null;
+    if (body.imageUrl) {
+      try {
+        imageBlock = await fetchImageForClaude(body.imageUrl);
+      } catch (err) {
+        console.warn("find-product: could not fetch source image, continuing text-only:", err);
+      }
+    }
+
+    const content: Array<Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam> = [
+      { type: "text", text: `Find real product matches for this finish/fixture:\n\n${query}` },
+    ];
+    if (imageBlock) {
+      content.push({ type: "text", text: "Source photo (the item is somewhere in this photo — this is the ground truth to match against):" });
+      content.push(imageBlock);
+    }
+
     const message = await anthropic.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: 4000,
       system: SYSTEM_PROMPT,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
       // Deliberately the basic search tool, not the newer web_search_20260209 —
       // that variant routes searches through a server-side Python sandbox for
       // dynamic filtering, which in testing took 60-90+ seconds (including
@@ -87,12 +121,7 @@ export async function POST(req: Request) {
       // That easily exceeds a serverless function's timeout for a feature
       // that doesn't need dynamic domain filtering anyway.
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
-      messages: [
-        {
-          role: "user",
-          content: `Find real product matches for this finish/fixture:\n\n${query}`,
-        },
-      ],
+      messages: [{ role: "user", content }],
     });
 
     const text = message.content
