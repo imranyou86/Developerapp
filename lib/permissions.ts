@@ -24,6 +24,7 @@ export interface ProjectTabDef {
 export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "plan", label: "Plan" },
   { slug: "rooms", label: "Rooms & Tasks" },
+  { slug: "interior-design", label: "Interior Design" },
   { slug: "finish-id", label: "Finish ID" },
   { slug: "checklist", label: "Checklist" },
   { slug: "budget", label: "Budget" },

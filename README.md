@@ -95,6 +95,25 @@ yet; each one only adds what a given feature needed.
   replacing the illustration; without that key, copy the same prompt into
   ChatGPT/Midjourney by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
+- **Interior Design tab** — a separate, project-level tab (not per-room like
+  Rooms & Tasks) for redesigning a real photo of an empty or framed-out
+  room. Upload the photo, pick a room type and a style (5 quick-fill
+  presets from the same palette list as Rooms & Tasks, or type your own),
+  and size the room either by selecting one of the project's pre-added
+  rooms (auto-fills width/depth from `rooms`) or entering dimensions/sqft
+  manually. Unlike Rooms & Tasks' text-to-image "Generate image", this uses
+  OpenAI's image *edit* endpoint (`editRoomImage` in `lib/openai.ts`, POST
+  `/api/openai/edit-room-image`) — an image-to-image call seeded with the
+  actual uploaded photo, not a blank canvas, so the room's real
+  architecture/windows/layout come through in the result rather than being
+  invented. The prompt itself is built deterministically
+  (`lib/interiorDesignPrompt.ts`, no Claude round-trip) — short and
+  front-loaded, the same lesson learned tuning Rooms & Tasks' prompts.
+  Every past design for the project is kept (not overwritten) in a gallery
+  with both the before photo and the generated result, "Copy prompt", and
+  "Save image"; deleting one removes both images and their File Library
+  entries. Requires `OPENAI_API_KEY` like the Rooms tab's image generation
+  does.
 - **Construction Cost tab** — Claude reads every plan page marked "Floor
   plan layout" on the Plan tab and, grounded by a couple of web searches for
   current regional (or national, if no address) construction cost data, picks

@@ -151,7 +151,15 @@ export interface ProjectShare {
   revoked_at: string | null;
 }
 
-export type FileCategory = "plan" | "bid" | "checklist_photo" | "rendering" | "finish_scan" | "document" | "photo";
+export type FileCategory =
+  | "plan"
+  | "bid"
+  | "checklist_photo"
+  | "rendering"
+  | "finish_scan"
+  | "document"
+  | "photo"
+  | "interior_design";
 
 export interface ProjectFile {
   id: string;
@@ -162,6 +170,21 @@ export interface ProjectFile {
   source_table: string | null;
   source_id: string | null;
   notes: string | null;
+  created_at: string;
+}
+
+export interface InteriorDesign {
+  id: string;
+  project_id: string;
+  room_id: string | null;
+  room_type: string;
+  style: string;
+  width: number | null;
+  depth: number | null;
+  sqft: number | null;
+  original_photo_url: string;
+  generated_image_url: string;
+  prompt: string;
   created_at: string;
 }
 

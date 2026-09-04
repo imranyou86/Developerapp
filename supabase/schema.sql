@@ -119,6 +119,25 @@ create table if not exists renderings (
   created_at timestamptz not null default now()
 );
 
+-- Interior Design tab: a photo of an empty/framed room, redesigned in
+-- place by OpenAI's image-edit API given a style + room type + sizing.
+-- room_id is optional — sizing can come from a pre-added room (rooms.id)
+-- or be entered manually, so this isn't required to point at one.
+create table if not exists interior_designs (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  room_id uuid references rooms (id) on delete set null,
+  room_type text not null,
+  style text not null,
+  width numeric,
+  depth numeric,
+  sqft numeric,
+  original_photo_url text not null,
+  generated_image_url text not null,
+  prompt text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists checklist_items (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -233,7 +252,7 @@ create table if not exists project_files (
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo')),
+  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design')),
   source_table text,
   source_id uuid,
   notes text,
@@ -254,7 +273,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -295,6 +314,8 @@ create index if not exists idx_budget_items_finish on budget_items (finish_id);
 create index if not exists idx_finish_scans_project on finish_scans (project_id, created_at desc);
 create index if not exists idx_cost_estimates_project on cost_estimates (project_id, created_at desc);
 create index if not exists idx_renderings_room on renderings (room_id);
+create index if not exists idx_interior_designs_project on interior_designs (project_id, created_at desc);
+create index if not exists idx_interior_designs_room on interior_designs (room_id);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
 create index if not exists idx_bids_project on bids (project_id);
@@ -315,9 +336,9 @@ create index if not exists idx_project_invites_token on project_invites (token);
 -- defaults to the field-facing tabs only (no financials/deal analysis) —
 -- all Developer-editable afterwards from the Admin page.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('finish-id', 'budget', 'cost', 'payments', 'deals') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'payments', 'deals') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -364,6 +385,7 @@ alter table finishes enable row level security;
 alter table finish_scans enable row level security;
 alter table cost_estimates enable row level security;
 alter table renderings enable row level security;
+alter table interior_designs enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table bids enable row level security;
@@ -442,6 +464,10 @@ create policy "cost_estimates_member" on cost_estimates
 create policy "renderings_member" on renderings
   for all using (exists (select 1 from rooms r where r.id = renderings.room_id and has_project_access(r.project_id)))
   with check (exists (select 1 from rooms r where r.id = renderings.room_id and has_project_access(r.project_id)));
+
+create policy "interior_designs_member" on interior_designs
+  for all using (has_project_access(interior_designs.project_id))
+  with check (has_project_access(interior_designs.project_id));
 
 create policy "checklist_items_member" on checklist_items
   for all using (has_project_access(checklist_items.project_id))
@@ -525,7 +551,8 @@ values
   ('checklist-photos', 'checklist-photos', true),
   ('bid-files', 'bid-files', true),
   ('finish-scans', 'finish-scans', true),
-  ('project-files', 'project-files', true)
+  ('project-files', 'project-files', true),
+  ('interior-design-photos', 'interior-design-photos', true)
 on conflict (id) do nothing;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -553,3 +580,7 @@ create policy "finish_scans_storage_owner" on storage.objects
 create policy "project_files_storage_owner" on storage.objects
   for all using (bucket_id = 'project-files' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'project-files' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "interior_design_photos_storage_owner" on storage.objects
+  for all using (bucket_id = 'interior-design-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'interior-design-photos' and (storage.foldername(name))[1] = auth.uid()::text);

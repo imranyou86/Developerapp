@@ -19,6 +19,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   finish_scan: "Finish scan",
   document: "Document",
   photo: "Photo",
+  interior_design: "Interior design",
 };
 
 const CATEGORY_STYLE: Record<FileCategory, string> = {
@@ -29,12 +30,14 @@ const CATEGORY_STYLE: Record<FileCategory, string> = {
   finish_scan: "badge bg-blueprint/10 text-blueprint/60",
   document: "badge bg-blueprint/10 text-blueprint/60",
   photo: "badge-sage",
+  interior_design: "badge bg-blueprint text-white",
 };
 
-// Categories offered when uploading directly from this tab — the other
-// three (checklist_photo, rendering, finish_scan) only make sense attached
-// to their own workflow (a checklist item, a room rendering, a scan) and
-// are populated automatically from those tabs instead.
+// Categories offered when uploading directly from this tab — the others
+// (checklist_photo, rendering, finish_scan, interior_design) only make
+// sense attached to their own workflow (a checklist item, a room
+// rendering, a scan, a room design) and are populated automatically from
+// those tabs instead.
 const UPLOAD_CATEGORIES: FileCategory[] = ["plan", "bid", "document", "photo"];
 
 function isImage(url: string): boolean {
@@ -181,6 +184,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
     "bid",
     "checklist_photo",
     "rendering",
+    "interior_design",
     "finish_scan",
     "document",
     "photo",
