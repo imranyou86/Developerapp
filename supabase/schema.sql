@@ -269,6 +269,12 @@ create table if not exists profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null,
   role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer')),
+  -- Gates access to the whole app (enforced in middleware.ts): new signups
+  -- land here as 'pending' until a Developer approves them from Admin's
+  -- "Access requests" section, so creating an account alone never grants
+  -- usage. 'rejected' is a permanent-looking decline an admin can still
+  -- flip back to 'pending'/'approved' later.
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at timestamptz not null default now()
 );
 
@@ -346,12 +352,19 @@ cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('ch
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
--- signups get one via the trigger below.
-insert into profiles (id, email, role)
-select u.id, u.email, 'owner'
+-- signups get one via the trigger below. Pre-existing accounts are
+-- grandfathered straight to 'approved' — only signups going through the
+-- trigger from here on start out 'pending'.
+insert into profiles (id, email, role, status)
+select u.id, u.email, 'owner', 'approved'
 from auth.users u
 where not exists (select 1 from profiles p where p.id = u.id);
 
+-- A project invite (sent by a Developer via app/projects/[id]/invite-actions.ts,
+-- which calls admin.inviteUserByEmail with data: {status: 'approved'}) is
+-- already a Developer-vetted grant of access, so those accounts skip the
+-- pending queue entirely — only the self-service /login "Create an account"
+-- flow (which sets no such metadata) lands someone in 'pending'.
 create or replace function handle_new_user()
 returns trigger
 language plpgsql
@@ -359,8 +372,17 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into profiles (id, email, role)
-  values (new.id, new.email, coalesce(new.raw_user_meta_data ->> 'role', 'owner'))
+  insert into profiles (id, email, role, status)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data ->> 'role', 'owner'),
+    case
+      when lower(new.email) = 'imranyousuf86@gmail.com' then 'approved'
+      when new.raw_user_meta_data ->> 'status' = 'approved' then 'approved'
+      else 'pending'
+    end
+  )
   on conflict (id) do nothing;
   return new;
 end;

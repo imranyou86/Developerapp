@@ -40,6 +40,23 @@ export async function updateUserRole(userId: string, role: UserRole): Promise<Ac
   return { ok: true };
 }
 
+export async function updateUserStatus(
+  userId: string,
+  status: "pending" | "approved" | "rejected"
+): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (userId === auth.userId && status !== "approved") {
+    return { ok: false, error: "You can't revoke your own access." };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.from("profiles").update({ status }).eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
 export async function deleteUser(userId: string): Promise<ActionResult> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };

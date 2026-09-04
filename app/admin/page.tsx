@@ -24,7 +24,7 @@ export default async function AdminPage() {
 
   const [{ data: tabPermissions }, { data: profiles }, { data: projects }] = await Promise.all([
     supabase.from("tab_permissions").select("role, tab, allowed"),
-    supabase.from("profiles").select("id, email, role").order("email"),
+    supabase.from("profiles").select("id, email, role, status").order("email"),
     supabase.from("projects").select("id, name, address, user_id").order("name"),
   ]);
 

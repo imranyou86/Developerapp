@@ -59,7 +59,14 @@ export async function sendProjectInvite(
   try {
     const admin = createAdminClient();
     const redirectTo = `${getSiteOrigin()}/invite/${token}`;
-    const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(normalizedEmail, { redirectTo });
+    // A Developer sending this invite is itself the access decision — mark
+    // the new account pre-approved (see handle_new_user() in schema.sql) so
+    // it never lands in the pending-approval queue meant for the public
+    // /login sign-up form.
+    const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(normalizedEmail, {
+      redirectTo,
+      data: { status: "approved" },
+    });
     if (inviteEmailError) {
       const alreadyRegistered = /already|exist/i.test(inviteEmailError.message);
       emailNote = alreadyRegistered

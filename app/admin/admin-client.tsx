@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
-import { updateTabPermission, updateUserRole, deleteUser } from "@/app/admin/actions";
+import { updateTabPermission, updateUserRole, updateUserStatus, deleteUser } from "@/app/admin/actions";
 import { setPreviewRole } from "@/app/admin/preview-actions";
 import {
   sendProjectInvite,
@@ -26,10 +26,13 @@ const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor"];
 // section above without going through an invite at all.
 const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer"];
 
+export type AccountStatus = "pending" | "approved" | "rejected";
+
 export interface AdminUser {
   id: string;
   email: string;
   role: UserRole;
+  status: AccountStatus;
 }
 
 export interface AdminProject {
@@ -59,13 +62,78 @@ export function AdminClient({
   /** Effective role right now — "developer" means no preview active. */
   currentPreviewRole: UserRole;
 }) {
+  const [rows, setRows] = useState(users);
+
   return (
     <div className="space-y-10">
+      <AccessRequestsSection rows={rows} setRows={setRows} currentUserId={currentUserId} />
       <PreviewRoleSection currentPreviewRole={currentPreviewRole} />
       <TabPermissionMatrix initial={matrix} />
-      <UsersSection users={users} projects={projects} currentUserId={currentUserId} />
+      <UsersSection rows={rows} setRows={setRows} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
     </div>
+  );
+}
+
+function AccessRequestsSection({
+  rows,
+  setRows,
+  currentUserId,
+}: {
+  rows: AdminUser[];
+  setRows: React.Dispatch<React.SetStateAction<AdminUser[]>>;
+  currentUserId: string;
+}) {
+  const { notify } = useToast();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const pending = rows.filter((u) => u.status === "pending" && u.id !== currentUserId);
+
+  async function decide(userId: string, status: AccountStatus) {
+    setBusyId(userId);
+    const res = await updateUserStatus(userId, status);
+    setBusyId(null);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update access.");
+      return;
+    }
+    setRows((r) => r.map((u) => (u.id === userId ? { ...u, status } : u)));
+    notify("success", status === "approved" ? "Access granted." : "Access declined.");
+  }
+
+  if (pending.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">
+        Access requests <span className="badge-amber ml-1 text-xs">{pending.length}</span>
+      </h2>
+      <p className="mb-3 text-xs text-blueprint/50">
+        New accounts created via the sign-up form on /login can&apos;t use the app until a Developer approves them
+        here — this prevents anyone who finds the sign-up page from getting free access.
+      </p>
+      <div className="space-y-2">
+        {pending.map((u) => (
+          <div key={u.id} className="flex items-center gap-2 rounded-lg border border-amber/30 bg-amber/5 p-2 text-sm">
+            <span className="flex-1 truncate">{u.email}</span>
+            <span className="badge-amber text-xs">{ROLE_LABELS[u.role]}</span>
+            <button
+              className="btn-primary px-3 py-1 text-xs"
+              disabled={busyId === u.id}
+              onClick={() => decide(u.id, "approved")}
+            >
+              Approve
+            </button>
+            <button
+              className="text-xs text-red-500 hover:underline"
+              disabled={busyId === u.id}
+              onClick={() => decide(u.id, "rejected")}
+            >
+              Decline
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -178,17 +246,24 @@ function TabPermissionMatrix({ initial }: { initial: MatrixRole[] }) {
   );
 }
 
+const STATUS_LABELS: Record<AccountStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Declined",
+};
+
 function UsersSection({
-  users,
+  rows,
+  setRows,
   projects,
   currentUserId,
 }: {
-  users: AdminUser[];
+  rows: AdminUser[];
+  setRows: React.Dispatch<React.SetStateAction<AdminUser[]>>;
   projects: AdminProject[];
   currentUserId: string;
 }) {
   const { notify } = useToast();
-  const [rows, setRows] = useState(users);
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -204,6 +279,18 @@ function UsersSection({
     }
   }
 
+  async function handleStatusChange(userId: string, status: AccountStatus) {
+    const prev = rows;
+    setRows((r) => r.map((u) => (u.id === userId ? { ...u, status } : u)));
+    const res = await updateUserStatus(userId, status);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update access.");
+      setRows(prev);
+    } else {
+      notify("success", "Access updated.");
+    }
+  }
+
   function ownedProjectCount(userId: string): number {
     return projects.filter((p) => p.ownerId === userId).length;
   }
@@ -211,7 +298,11 @@ function UsersSection({
   return (
     <section>
       <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Users</h2>
-      <p className="mb-3 text-xs text-blueprint/50">Change anyone&apos;s account-level login type, including granting Developer access.</p>
+      <p className="mb-3 text-xs text-blueprint/50">
+        Change anyone&apos;s account-level login type, including granting Developer access. Access controls whether
+        they can use the app at all — set it back to Pending or Declined to revoke access from someone already
+        approved.
+      </p>
       <div className="space-y-2">
         {rows.map((u) => (
           <div key={u.id} className="flex items-center gap-2 rounded-lg border border-blueprint/10 bg-white p-2 text-sm">
@@ -219,6 +310,11 @@ function UsersSection({
               {u.email}
               {u.id === currentUserId && <span className="ml-2 text-xs text-blueprint/40">(you)</span>}
             </span>
+            {u.status !== "approved" && (
+              <span className={`text-xs ${u.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>
+                {STATUS_LABELS[u.status]}
+              </span>
+            )}
             <select className="input w-auto text-xs" value={u.role} onChange={(e) => handleChange(u.id, e.target.value as UserRole)}>
               {ROLE_VALUES.map((r) => (
                 <option key={r} value={r}>
@@ -226,6 +322,19 @@ function UsersSection({
                 </option>
               ))}
             </select>
+            {u.id !== currentUserId && (
+              <select
+                className="input w-auto text-xs"
+                value={u.status}
+                onChange={(e) => handleStatusChange(u.id, e.target.value as AccountStatus)}
+              >
+                {(Object.keys(STATUS_LABELS) as AccountStatus[]).map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            )}
             {u.id !== currentUserId && (
               <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(u)}>
                 Delete

@@ -414,6 +414,34 @@ yet; each one only adds what a given feature needed.
   of the one page that can turn it back off. Clears itself when the
   browser session ends, or by picking "Not previewing" in the same
   section.
+- **Access requests** — signing up at `/login` no longer grants access by
+  itself. `profiles.status` (`pending` / `approved` / `rejected`, migration
+  `016_access_requests.sql`) gates the whole app: `handle_new_user()`
+  inserts every new self-service signup as `pending`, and
+  `lib/supabase/middleware.ts` — the one place every route already passes
+  through for the signed-in-or-not check — redirects any signed-in user
+  whose status isn't `approved` to `/pending-approval` (a simple "awaiting
+  approval"/"declined" holding page with just a sign-out button) before
+  they can reach anything else, `/admin` included. A Developer reviews the
+  queue from a new **Access requests** section at the top of the Admin page
+  (`app/admin/admin-client.tsx`'s `AccessRequestsSection`) — it only
+  renders when there's something to review, listing each pending signup's
+  email and chosen login type with **Approve**/**Decline** buttons
+  (`app/admin/actions.ts`'s `updateUserStatus`, Developer-only both in the
+  action and via the `profiles_update` RLS policy). The Users section below
+  it also gets a status column/dropdown so a Developer can revoke access
+  from someone already approved (set them back to Pending or Declined) —
+  disabled for your own row so you can't lock yourself out. Two paths skip
+  the queue entirely and land straight on `approved`: the bootstrap
+  Developer email (`imranyousuf86@gmail.com`, same special-case the schema
+  already had for the `role` column), and anyone brought in through the
+  existing **Admin → Projects & invites** flow — a Developer sending that
+  invite (`app/projects/[id]/invite-actions.ts`'s `sendProjectInvite`) is
+  itself the access decision, so it now passes `data: { status: "approved"
+  }` into `admin.inviteUserByEmail`, which `handle_new_user()` reads out of
+  `raw_user_meta_data` before falling back to `pending`. Existing accounts
+  from before this migration are grandfathered straight to `approved` so
+  nobody already using the app gets locked out by it.
 - **Finish ID's product search** — sends the actual scan photo alongside the
   text description to Claude (vision + web search in one call), and is
   explicitly instructed to cross-check each search result's own product
