@@ -196,13 +196,32 @@ yet; each one only adds what a given feature needed.
     trusts the model's arithmetic verbatim. Replaces whatever's currently
     on the canvas; drag from there to adjust.
   - **Rendering from the layout** — `lib/interiorDesignPrompt.ts`'s
-    `describeLayout` turns the placed items into a plain-language
-    placement sentence ("kitchen island centered in the room; base
-    cabinets along the back wall; …", derived from each item's position
-    relative to the room, since an image model can't use real
-    coordinates) and folds it into the same deterministic prompt
-    (`buildInteriorDesignPrompt`, still no Claude round-trip) used for the
-    photo. The uploaded photo is now optional: with one, it's still
+    `describeLayout` turns the placed items into a numbered, imperative
+    "FIXTURE PLACEMENT — follow this exactly" list (one line per item:
+    label, size, and a zone derived from its position relative to the
+    room — "along the back wall", "in the back-right corner", etc., since
+    an image model can't use real coordinates), and it explicitly tells
+    the model not to add anything beyond that list. A dense semicolon-joined
+    sentence turned out to get partially skimmed/ignored; a numbered
+    "do exactly this" list is what actually gets followed. `buildInteriorDesignPrompt`
+    (still a deterministic template, no Claude round-trip) puts that list
+    right after the opening scene-setting sentence — ahead of the softer
+    style/finish language — and drops the generic "add appropriate
+    fixtures and furniture" fallback whenever an explicit layout exists,
+    since that catch-all was competing with and diluting the specific
+    placement instructions. It also resolves a coordinate-frame ambiguity:
+    the 2D plan's "back/front/left/right" are the plan's own axes and have
+    no inherent relationship to a camera angle. Without a source photo,
+    the prompt fully specifies the camera itself (shot from just inside
+    the doorway, straight across toward the far wall) so those axes line
+    up with what gets generated; with a source photo, the camera angle is
+    whatever the photo already has, so the prompt instead tells the model
+    to map the plan's axes onto what it can actually see (farthest wall =
+    back, nearest = front, left/right as shown). This is a best-effort
+    mitigation, not a guarantee — image models have real limits following
+    precise multi-object spatial instructions, especially on the
+    photo-edit path where it also has to preserve the existing photo. The
+    uploaded photo is still optional: with one, it's still
     OpenAI's image *edit* endpoint (`editRoomImage` in `lib/openai.ts`,
     POST `/api/openai/edit-room-image`) — image-to-image seeded with the
     real photo so the actual architecture/windows carry through; without
