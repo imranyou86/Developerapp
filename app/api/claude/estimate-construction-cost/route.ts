@@ -26,6 +26,10 @@ interface CostEstimateResult {
   cost_per_sqft_low: number;
   cost_per_sqft_mid: number;
   cost_per_sqft_high: number;
+  predicted_cost_per_sqft: number;
+  contingency_pct: number;
+  prediction_confidence: "high" | "medium" | "low";
+  prediction_notes: string;
   complexity_factors: string[];
   breakdown: { category: string; pct: number; description: string }[];
   reasoning: string;
@@ -66,7 +70,19 @@ Your job:
    Cabinetry & Countertops, General Conditions & Permits — merge/adjust categories as sensible for
    this project) each with a pct of the total construction cost (should sum to ~100) and a short
    description of what's driving that line for this specific plan.
-7. Write reasoning — 3-5 sentences explaining the sqft read, the quality/complexity assessment,
+7. Give your single most accurate prediction, separate from the low/mid/high range above:
+   - predicted_cost_per_sqft — your best single-point $/sqft estimate for THIS specific plan,
+     reasoned from where exactly its complexity_factors and quality land it within (or, if truly
+     warranted, just outside) the cost_tier band — not simply the midpoint of the band.
+   - contingency_pct — a realistic contingency (typically 5-15%) for costs the plan can't show you:
+     unknown site/soil conditions, permitting, final finish selections, change orders. Use the low
+     end when the plan is detailed and site conditions look straightforward, higher when there's
+     real uncertainty.
+   - prediction_confidence — "high", "medium", or "low", based on how complete and legible the
+     plan set is and how much is left to infer.
+   - prediction_notes — 2-3 sentences on specifically what makes this plan land where it does
+     within the tier, and what would most likely move the real number up or down.
+8. Write reasoning — 3-5 sentences explaining the sqft read, the quality/complexity assessment,
    and anything uncertain (e.g. finish specs not shown on the plan, so quality tier is inferred
    from layout only).
 
@@ -79,6 +95,10 @@ Respond with ONLY a JSON object, no prose, matching this shape exactly:
   "cost_per_sqft_low": number,
   "cost_per_sqft_mid": number,
   "cost_per_sqft_high": number,
+  "predicted_cost_per_sqft": number,
+  "contingency_pct": number,
+  "prediction_confidence": "high" | "medium" | "low",
+  "prediction_notes": string,
   "complexity_factors": string[],
   "breakdown": [ { "category": string, "pct": number, "description": string } ],
   "reasoning": string
@@ -165,6 +185,16 @@ export async function POST(req: Request) {
     const totalCostMid = result.total_sqft * costPerSqftMid;
     const totalCostHigh = result.total_sqft * costPerSqftHigh;
 
+    // The predicted figure is allowed to land anywhere sane near the tier band (it's the "most
+    // accurate single number", not a band edge) but is still guarded against a wild outlier, and
+    // the contingency is capped to a believable range rather than trusted verbatim.
+    const predictedCostPerSqft = Math.min(
+      Math.max(result.predicted_cost_per_sqft, band.low * 0.85),
+      result.cost_tier === "high" ? band.high * 1.5 : band.high * 1.15
+    );
+    const contingencyPct = Math.min(Math.max(result.contingency_pct, 0), 20);
+    const predictedTotalCost = Math.round(result.total_sqft * predictedCostPerSqft * (1 + contingencyPct / 100));
+
     const breakdown = result.breakdown.map((line) => ({
       category: line.category,
       pct: line.pct,
@@ -183,6 +213,11 @@ export async function POST(req: Request) {
       total_cost_low: totalCostLow,
       total_cost_mid: totalCostMid,
       total_cost_high: totalCostHigh,
+      predicted_cost_per_sqft: predictedCostPerSqft,
+      contingency_pct: contingencyPct,
+      predicted_total_cost: predictedTotalCost,
+      prediction_confidence: result.prediction_confidence,
+      prediction_notes: result.prediction_notes,
       complexity_factors: result.complexity_factors,
       breakdown,
       reasoning: result.reasoning,

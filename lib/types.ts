@@ -210,6 +210,7 @@ export interface DealAnalysis {
 
 export type QualityTier = "economy" | "standard" | "premium" | "luxury";
 export type CostTier = "low" | "mid" | "high";
+export type PredictionConfidence = "high" | "medium" | "low";
 
 export interface CostBreakdownLine {
   category: string;
@@ -231,6 +232,11 @@ export interface CostEstimate {
   total_cost_low: number | null;
   total_cost_mid: number | null;
   total_cost_high: number | null;
+  predicted_cost_per_sqft: number | null;
+  contingency_pct: number | null;
+  predicted_total_cost: number | null;
+  prediction_confidence: PredictionConfidence | null;
+  prediction_notes: string | null;
   complexity_factors: string[];
   breakdown: CostBreakdownLine[];
   reasoning: string | null;

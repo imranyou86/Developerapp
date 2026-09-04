@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
-import type { CostBreakdownLine, CostTier, QualityTier } from "@/lib/types";
+import type { CostBreakdownLine, CostTier, PredictionConfidence, QualityTier } from "@/lib/types";
 
 export interface SaveCostEstimateInput {
   total_sqft: number;
@@ -16,6 +16,11 @@ export interface SaveCostEstimateInput {
   total_cost_low: number;
   total_cost_mid: number;
   total_cost_high: number;
+  predicted_cost_per_sqft: number;
+  contingency_pct: number;
+  predicted_total_cost: number;
+  prediction_confidence: PredictionConfidence;
+  prediction_notes: string;
   complexity_factors: string[];
   breakdown: CostBreakdownLine[];
   reasoning: string;

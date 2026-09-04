@@ -32,6 +32,12 @@ const COST_TIER_LABEL: Record<CostTier, string> = {
   high: "High tier · $450+/sqft",
 };
 
+const CONFIDENCE_STYLE: Record<string, string> = {
+  high: "badge-sage",
+  medium: "badge-amber",
+  low: "badge bg-blueprint/10 text-blueprint/60",
+};
+
 function currency(n: number | null | undefined): string {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -93,9 +99,9 @@ export function CostClient({
             <h2 className="font-semibold text-blueprint-dark">Construction cost estimate</h2>
             <p className="text-sm text-blueprint/60">
               Claude reads every sheet of the uploaded plan — dimensions, room complexity, roofline,
-              fixture counts — and estimates total construction cost with a category breakdown,
-              instead of a flat guess. It also picks a pricing tier for you: Low ($250–300/sqft),
-              Mid ($350–400/sqft), or High ($450+/sqft), based on what the plan actually shows.
+              fixture counts — and gives a single most-accurate predicted cost (with a contingency
+              for what the plan can&apos;t show), plus a pricing tier — Low ($250–300/sqft), Mid
+              ($350–400/sqft), or High ($450+/sqft) — and a full category breakdown.
             </p>
           </div>
           {planPages.length === 0 ? (
@@ -148,17 +154,25 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
     <div className="card p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-2xl font-bold text-blueprint-dark">{currency(estimate.total_cost_mid)}</p>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">AI predicted cost</p>
+          <p className="text-2xl font-bold text-blueprint-dark">{currency(estimate.predicted_total_cost ?? estimate.total_cost_mid)}</p>
           <p className="text-xs text-blueprint/50">
-            Range {currency(estimate.total_cost_low)} – {currency(estimate.total_cost_high)}
+            Likely range {currency(estimate.total_cost_low)} – {currency(estimate.total_cost_high)}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {estimate.prediction_confidence && (
+            <span className={CONFIDENCE_STYLE[estimate.prediction_confidence]}>{estimate.prediction_confidence} confidence</span>
+          )}
           {estimate.cost_tier && <span className={COST_TIER_STYLE[estimate.cost_tier]}>{COST_TIER_LABEL[estimate.cost_tier]}</span>}
           {estimate.quality_tier && <span className={QUALITY_STYLE[estimate.quality_tier]}>{estimate.quality_tier}</span>}
           <span className="text-xs text-blueprint/40">{new Date(estimate.created_at).toLocaleString()}</span>
         </div>
       </div>
+
+      {estimate.prediction_notes && (
+        <p className="mb-4 rounded-lg bg-amber/10 px-3 py-2 text-sm text-blueprint-dark">{estimate.prediction_notes}</p>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
@@ -168,6 +182,18 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
         <div>
           <p className="text-xs uppercase tracking-wide text-blueprint/50">Stories</p>
           <p className="font-semibold text-blueprint-dark">{estimate.stories ?? "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">Predicted $/sqft</p>
+          <p className="font-semibold text-blueprint-dark">
+            {estimate.predicted_cost_per_sqft ? `$${Math.round(estimate.predicted_cost_per_sqft)}` : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">Contingency</p>
+          <p className="font-semibold text-blueprint-dark">
+            {estimate.contingency_pct != null ? `${Math.round(estimate.contingency_pct)}%` : "—"}
+          </p>
         </div>
         <div>
           <p className="text-xs uppercase tracking-wide text-blueprint/50">$/sqft (mid)</p>
