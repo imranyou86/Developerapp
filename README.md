@@ -141,6 +141,24 @@ yet; each one only adds what a given feature needed.
   replacing the illustration; without that key, copy the same prompt into
   ChatGPT/Midjourney by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
+  - **Style search, not a locked list** — style used to be 5 fixed preset
+    buttons (`lib/styles.ts`'s `STYLE_PALETTES`), each with its own baked-in
+    color palette. `StyleName` (`lib/types.ts`) is now a plain `string`
+    instead of that 5-value union — DB-side `renderings.style` was already
+    unconstrained text, so no migration was needed. The panel is now a
+    free-text style search (an `<input>` with a `<datalist>` of the old
+    preset names as autocomplete suggestions — real suggestions, not a
+    restriction, so typing anything else works fine) plus three color
+    pickers (wall/floor/accent) that default to the first preset's palette
+    but are fully user-adjustable. "+ Add to list" queues a
+    `{name, wall, floor, accent}` entry as a removable chip rather than
+    generating immediately, so you can line up several styles/colorways
+    before committing; "Build design(s) (N)" then generates them one at a
+    time (`handleGenerate` now takes the queued entry plus the room state
+    threaded through the loop — each generation's `onRoomUpdated` call
+    builds on the previous one's result rather than the stale `room` prop,
+    which would otherwise make each subsequent queued generation overwrite
+    the ones before it in local state).
 - **Interior Design** (top-level, next to Buyers Guide — not a per-project
   tab) — designs a room, optionally starting from a real photo of it
   empty/framed-out. Pick which construction it's for first

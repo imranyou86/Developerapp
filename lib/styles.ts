@@ -9,7 +9,11 @@ export interface StylePalette {
   description: string;
 }
 
-// Five fixed style palettes used for room renderings.
+// Starting points, not a locked list — the Rooms tab's style search offers
+// these as autocomplete suggestions and a default color swatch, but someone
+// can type any style name and pick their own wall/floor/accent colors
+// instead. Interior Design's style field uses these the same way, as
+// quick-fill shortcuts on top of its own free-text input.
 export const STYLE_PALETTES: StylePalette[] = [
   {
     name: "Warm Modern Minimalist",
@@ -53,6 +57,3 @@ export const STYLE_PALETTES: StylePalette[] = [
   },
 ];
 
-export function getPalette(style: StyleName): StylePalette {
-  return STYLE_PALETTES.find((p) => p.name === style) ?? STYLE_PALETTES[0];
-}

@@ -12,12 +12,12 @@ export type FinishCategory =
 
 export type ChecklistPhase = "rough" | "finish";
 
-export type StyleName =
-  | "Warm Modern Minimalist"
-  | "Modern Farmhouse"
-  | "Scandinavian"
-  | "Industrial Loft"
-  | "Transitional Classic";
+// Used to be a fixed 5-value union (one fixed preset design style) — the
+// Rooms tab now lets someone type/search any style name and pick their own
+// colors instead of choosing from a locked list, so this is just a plain
+// string. Kept as a named alias rather than inlining `string` everywhere
+// that used to import it, purely so those call sites stay self-documenting.
+export type StyleName = string;
 
 export interface Project {
   id: string;

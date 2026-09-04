@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { STYLE_PALETTES, getPalette } from "@/lib/styles";
+import { STYLE_PALETTES } from "@/lib/styles";
+import type { StylePalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
 import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projects/[id]/rooms/actions";
 import { saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
@@ -17,6 +18,14 @@ import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 import type { IdentifiedFinish, StyleName } from "@/lib/types";
 
 const FINISH_CATEGORY_SET = new Set<string>(FINISH_CATEGORIES);
+
+interface QueuedStyle {
+  id: string;
+  name: string;
+  wall: string;
+  floor: string;
+  accent: string;
+}
 
 export function RenderingPanel({
   projectId,
@@ -36,6 +45,45 @@ export function RenderingPanel({
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
   const [generatingImageFor, setGeneratingImageFor] = useState<string | null>(null);
   const [sendingToFinishId, setSendingToFinishId] = useState<string | null>(null);
+
+  // Style search + custom colors, queued up before a single "Build" — no
+  // more locked list of 5 preset styles: STYLE_PALETTES[0] just seeds a
+  // sensible starting color set, and the datalist below offers the old
+  // preset names as autocomplete suggestions without restricting input to
+  // them.
+  const [styleInput, setStyleInput] = useState("");
+  const [wallColor, setWallColor] = useState(STYLE_PALETTES[0].wall);
+  const [floorColor, setFloorColor] = useState(STYLE_PALETTES[0].floor);
+  const [accentColor, setAccentColor] = useState(STYLE_PALETTES[0].accent);
+  const [queue, setQueue] = useState<QueuedStyle[]>([]);
+  const [building, setBuilding] = useState(false);
+
+  function addToQueue() {
+    const name = styleInput.trim();
+    if (!name) return;
+    setQueue((prev) => [...prev, { id: crypto.randomUUID(), name, wall: wallColor, floor: floorColor, accent: accentColor }]);
+    setStyleInput("");
+  }
+
+  function removeFromQueue(id: string) {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+  }
+
+  async function handleBuildQueue() {
+    if (queue.length === 0) return;
+    setBuilding(true);
+    // Threaded through the loop (rather than each call reading the `room`
+    // prop off the closure) so generating several queued styles back to
+    // back doesn't have each onRoomUpdated call overwrite the previous
+    // entry — the prop only updates on the parent's next render, which
+    // hasn't happened yet mid-loop.
+    let currentRoom = room;
+    for (const entry of queue) {
+      currentRoom = await handleGenerate(entry, currentRoom);
+    }
+    setBuilding(false);
+    setQueue([]);
+  }
 
   async function handleCopyPrompt(prompt: string) {
     try {
@@ -160,12 +208,21 @@ export function RenderingPanel({
     }
   }
 
-  async function handleGenerate(style: StyleName) {
+  async function handleGenerate(entry: QueuedStyle, currentRoom: RoomWithRelations): Promise<RoomWithRelations> {
+    const style = entry.name;
     setGenerating(style);
-    const taskKey = `room-concept:${room.id}:${style}`;
+    const taskKey = `room-concept:${room.id}:${entry.id}`;
+    let nextRoom = currentRoom;
     try {
       await run(taskKey, `Generating "${room.name}" — ${style} concept…`, async () => {
-        const palette = getPalette(style);
+        const palette: StylePalette = {
+          name: style,
+          colors: [entry.wall, entry.accent, entry.floor],
+          wall: entry.wall,
+          floor: entry.floor,
+          accent: entry.accent,
+          description: "",
+        };
         const illustration_svg = buildRoomIllustration(room.name, palette);
 
         const res = await fetchWithRetry("/api/claude/room-concept", {
@@ -191,8 +248,8 @@ export function RenderingPanel({
         });
         if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save rendering.");
 
-        onRoomUpdated({
-          ...room,
+        nextRoom = {
+          ...currentRoom,
           renderings: [
             {
               id: crypto.randomUUID(),
@@ -204,9 +261,10 @@ export function RenderingPanel({
               uploaded_photo_url: null,
               created_at: new Date().toISOString(),
             },
-            ...room.renderings,
+            ...currentRoom.renderings,
           ],
-        });
+        };
+        onRoomUpdated(nextRoom);
         notify("success", `Generated a ${style} rendering.`);
       });
     } catch (err) {
@@ -214,6 +272,7 @@ export function RenderingPanel({
     } finally {
       setGenerating(null);
     }
+    return nextRoom;
   }
 
   async function handlePhotoUpload(renderingId: string, file: File) {
@@ -236,22 +295,90 @@ export function RenderingPanel({
   return (
     <div>
       <h4 className="mb-2 text-sm font-semibold text-blueprint-dark">Style rendering</h4>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {STYLE_PALETTES.map((p) => (
-          <button
-            key={p.name}
-            className="btn-outline text-xs"
-            disabled={generating !== null || isRunning(`room-concept:${room.id}:${p.name}`)}
-            onClick={() => handleGenerate(p.name)}
-          >
-            {generating === p.name || isRunning(`room-concept:${room.id}:${p.name}`) ? "Generating…" : p.name}
-            <span className="ml-1.5 flex">
-              {p.colors.slice(0, 3).map((c) => (
-                <span key={c} className="-ml-1 h-3 w-3 rounded-full border border-white" style={{ backgroundColor: c }} />
+      <div className="mb-4 space-y-3 rounded-lg border border-blueprint/10 bg-concrete/50 p-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[180px] flex-1">
+            <label className="label">Search a style</label>
+            <input
+              className="input"
+              list={`style-suggestions-${room.id}`}
+              value={styleInput}
+              onChange={(e) => setStyleInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addToQueue())}
+              placeholder="e.g. Coastal, Japandi, Mid-Century Modern…"
+            />
+            <datalist id={`style-suggestions-${room.id}`}>
+              {STYLE_PALETTES.map((p) => (
+                <option key={p.name} value={p.name} />
               ))}
-            </span>
+            </datalist>
+          </div>
+          <div>
+            <label className="label">Wall</label>
+            <input
+              type="color"
+              value={wallColor}
+              onChange={(e) => setWallColor(e.target.value)}
+              className="h-9 w-11 cursor-pointer rounded-lg border border-blueprint/20 bg-white p-0.5"
+            />
+          </div>
+          <div>
+            <label className="label">Floor</label>
+            <input
+              type="color"
+              value={floorColor}
+              onChange={(e) => setFloorColor(e.target.value)}
+              className="h-9 w-11 cursor-pointer rounded-lg border border-blueprint/20 bg-white p-0.5"
+            />
+          </div>
+          <div>
+            <label className="label">Accent</label>
+            <input
+              type="color"
+              value={accentColor}
+              onChange={(e) => setAccentColor(e.target.value)}
+              className="h-9 w-11 cursor-pointer rounded-lg border border-blueprint/20 bg-white p-0.5"
+            />
+          </div>
+          <button className="btn-outline text-xs" disabled={!styleInput.trim() || building} onClick={addToQueue}>
+            + Add to list
           </button>
-        ))}
+        </div>
+
+        {queue.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-blueprint/10 pt-3">
+            {queue.map((q) => (
+              <span
+                key={q.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-blueprint/15 bg-white py-1 pl-1 pr-2 text-xs"
+              >
+                <span className="flex">
+                  {[q.wall, q.accent, q.floor].map((c, i) => (
+                    <span
+                      key={i}
+                      className="-ml-1 h-3 w-3 rounded-full border border-white first:ml-0"
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </span>
+                {q.name}
+                <button
+                  className="ml-0.5 text-blueprint/40 hover:text-red-500"
+                  onClick={() => removeFromQueue(q.id)}
+                  aria-label={`Remove ${q.name} from the list`}
+                  disabled={building}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button className="btn-amber text-xs" disabled={building} onClick={handleBuildQueue}>
+              {building
+                ? `Building "${generating}"…`
+                : `Build design${queue.length > 1 ? "s" : ""} (${queue.length})`}
+            </button>
+          </div>
+        )}
       </div>
 
       {room.renderings.length > 0 && (
