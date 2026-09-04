@@ -183,9 +183,19 @@ yet; each one only adds what a given feature needed.
   "Developer" (see below) — not selectable at sign-up. Only a Developer can
   invite someone onto a construction — the "Invite" button next to "Share"
   on a project page (Developer-only) creates a `project_invites` row with a
-  role and a one-time link; there's no email sending configured, so the
-  Developer copies the link and sends it however they like. The invitee
-  accepts it at `/invite/[token]` once signed in with the matching email,
+  role and a one-time link, and tries to email it automatically via
+  Supabase Auth's `admin.inviteUserByEmail` (`app/projects/[id]/invite-actions.ts`).
+  That only works for an email with no existing account — it's how GoTrue's
+  invite flow is designed — and it depends on the Supabase project actually
+  being able to send email: Supabase's own built-in sender works out of the
+  box but is rate-limited to a handful of emails/hour, so anything beyond
+  testing needs a custom SMTP provider configured under **Authentication →
+  Emails → SMTP Settings** in the Supabase dashboard. Either way, sending
+  never blocks creating the invite — if the email doesn't go through (already
+  has an account, no SMTP configured, rate-limited), the modal says so and
+  the Developer copies the link and sends it manually instead; the link
+  always works regardless of whether the email did. The invitee accepts it
+  at `/invite/[token]` once signed in with the matching email,
   which creates a `project_members` row for them; inviting someone as
   "Developer" specifically also promotes their account (`profiles.role`),
   since Developer is an admin role, not a per-project one — they get full

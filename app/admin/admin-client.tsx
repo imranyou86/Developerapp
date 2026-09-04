@@ -244,7 +244,10 @@ function ProjectInvitePanel({ project }: { project: AdminProject }) {
         notify("error", res.error ?? "Could not send invite.");
         return;
       }
-      notify("success", `Invite created for ${email}.`);
+      notify(
+        "success",
+        res.emailSent ? `Invite email sent to ${email}.` : (res.emailNote ?? `Invite created for ${email}. Copy the link below to send it.`)
+      );
       setEmail("");
       await refresh();
     });

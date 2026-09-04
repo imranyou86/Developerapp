@@ -66,7 +66,10 @@ export function InviteButton({ projectId }: { projectId: string }) {
         notify("error", res.error ?? "Could not send invite.");
         return;
       }
-      notify("success", `Invite created for ${email}. Copy the link below to send it.`);
+      notify(
+        "success",
+        res.emailSent ? `Invite email sent to ${email}.` : (res.emailNote ?? `Invite created for ${email}. Copy the link below to send it.`)
+      );
       setEmail("");
       await refresh();
     });
@@ -90,9 +93,10 @@ export function InviteButton({ projectId }: { projectId: string }) {
       >
         <div className="space-y-5">
           <p className="text-sm text-blueprint/70">
-            Invite a person to this project at a specific role. There&apos;s no email sending configured yet, so
-            copy the invite link after creating it and send it to them yourself — they&apos;ll get access once
-            they sign in with the matching email and open the link.
+            Invite a person to this project at a specific role. If they don&apos;t have an account yet, we&apos;ll
+            try to email them an invite automatically. If that doesn&apos;t go through (they already have an
+            account, or email isn&apos;t set up on this Supabase project), copy the link below and send it to
+            them yourself — they&apos;ll get access once they sign in with the matching email and open it.
           </p>
 
           <form onSubmit={handleSend} className="flex flex-wrap items-end gap-2">

@@ -3,6 +3,8 @@
 import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getSiteOrigin } from "@/lib/site";
 import type { ActionResult } from "@/app/projects/actions";
 import type { UserRole } from "@/lib/types";
 
@@ -25,24 +27,52 @@ export async function sendProjectInvite(
   projectId: string,
   email: string,
   role: UserRole
-): Promise<ActionResult & { token?: string }> {
+): Promise<ActionResult & { token?: string; emailSent?: boolean; emailNote?: string }> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };
-  if (!email.trim() || !email.includes("@")) return { ok: false, error: "Enter a valid email." };
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes("@")) return { ok: false, error: "Enter a valid email." };
 
   const supabase = createClient();
   const token = crypto.randomBytes(24).toString("base64url");
 
   const { data, error } = await supabase
     .from("project_invites")
-    .insert({ project_id: projectId, email: email.trim().toLowerCase(), role, invited_by: auth.userId, token })
+    .insert({ project_id: projectId, email: normalizedEmail, role, invited_by: auth.userId, token })
     .select("id, token")
     .single();
 
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/admin");
-  return { ok: true, id: data.id, token: data.token };
+
+  // Try to actually email the invite via Supabase Auth's own invite flow —
+  // it only works for an email with no existing account (that's how
+  // GoTrue's admin API is designed: it creates the auth user in an
+  // "invited" state and emails them a sign-in link). For an email that
+  // already has an account, there's no equivalent "send them an email"
+  // admin call without a separate email provider, so this falls back to
+  // "copy the link yourself" — never treated as a hard failure, since the
+  // invite row + link both still work either way.
+  let emailSent = false;
+  let emailNote: string | undefined;
+  try {
+    const admin = createAdminClient();
+    const redirectTo = `${getSiteOrigin()}/invite/${token}`;
+    const { error: inviteEmailError } = await admin.auth.admin.inviteUserByEmail(normalizedEmail, { redirectTo });
+    if (inviteEmailError) {
+      const alreadyRegistered = /already|exist/i.test(inviteEmailError.message);
+      emailNote = alreadyRegistered
+        ? "This person already has an account — copy the link below and send it to them yourself."
+        : `Could not send an email automatically (${inviteEmailError.message}) — copy the link below and send it yourself.`;
+    } else {
+      emailSent = true;
+    }
+  } catch (err) {
+    emailNote = `Could not send an email automatically (${err instanceof Error ? err.message : "unknown error"}) — copy the link below and send it yourself.`;
+  }
+
+  return { ok: true, id: data.id, token: data.token, emailSent, emailNote };
 }
 
 export async function revokeInvite(inviteId: string, projectId: string): Promise<ActionResult> {
