@@ -42,3 +42,24 @@ export async function deleteProjectFile(projectId: string, fileId: string): Prom
   revalidatePath(`/projects/${projectId}/files`);
   return { ok: true };
 }
+
+// Same "manual upload only" restriction as the single-file delete above
+// (.is("source_table", null)) — a checked file that actually came from
+// another tab (a rendering, a checklist photo, a plan page, …) is silently
+// skipped rather than erroring, since deleting it here would desync it from
+// the feature it belongs to; the client tells the user how many were
+// skipped. Returns the ids that were actually deleted so the client can
+// update local state/selection without a full refetch.
+export async function deleteProjectFiles(projectId: string, fileIds: string[]): Promise<ActionResult & { deletedIds?: string[] }> {
+  if (fileIds.length === 0) return { ok: true, deletedIds: [] };
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("project_files")
+    .delete()
+    .in("id", fileIds)
+    .is("source_table", null)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/projects/${projectId}/files`);
+  return { ok: true, deletedIds: (data ?? []).map((row) => row.id) };
+}

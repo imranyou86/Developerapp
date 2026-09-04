@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { deleteProjectFile, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
+import { deleteProjectFile, deleteProjectFiles, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { FileCategory, ProjectFile } from "@/lib/types";
@@ -56,12 +56,27 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   const [uploading, setUploading] = useState(false);
   const [uploadCategory, setUploadCategory] = useState<FileCategory>("document");
   const [deleting, setDeleting] = useState<ProjectFile | null>(null);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(
     () => (categoryFilter === "all" ? files : files.filter((f) => f.category === categoryFilter)),
     [files, categoryFilter]
   );
+
+  // Selection persists across the category filter and even across tabs, so
+  // it can include files not currently shown — read it off the full list,
+  // not `filtered`. Only directly-uploaded files (source_table null) can be
+  // deleted at all (same rule as the per-row Remove button), so a selection
+  // that also includes a rendering/checklist-photo/plan-page/etc. still
+  // deletes the eligible ones and just skips the rest.
+  const selectedFiles = useMemo(() => files.filter((f) => selected.has(f.id)), [files, selected]);
+  const deletableSelectedIds = useMemo(
+    () => selectedFiles.filter((f) => f.source_table == null).map((f) => f.id),
+    [selectedFiles]
+  );
+  const nonDeletableSelectedCount = selectedFiles.length - deletableSelectedIds.length;
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((f) => selected.has(f.id));
 
@@ -132,6 +147,30 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
     if (!res.ok) {
       notify("error", res.error ?? "Could not save notes.");
     }
+  }
+
+  async function handleDeleteSelected() {
+    setBulkDeleting(true);
+    const res = await deleteProjectFiles(projectId, deletableSelectedIds);
+    setBulkDeleting(false);
+    setDeletingSelected(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete files.");
+      return;
+    }
+    const deletedIds = new Set(res.deletedIds ?? deletableSelectedIds);
+    setFiles((prev) => prev.filter((f) => !deletedIds.has(f.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      deletedIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    notify(
+      "success",
+      nonDeletableSelectedCount > 0
+        ? `${deletedIds.size} file${deletedIds.size === 1 ? "" : "s"} deleted — ${nonDeletableSelectedCount} skipped (not directly uploaded).`
+        : `${deletedIds.size} file${deletedIds.size === 1 ? "" : "s"} deleted.`
+    );
   }
 
   async function handleUpload(file: File) {
@@ -242,6 +281,16 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
                   ? `Download selected (${selected.size})`
                   : "Download all"}
             </button>
+            {selected.size > 0 && (
+              <button
+                className="btn-outline text-xs text-red-500 hover:bg-red-50"
+                onClick={() => setDeletingSelected(true)}
+                disabled={bulkDeleting || deletableSelectedIds.length === 0}
+                title={deletableSelectedIds.length === 0 ? "Selected files aren't directly-uploaded, so they can't be deleted here." : undefined}
+              >
+                Delete selected ({deletableSelectedIds.length})
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -319,6 +368,21 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
           }
           setDeleting(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={deletingSelected}
+        title="Delete selected files?"
+        message={`${deletableSelectedIds.length} file${deletableSelectedIds.length === 1 ? "" : "s"} will be permanently removed from the library.${
+          nonDeletableSelectedCount > 0
+            ? ` ${nonDeletableSelectedCount} other selected file${nonDeletableSelectedCount === 1 ? "" : "s"} came from another tab and can't be deleted here, so ${nonDeletableSelectedCount === 1 ? "it" : "they"} will be left alone.`
+            : ""
+        } This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        busy={bulkDeleting}
+        onCancel={() => setDeletingSelected(false)}
+        onConfirm={handleDeleteSelected}
       />
     </div>
   );

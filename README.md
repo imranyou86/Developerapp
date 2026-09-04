@@ -322,6 +322,17 @@ yet; each one only adds what a given feature needed.
   originating feature-table row (`source_table`/`source_id` are null) and
   can be removed from this tab directly — auto-mirrored files can't, since
   removing them here without touching their source tab would desync the two.
+  The same "Check all"/individual checkboxes used for the bulk-zip download
+  also drive a **"Delete selected"** button (`deleteProjectFiles` in
+  `app/projects/[id]/files/actions.ts`) — a single query
+  (`.in("id", ids).is("source_table", null)`) that deletes whichever
+  checked files are directly-uploaded and silently leaves any auto-mirrored
+  ones checked alone (same restriction as the single-file Remove button,
+  applied in bulk); the confirmation dialog and the resulting toast both
+  say up front how many of the selection will actually be deleted vs.
+  skipped, so it's never a surprise. Selection is the same persisted set
+  used elsewhere (`usePersistedSelection`), so it survives the category
+  filter and tab switches.
 - **Roles & permissions** — every account has a login type: Owner, PM,
   Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
   trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer
