@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { DealsClient } from "@/app/deals/deals-client";
 import { TopNav } from "@/components/TopNav";
+import { getCurrentUser } from "@/lib/permissions-server";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function DealsPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const currentUser = await getCurrentUser();
   const { data: deals, error } = await supabase
     .from("deals")
     .select("id, address, city, state, zip_code, list_price, beds, baths, sqft, year_built, status, project_id, created_at")
@@ -33,7 +35,7 @@ export default async function DealsPage() {
             </button>
           </form>
         </div>
-        <TopNav />
+        <TopNav showAdmin={currentUser?.role === "developer"} />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">

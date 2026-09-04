@@ -2,24 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { PROJECT_TABS } from "@/lib/permissions";
 
-const TABS = [
-  { slug: "plan", label: "Plan" },
-  { slug: "rooms", label: "Rooms & Tasks" },
-  { slug: "finish-id", label: "Finish ID" },
-  { slug: "checklist", label: "Checklist" },
-  { slug: "budget", label: "Budget" },
-  { slug: "cost", label: "Construction Cost" },
-  { slug: "payments", label: "Payments" },
-  { slug: "files", label: "Files" },
-];
-
-export function ProjectTabs({ projectId }: { projectId: string }) {
+export function ProjectTabs({ projectId, allowedSlugs }: { projectId: string; allowedSlugs: string[] }) {
   const pathname = usePathname();
+  const tabs = PROJECT_TABS.filter((t) => allowedSlugs.includes(t.slug));
 
   return (
     <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-6">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const href = `/projects/${projectId}/${tab.slug}`;
         const active = pathname?.startsWith(href);
         return (

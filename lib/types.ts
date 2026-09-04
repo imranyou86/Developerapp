@@ -234,6 +234,44 @@ export interface CostBreakdownLine {
   description: string;
 }
 
+export type UserRole = "owner" | "pm" | "contractor" | "developer";
+
+export interface Profile {
+  id: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface TabPermission {
+  role: UserRole;
+  tab: string;
+  allowed: boolean;
+}
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: UserRole;
+  invited_by: string | null;
+  created_at: string;
+}
+
+export type InviteStatus = "pending" | "accepted" | "revoked";
+
+export interface ProjectInvite {
+  id: string;
+  project_id: string;
+  email: string;
+  role: UserRole;
+  invited_by: string;
+  token: string;
+  status: InviteStatus;
+  created_at: string;
+  accepted_at: string | null;
+}
+
 export interface CostEstimate {
   id: string;
   project_id: string;

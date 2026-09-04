@@ -21,6 +21,7 @@ function LoginForm() {
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"owner" | "pm" | "contractor">("owner");
   const [status, setStatus] = useState<{ kind: "idle" | "loading" | "error" | "sent"; message?: string }>({
     kind: "idle",
   });
@@ -47,7 +48,10 @@ function LoginForm() {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
+          data: { role },
+        },
       });
       if (error) {
         setStatus({ kind: "error", message: error.message });
@@ -107,6 +111,22 @@ function LoginForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
               />
+            </div>
+          )}
+
+          {mode === "sign-up" && (
+            <div>
+              <label className="label" htmlFor="role">
+                Login type
+              </label>
+              <select id="role" className="input" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
+                <option value="owner">Owner</option>
+                <option value="pm">PM</option>
+                <option value="contractor">Contractor</option>
+              </select>
+              <p className="mt-1 text-xs text-blueprint/40">
+                A Developer account is granted by an existing Developer, not chosen here.
+              </p>
             </div>
           )}
 

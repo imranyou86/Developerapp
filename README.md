@@ -174,6 +174,29 @@ yet; each one only adds what a given feature needed.
   originating feature-table row (`source_table`/`source_id` are null) and
   can be removed from this tab directly — auto-mirrored files can't, since
   removing them here without touching their source tab would desync the two.
+- **Roles & permissions** — every account has a login type: Owner, PM,
+  Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
+  trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer
+  by `supabase/migrations/012_permissions.sql`). Developer is an admin role,
+  granted only by an existing Developer from the **Admin** page's Users
+  section (not selectable at sign-up). Only a Developer can invite someone
+  onto a construction — the "Invite" button next to "Share" on a project
+  page (Developer-only) creates a `project_invites` row with a role and a
+  one-time link; there's no email sending configured, so the Developer
+  copies the link and sends it however they like. The invitee accepts it at
+  `/invite/[token]` once signed in with the matching email, which creates a
+  `project_members` row for them. From the Admin page a Developer can also
+  edit the **tab permission matrix** — which project tabs (Plan, Rooms,
+  Finish ID, Checklist, Budget, Cost, Payments, Files) each role can see;
+  Developer itself always has every tab regardless of that table. Every
+  RLS policy that used to check `projects.user_id = auth.uid()` now goes
+  through a `has_project_access(project_id)` SQL helper that also allows a
+  `project_members` row or a Developer account, so an invited PM/Contractor
+  actually gets real data access to a project, not just a visible shell.
+  Tab-permission enforcement itself (which tabs render/redirect) happens in
+  the app layer (`app/projects/[id]/layout.tsx` + `TabAccessGuard`), not RLS
+  — RLS controls data access per project, the tab matrix controls which of
+  that project's pages a role is shown.
 - **Finish ID's product search** — sends the actual scan photo alongside the
   text description to Claude (vision + web search in one call), and is
   explicitly instructed to cross-check each search result's own product

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ProjectsClient, type ProjectSummary } from "@/app/projects/projects-client";
 import { TopNav } from "@/components/TopNav";
+import { getCurrentUser } from "@/lib/permissions-server";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function ProjectsPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const currentUser = await getCurrentUser();
 
   const { data, error } = await supabase
     .from("projects")
@@ -65,7 +67,7 @@ export default async function ProjectsPage() {
             </button>
           </form>
         </div>
-        <TopNav />
+        <TopNav showAdmin={currentUser?.role === "developer"} />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">

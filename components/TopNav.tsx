@@ -8,12 +8,13 @@ const TABS = [
   { href: "/deals", label: "Buyers Guide" },
 ];
 
-export function TopNav() {
+export function TopNav({ showAdmin }: { showAdmin?: boolean } = {}) {
   const pathname = usePathname();
+  const tabs = showAdmin ? [...TABS, { href: "/admin", label: "Admin" }] : TABS;
 
   return (
     <nav className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-6">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = pathname?.startsWith(tab.href);
         return (
           <Link
