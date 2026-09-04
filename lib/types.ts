@@ -353,3 +353,46 @@ export interface Subcontractor {
   created_at: string;
 }
 
+export interface COClearance {
+  code: string | null;
+  description: string;
+}
+
+export interface COPermit {
+  permit_number: string | null;
+  type: string | null;
+  status: string | null;
+  issued_date: string | null;
+  description: string | null;
+}
+
+export interface COInspector {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  department: string | null;
+}
+
+// One row per project (app/projects/[id]/certificate-of-occupancy/), kept
+// current rather than kept as history — "Update information" overwrites
+// this row with a fresh lookup rather than accumulating past checks, since
+// what matters here is the current status, not a timeline of past ones.
+// Best-effort AI web search against public records (primarily LADBS), not
+// a live query against the department's own database — see `confidence`/
+// `notes` for how much to trust a given result.
+export interface CertificateOfOccupancy {
+  id: string;
+  project_id: string;
+  status: string | null;
+  co_number: string | null;
+  issued_date: string | null;
+  open_clearances: COClearance[];
+  permits: COPermit[];
+  inspector: COInspector | null;
+  source_url: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  notes: string | null;
+  last_checked_at: string;
+  created_at: string;
+}
+

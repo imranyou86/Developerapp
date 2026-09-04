@@ -283,7 +283,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals', 'subcontractors')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -354,6 +354,28 @@ create table if not exists project_subcontractors (
   unique (project_id, subcontractor_id)
 );
 
+-- One row per project, kept current rather than kept as history — the
+-- "Update information" button overwrites this row with a fresh lookup
+-- (see app/api/claude/lookup-certificate-of-occupancy) rather than
+-- accumulating past checks, since what matters here is the current
+-- status. Best-effort AI web search against public records (primarily
+-- LADBS), not a live query against the department's own database.
+create table if not exists certificate_of_occupancy_checks (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null unique references projects (id) on delete cascade,
+  status text,
+  co_number text,
+  issued_date text,
+  open_clearances jsonb not null default '[]'::jsonb,
+  permits jsonb not null default '[]'::jsonb,
+  inspector jsonb,
+  source_url text,
+  confidence text check (confidence in ('high', 'medium', 'low')),
+  notes text,
+  last_checked_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -383,16 +405,19 @@ create index if not exists idx_subcontractors_created_by on subcontractors (crea
 create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
 create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
 create index if not exists idx_project_subcontractors_sub on project_subcontractors (subcontractor_id);
+create index if not exists idx_certificate_of_occupancy_checks_project on certificate_of_occupancy_checks (project_id);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
 -- defaults to the field-facing tabs only (no financials/deal analysis, and
 -- no sub cost/reliability info) — all Developer-editable afterwards from
--- the Admin page.
+-- the Admin page. Certificate of Occupancy defaults visible to everyone,
+-- Contractor included — inspection/clearance status is field-relevant
+-- info, not a financial tab.
 insert into tab_permissions (role, tab, allowed)
 select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'payments', 'deals', 'subcontractors') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals'), ('subcontractors')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -470,6 +495,7 @@ alter table project_members enable row level security;
 alter table project_invites enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
+alter table certificate_of_occupancy_checks enable row level security;
 
 -- security definer so they can be called from other tables' RLS policies
 -- without recursing back through THEIR RLS.
@@ -588,6 +614,9 @@ create policy "subcontractors_delete" on subcontractors
 -- Scoped by project access, not by who added the subcontractor row — any
 -- project member can tag a sub as being used on their project.
 create policy "project_subcontractors_member" on project_subcontractors
+  for all using (has_project_access(project_id)) with check (has_project_access(project_id));
+
+create policy "certificate_of_occupancy_checks_member" on certificate_of_occupancy_checks
   for all using (has_project_access(project_id)) with check (has_project_access(project_id));
 
 create policy "project_files_member" on project_files

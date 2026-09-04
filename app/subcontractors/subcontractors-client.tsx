@@ -11,6 +11,7 @@ import {
   updateSubcontractor,
   type SubcontractorInput,
 } from "@/app/subcontractors/actions";
+import { telHref } from "@/lib/phone";
 import type { Subcontractor } from "@/lib/types";
 
 interface ProjectOption {
@@ -56,15 +57,6 @@ function Stars({ value }: { value: number | null }) {
       <span className="text-blueprint/20">{"★".repeat(5 - value)}</span>
     </span>
   );
-}
-
-// tel: links work with most formatting, but stripping to digits (keeping a
-// leading +) is the most reliably dialable form across phone apps rather
-// than passing through however the number was typed in (parens, dashes,
-// extra spaces).
-function telHref(phone: string): string {
-  const cleaned = phone.replace(/[^\d+]/g, "");
-  return `tel:${cleaned}`;
 }
 
 function CostTier({ value }: { value: number | null }) {

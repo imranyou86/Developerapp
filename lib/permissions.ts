@@ -30,6 +30,7 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "cost", label: "Construction Cost" },
   { slug: "payments", label: "Payments" },
   { slug: "files", label: "Files" },
+  { slug: "certificate-of-occupancy", label: "Certificate of Occupancy" },
 ];
 
 // Top-level (not per-project) sections gated the same way as project tabs.

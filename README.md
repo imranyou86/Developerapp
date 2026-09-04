@@ -80,6 +80,37 @@ yet; each one only adds what a given feature needed.
 
 ## Feature notes
 
+- **Certificate of Occupancy** (the last per-project tab, `PROJECT_TABS` in
+  `lib/permissions.ts`, `certificate-of-occupancy` slug — defaults visible
+  to every role including Contractor, since inspection/clearance status is
+  field-relevant, not a financial tab) — looks up the construction's
+  Certificate of Occupancy status from its address: whether one's been
+  issued (and its CO number/issue date if so), any open or remaining
+  clearances blocking it, every issued permit it can find, and inspector
+  contact info when available (phone/email render as tap-to-call/email
+  `tel:`/`mailto:` links via the same `lib/phone.ts` helper Subcontractors
+  uses). One row per project (`certificate_of_occupancy_checks`, unique on
+  `project_id`) that "Update information" overwrites in place rather than
+  accumulating history — this is about current status, not a timeline of
+  past checks. If the construction has no address on file yet, the tab
+  shows an inline "enter one" field instead of the report — saving it
+  writes straight to `projects.address` (via the existing `renameProject`
+  action, so it's consistent everywhere else in the app that uses it, not
+  a separate one-off address) and immediately kicks off the first check.
+  `app/api/claude/lookup-certificate-of-occupancy` does the actual
+  research — Claude with the same bounded web-search tool used for the
+  Buyers Guide's zoning/property-detail lookups (`web_search_20250305`,
+  capped uses, low thinking effort, 30s `maxDuration` to fit a serverless
+  function), primarily targeting LADBS (Los Angeles Department of Building
+  and Safety). This is inherently best-effort: LADBS's own permit-lookup
+  portal is an interactive form a general web search often can't reach
+  directly, so the prompt explicitly tells Claude to be honest about that
+  limitation (say what's missing in `notes`, keep `confidence` at
+  medium/low) rather than presenting a search-engine guess as fact — never
+  invent a CO/permit number or inspector name. The tab carries a standing
+  disclaimer that this only covers LADBS's jurisdiction (City of LA) and
+  is a research aid to verify against LADBS directly, not a live query
+  against their database.
 - **Subcontractors** (top-level, next to Buyers Guide/Interior Design —
   gated by the same `tab_permissions` matrix, `subcontractors` tab, default
   hidden for Contractor) — a shared directory (`app/subcontractors/`), not
@@ -494,10 +525,11 @@ yet; each one only adds what a given feature needed.
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
-  which sections each role can see, covering both the 8 per-project tabs
-  (Plan, Rooms, Finish ID, Checklist, Budget, Cost, Payments, Files) and the
-  top-level tabs (Buyers Guide/`deals`, Interior Design, Subcontractors);
-  Developer itself always has every tab regardless of that table. Every RLS policy that used to check
+  which sections each role can see, covering both the 9 per-project tabs
+  (Plan, Rooms, Finish ID, Checklist, Budget, Cost, Payments, Files,
+  Certificate of Occupancy) and the top-level tabs (Buyers Guide/`deals`,
+  Interior Design, Subcontractors); Developer itself always has every tab
+  regardless of that table. Every RLS policy that used to check
   `projects.user_id = auth.uid()` now goes through a
   `has_project_access(project_id)` SQL helper that also allows a
   `project_members` row or a Developer account, so an invited PM/Contractor
