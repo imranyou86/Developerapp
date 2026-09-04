@@ -173,6 +173,17 @@ export interface ProjectFile {
   created_at: string;
 }
 
+export interface PlacedFixture {
+  id: string;
+  typeId: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  rotated: boolean;
+}
+
 export interface InteriorDesign {
   id: string;
   project_id: string;
@@ -182,7 +193,8 @@ export interface InteriorDesign {
   width: number | null;
   depth: number | null;
   sqft: number | null;
-  original_photo_url: string;
+  layout: PlacedFixture[];
+  original_photo_url: string | null;
   generated_image_url: string;
   prompt: string;
   created_at: string;

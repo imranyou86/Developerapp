@@ -96,31 +96,58 @@ yet; each one only adds what a given feature needed.
   ChatGPT/Midjourney by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
 - **Interior Design** (top-level, next to Buyers Guide — not a per-project
-  tab) — redesigns a real photo of an empty or framed-out room. Pick which
-  construction it's for first (`app/interior-design/project-picker.tsx`,
-  auto-selected when there's only one), then upload the photo, pick a room
-  type and a style (5 quick-fill presets from the same palette list as
-  Rooms & Tasks, or type your own), and size the room either by selecting
-  one of that project's pre-added rooms (auto-fills width/depth from
-  `rooms`) or entering dimensions/sqft manually. Unlike Rooms & Tasks'
-  text-to-image "Generate image", this uses OpenAI's image *edit* endpoint
-  (`editRoomImage` in `lib/openai.ts`, POST `/api/openai/edit-room-image`)
-  — an image-to-image call seeded with the actual uploaded photo, not a
-  blank canvas, so the room's real architecture/windows/layout come
-  through in the result rather than being invented. The prompt itself is
-  built deterministically (`lib/interiorDesignPrompt.ts`, no Claude
-  round-trip) — short and front-loaded, the same lesson learned tuning
-  Rooms & Tasks' prompts. Every past design for a project is kept (not
-  overwritten) in a gallery with both the before photo and the generated
-  result, "Copy prompt", and "Save image"; deleting one removes both
-  images and their File Library entries. Still belongs to a project under
-  the hood (`interior_designs.project_id`) — being top-level only changes
-  where you start (pick the construction up front, same as picking a deal
-  in Buyers Guide) — and it's gated by the same tab_permissions row
-  (`interior-design`) as before, just reclassified from `PROJECT_TABS` to
-  `TOP_LEVEL_TABS` in `lib/permissions.ts` (no migration needed for that,
-  the DB doesn't distinguish the two). Requires `OPENAI_API_KEY` like the
-  Rooms tab's image generation does.
+  tab) — designs a room, optionally starting from a real photo of it
+  empty/framed-out. Pick which construction it's for first
+  (`app/interior-design/project-picker.tsx`, auto-selected when there's
+  only one), then pick a room type and a style (5 quick-fill presets from
+  the same palette list as Rooms & Tasks, or type your own), and size the
+  room either by selecting one of that project's pre-added rooms
+  (auto-fills width/depth from `rooms`) or entering dimensions/sqft
+  manually.
+  - **2D layout editor** (`app/interior-design/room-layout-editor.tsx`) —
+    once the room has real dimensions, a scaled top-down SVG of it appears
+    with a palette of draggable fixtures/furniture specific to the room
+    type (`lib/fixtureCatalog.ts` — cabinets/island/range/fridge for a
+    Kitchen, toilet/shower/tub/vanity for a Bathroom, bed/dresser for a
+    Bedroom, etc.). Drag a chip from the palette onto the room to place it
+    at that spot; drag a placed item to reposition it; a small toolbar
+    rotates 90° or deletes the selected item. Positions snap to a 0.5ft
+    grid and clamp to stay inside the room, including when you switch
+    rooms mid-edit. Built with pointer events (not the HTML5 Drag and Drop
+    API, which is unreliable on touch) — dragging in from the palette
+    tracks `window` pointermove/pointerup while a floating preview follows
+    the cursor; repositioning a placed item uses native pointer capture on
+    that element instead, so it keeps tracking even if the cursor leaves
+    it mid-drag.
+  - **Rendering from the layout** — `lib/interiorDesignPrompt.ts`'s
+    `describeLayout` turns the placed items into a plain-language
+    placement sentence ("kitchen island centered in the room; base
+    cabinets along the back wall; …", derived from each item's position
+    relative to the room, since an image model can't use real
+    coordinates) and folds it into the same deterministic prompt
+    (`buildInteriorDesignPrompt`, still no Claude round-trip) used for the
+    photo. The uploaded photo is now optional: with one, it's still
+    OpenAI's image *edit* endpoint (`editRoomImage` in `lib/openai.ts`,
+    POST `/api/openai/edit-room-image`) — image-to-image seeded with the
+    real photo so the actual architecture/windows carry through; without
+    one, it falls back to the Rooms tab's existing text-to-image endpoint
+    (`generateRoomImage`, POST `/api/openai/generate-room-image`) and
+    generates the room from scratch using the room type, style, and
+    layout description alone.
+  - Every past design for a project is kept (not overwritten) in a
+    gallery with the generated result, the before photo when there was
+    one, a "N fixtures laid out" note, "Copy prompt", and "Save image";
+    deleting one removes its images and File Library entries. The layout
+    itself is saved too (`interior_designs.layout`, jsonb array of
+    `{id, typeId, label, x, y, width, depth, rotated}` in feet from the
+    room's top-left).
+  - Still belongs to a project under the hood
+    (`interior_designs.project_id`) — being top-level only changes where
+    you start (pick the construction up front, same as picking a deal in
+    Buyers Guide) — and it's gated by the same tab_permissions row
+    (`interior-design`), just reclassified from `PROJECT_TABS` to
+    `TOP_LEVEL_TABS` in `lib/permissions.ts`. Requires `OPENAI_API_KEY`
+    like the Rooms tab's image generation does.
 - **Construction Cost tab** — Claude reads every plan page marked "Floor
   plan layout" on the Plan tab and, grounded by a couple of web searches for
   current regional (or national, if no address) construction cost data, picks

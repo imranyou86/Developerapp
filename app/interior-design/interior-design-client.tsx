@@ -9,9 +9,10 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { STYLE_PALETTES } from "@/lib/styles";
 import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes";
-import { buildInteriorDesignPrompt } from "@/lib/interiorDesignPrompt";
+import { buildInteriorDesignPrompt, describeLayout } from "@/lib/interiorDesignPrompt";
+import { RoomLayoutEditor, clampItemsToRoom } from "@/app/interior-design/room-layout-editor";
 import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
-import type { InteriorDesign } from "@/lib/types";
+import type { InteriorDesign, PlacedFixture } from "@/lib/types";
 
 interface RoomOption {
   id: string;
@@ -50,12 +51,23 @@ export function InteriorDesignClient({
   const [width, setWidth] = useState<string>(rooms[0]?.width != null ? String(rooms[0].width) : "");
   const [depth, setDepth] = useState<string>(rooms[0]?.depth != null ? String(rooms[0].depth) : "");
   const [sqft, setSqft] = useState<string>("");
+  const [layout, setLayout] = useState<PlacedFixture[]>([]);
+
+  const numWidth = Number(width);
+  const numDepth = Number(depth);
+  const hasRoomDims = numWidth > 0 && numDepth > 0;
 
   useEffect(() => {
-    const w = Number(width);
-    const d = Number(depth);
-    if (w > 0 && d > 0) setSqft(String(Math.round(w * d)));
+    if (numWidth > 0 && numDepth > 0) setSqft(String(Math.round(numWidth * numDepth)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, depth]);
+
+  // Keep placed fixtures inside the room whenever its dimensions change
+  // (switching the selected pre-added room, or editing manual sizing).
+  useEffect(() => {
+    if (hasRoomDims) setLayout((prev) => clampItemsToRoom(prev, numWidth, numDepth));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numWidth, numDepth]);
 
   useEffect(() => {
     return () => {
@@ -97,10 +109,6 @@ export function InteriorDesignClient({
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault();
-    if (!photoFile) {
-      notify("error", "Upload a photo of the room first.");
-      return;
-    }
     if (!style.trim()) {
       notify("error", "Enter a style.");
       return;
@@ -110,19 +118,36 @@ export function InteriorDesignClient({
     const d = depth ? Number(depth) : null;
     const s = sqft ? Number(sqft) : null;
     const roomId = roomSource === "existing" && selectedRoomId ? selectedRoomId : null;
+    const layoutDescription = hasRoomDims ? describeLayout(layout, numWidth, numDepth) : "";
 
     setSubmitting(true);
     try {
       await run(taskKey, `Designing ${roomType.toLowerCase()} — ${style}…`, async () => {
-        const originalUrl = await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original");
+        const originalUrl = photoFile
+          ? await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original")
+          : null;
 
-        const prompt = buildInteriorDesignPrompt({ roomType, style: style.trim(), width: w, depth: d, sqft: s });
-
-        const res = await fetchWithRetry("/api/openai/edit-room-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageUrl: originalUrl, prompt }),
+        const prompt = buildInteriorDesignPrompt({
+          roomType,
+          style: style.trim(),
+          width: w,
+          depth: d,
+          sqft: s,
+          hasPhoto: !!originalUrl,
+          layoutDescription,
         });
+
+        const res = originalUrl
+          ? await fetchWithRetry("/api/openai/edit-room-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ imageUrl: originalUrl, prompt }),
+            })
+          : await fetchWithRetry("/api/openai/generate-room-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prompt }),
+            });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Design generation failed.");
 
@@ -139,6 +164,7 @@ export function InteriorDesignClient({
           width: w,
           depth: d,
           sqft: s,
+          layout,
           originalPhotoUrl: originalUrl,
           generatedImageUrl: generatedUrl,
           prompt,
@@ -155,6 +181,7 @@ export function InteriorDesignClient({
             width: w,
             depth: d,
             sqft: s,
+            layout,
             original_photo_url: originalUrl,
             generated_image_url: generatedUrl,
             prompt,
@@ -206,13 +233,14 @@ export function InteriorDesignClient({
       <div className="card p-4">
         <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Design a room</h2>
         <p className="mb-4 text-xs text-blueprint/50">
-          Upload a photo of an empty or framed-out room. Pick a style and room type, and OpenAI will redesign the
-          actual photo — same architecture and layout, fully finished and furnished.
+          Optionally upload a photo of an empty or framed-out room — OpenAI will redesign that actual photo, same
+          architecture and layout. Without a photo, it generates a new room from scratch using the style, room
+          type, and the layout you lay out below.
         </p>
 
         <form onSubmit={handleGenerate} className="space-y-4">
           <div>
-            <label className="label">Room photo</label>
+            <label className="label">Room photo (optional)</label>
             <input
               ref={fileInputRef}
               type="file"
@@ -316,6 +344,21 @@ export function InteriorDesignClient({
             )}
           </div>
 
+          <div>
+            <label className="label">Room layout (optional)</label>
+            {hasRoomDims ? (
+              <RoomLayoutEditor
+                roomType={roomType}
+                roomWidth={numWidth}
+                roomDepth={numDepth}
+                items={layout}
+                onChange={setLayout}
+              />
+            ) : (
+              <p className="text-xs text-blueprint/40">Enter room dimensions above to lay out fixtures and furniture.</p>
+            )}
+          </div>
+
           <button type="submit" className="btn-amber w-full" disabled={generating}>
             {generating ? "Designing…" : "Design this room"}
           </button>
@@ -323,7 +366,7 @@ export function InteriorDesignClient({
       </div>
 
       {designs.length === 0 ? (
-        <p className="text-sm text-blueprint/50">No designs yet — upload a room photo above to get started.</p>
+        <p className="text-sm text-blueprint/50">No designs yet — fill in the form above to get started.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {designs.map((d) => (
@@ -343,13 +386,16 @@ export function InteriorDesignClient({
                 <p className="mb-2 text-xs text-blueprint/50">
                   {d.width && d.depth ? `${d.width}' x ${d.depth}' — ` : ""}
                   {d.sqft ? `${d.sqft} sqft` : ""}
+                  {d.layout.length > 0 ? ` — ${d.layout.length} fixture${d.layout.length === 1 ? "" : "s"} laid out` : ""}
                 </p>
               )}
               <details className="text-xs">
-                <summary className="cursor-pointer text-amber-dark">Before photo &amp; prompt</summary>
-                <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
-                  <Image src={d.original_photo_url} alt="Before" fill className="object-cover" unoptimized />
-                </div>
+                <summary className="cursor-pointer text-amber-dark">{d.original_photo_url ? "Before photo & prompt" : "Prompt"}</summary>
+                {d.original_photo_url && (
+                  <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
+                    <Image src={d.original_photo_url} alt="Before" fill className="object-cover" unoptimized />
+                  </div>
+                )}
                 <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{d.prompt}</p>
                 <button className="btn-ghost mt-1 text-xs" onClick={() => handleCopyPrompt(d.prompt)}>
                   Copy prompt
@@ -369,7 +415,7 @@ export function InteriorDesignClient({
       <ConfirmDialog
         open={!!deleting}
         title="Delete this design?"
-        message="The before photo and generated design will be permanently removed."
+        message="The generated design (and before photo, if any) will be permanently removed."
         confirmLabel="Delete"
         danger
         onCancel={() => setDeleting(null)}

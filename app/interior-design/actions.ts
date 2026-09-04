@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import type { ActionResult } from "@/app/projects/actions";
+import type { PlacedFixture } from "@/lib/types";
 
 function revalidate(projectId: string) {
   revalidatePath(`/interior-design`);
@@ -17,7 +18,8 @@ export interface SaveInteriorDesignInput {
   width: number | null;
   depth: number | null;
   sqft: number | null;
-  originalPhotoUrl: string;
+  layout: PlacedFixture[];
+  originalPhotoUrl: string | null;
   generatedImageUrl: string;
   prompt: string;
 }
@@ -34,6 +36,7 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
       width: input.width,
       depth: input.depth,
       sqft: input.sqft,
+      layout: input.layout,
       original_photo_url: input.originalPhotoUrl,
       generated_image_url: input.generatedImageUrl,
       prompt: input.prompt,
@@ -43,17 +46,19 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
   if (error) return { ok: false, error: error.message };
 
   const label = `${input.roomType} — ${input.style}`;
-  // Two files per design row (the "before" photo and the AI "after"
-  // render), so each gets its own source_id — the unique index on
+  // Two files per design row (the "before" photo, if any, and the AI
+  // "after" render), so each gets its own source_id — the unique index on
   // (source_table, source_id) is per-row, not per-design.
-  await recordProjectFile(supabase, {
-    projectId,
-    storageUrl: input.originalPhotoUrl,
-    fileName: `${label} (before)`,
-    category: "photo",
-    sourceTable: "interior_designs",
-    sourceId: `${data.id}:original`,
-  });
+  if (input.originalPhotoUrl) {
+    await recordProjectFile(supabase, {
+      projectId,
+      storageUrl: input.originalPhotoUrl,
+      fileName: `${label} (before)`,
+      category: "photo",
+      sourceTable: "interior_designs",
+      sourceId: `${data.id}:original`,
+    });
+  }
   await recordProjectFile(supabase, {
     projectId,
     storageUrl: input.generatedImageUrl,

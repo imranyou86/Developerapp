@@ -90,7 +90,7 @@ async function loadDesigns(projectId: string) {
   const { data } = await supabase
     .from("interior_designs")
     .select(
-      "id, project_id, room_id, room_type, style, width, depth, sqft, original_photo_url, generated_image_url, prompt, created_at"
+      "id, project_id, room_id, room_type, style, width, depth, sqft, layout, original_photo_url, generated_image_url, prompt, created_at"
     )
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });

@@ -119,8 +119,11 @@ create table if not exists renderings (
   created_at timestamptz not null default now()
 );
 
--- Interior Design tab: a photo of an empty/framed room, redesigned in
--- place by OpenAI's image-edit API given a style + room type + sizing.
+-- Interior Design tab: an optional photo of an empty/framed room (edited in
+-- place by OpenAI's image-edit API) or, with no photo, a from-scratch
+-- generation — either way given a style + room type + sizing + a 2D
+-- fixture/furniture layout laid out in the UI (array of {id, typeId,
+-- label, x, y, width, depth, rotated}, in feet from the room's top-left).
 -- room_id is optional — sizing can come from a pre-added room (rooms.id)
 -- or be entered manually, so this isn't required to point at one.
 create table if not exists interior_designs (
@@ -132,7 +135,8 @@ create table if not exists interior_designs (
   width numeric,
   depth numeric,
   sqft numeric,
-  original_photo_url text not null,
+  layout jsonb not null default '[]'::jsonb,
+  original_photo_url text,
   generated_image_url text not null,
   prompt text not null,
   created_at timestamptz not null default now()
