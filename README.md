@@ -125,8 +125,14 @@ yet; each one only adds what a given feature needed.
   up server-side, entirely bypassing RLS for that one path; the browser
   never gets a Supabase key capable of reading other users' data.
 - **Buyers Guide tab** (top-level, not per-project) — search homes for sale
-  by ZIP via the RentCast API, or paste in a specific address (e.g. from a
-  Zillow listing) directly. Running an analysis estimates construction cost
+  by ZIP via the RentCast API, or paste in a specific listing directly. For a
+  specific listing, pasting the URL (Zillow, Redfin, etc.) and clicking
+  "Look up listing" fills in the address/price/beds/baths/sqft/lot
+  size/year built for review before saving — Claude never fetches the URL
+  itself (most listing sites block that), it parses the address out of the
+  URL text and grounds the rest with web search, same as
+  `lookup-property-details`. Manual entry is still there as a fallback if
+  the lookup can't find something. Running an analysis estimates construction cost
   from square footage at an editable $/sqft rate, then uses Claude with web
   search to find comps (recently sold, prioritizing renovated/new-construction
   comps) and estimate the after-repair/rebuild value (ARV). The buy/pass

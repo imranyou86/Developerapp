@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteDeal, saveDeal, saveManualDeal } from "@/app/deals/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -49,6 +50,7 @@ function currency(n: number | null): string {
 
 export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
   const router = useRouter();
   const [zip, setZip] = useState("");
   const [searching, setSearching] = useState(false);
@@ -72,6 +74,54 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
     listing_url: "",
   });
   const [savingManual, setSavingManual] = useState(false);
+  const [lookingUpListing, setLookingUpListing] = useState(false);
+  const lookupTaskKey = "deal-listing-lookup";
+
+  async function handleLookupListing() {
+    if (!manual.listing_url.trim()) {
+      notify("error", "Paste a listing URL first.");
+      return;
+    }
+    setLookingUpListing(true);
+    try {
+      await run(lookupTaskKey, "Looking up listing…", async () => {
+        const res = await fetchWithRetry("/api/claude/lookup-listing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listingUrl: manual.listing_url.trim() }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
+
+        if (!json.address) {
+          notify("error", "Couldn't find this listing from that URL — enter the details manually below.");
+          return;
+        }
+
+        setManual((m) => ({
+          ...m,
+          address: json.address ?? m.address,
+          city: json.city ?? m.city,
+          state: json.state ?? m.state,
+          zip_code: json.zip_code ?? m.zip_code,
+          list_price: json.list_price != null ? String(json.list_price) : m.list_price,
+          beds: json.beds != null ? String(json.beds) : m.beds,
+          baths: json.baths != null ? String(json.baths) : m.baths,
+          sqft: json.sqft != null ? String(json.sqft) : m.sqft,
+          lot_size: json.lot_size != null ? String(json.lot_size) : m.lot_size,
+          year_built: json.year_built != null ? String(json.year_built) : m.year_built,
+        }));
+        notify(
+          "success",
+          `Found it (${json.confidence} confidence${json.source ? ` via ${json.source}` : ""}) — review the details below and save.`
+        );
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Lookup failed.");
+    } finally {
+      setLookingUpListing(false);
+    }
+  }
 
   async function handleSaveManual(e: React.FormEvent) {
     e.preventDefault();
@@ -183,9 +233,30 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
         {showManual && (
           <form onSubmit={handleSaveManual} className="mt-4 space-y-3">
             <p className="text-xs text-blueprint/50">
-              Paste in the address and whatever details are on the listing — we&apos;ll pull comps and
-              a value estimate for it when you run the analysis.
+              Paste the listing URL and click &quot;Look up listing&quot; — it&apos;ll fill in the
+              address and details below for you to review. Or skip straight to entering them by
+              hand.
             </p>
+            <div>
+              <label className="label">Listing URL</label>
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  type="url"
+                  value={manual.listing_url}
+                  onChange={(e) => setManual((m) => ({ ...m, listing_url: e.target.value }))}
+                  placeholder="https://www.zillow.com/homedetails/..."
+                />
+                <button
+                  type="button"
+                  className="btn-outline shrink-0 text-xs"
+                  onClick={handleLookupListing}
+                  disabled={lookingUpListing || isRunning(lookupTaskKey) || !manual.listing_url.trim()}
+                >
+                  {lookingUpListing || isRunning(lookupTaskKey) ? "Looking up…" : "Look up listing"}
+                </button>
+              </div>
+            </div>
             <div>
               <label className="label">Street address</label>
               <input
@@ -247,16 +318,6 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
                 <label className="label">Year built</label>
                 <input className="input" type="number" value={manual.year_built} onChange={(e) => setManual((m) => ({ ...m, year_built: e.target.value }))} />
               </div>
-            </div>
-            <div>
-              <label className="label">Listing URL (optional)</label>
-              <input
-                className="input"
-                type="url"
-                value={manual.listing_url}
-                onChange={(e) => setManual((m) => ({ ...m, listing_url: e.target.value }))}
-                placeholder="https://www.zillow.com/homedetails/..."
-              />
             </div>
             <button type="submit" className="btn-amber w-full" disabled={savingManual}>
               {savingManual ? "Saving…" : "Save & analyze this address"}
