@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
@@ -9,9 +10,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { STYLE_PALETTES, getPalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
 import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projects/[id]/rooms/actions";
+import { saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { FINISH_CATEGORIES } from "@/lib/finishes-db";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
-import type { StyleName } from "@/lib/types";
+import type { IdentifiedFinish, StyleName } from "@/lib/types";
+
+const FINISH_CATEGORY_SET = new Set<string>(FINISH_CATEGORIES);
 
 export function RenderingPanel({
   projectId,
@@ -24,11 +29,82 @@ export function RenderingPanel({
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
+  const router = useRouter();
   const [generating, setGenerating] = useState<StyleName | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
   const [generatingImageFor, setGeneratingImageFor] = useState<string | null>(null);
+  const [sendingToFinishId, setSendingToFinishId] = useState<string | null>(null);
+
+  async function handleCopyPrompt(prompt: string) {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      notify("success", "Prompt copied.");
+    } catch {
+      notify("error", "Could not copy — your browser blocked clipboard access.");
+    }
+  }
+
+  async function handleSaveImage(url: string, label: string) {
+    try {
+      const res = await fetchWithRetry(url);
+      if (!res.ok) throw new Error("Could not fetch the image.");
+      const blob = await res.blob();
+      const ext = blob.type.split("/")[1]?.split("+")[0] || "png";
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `${label.replace(/[^a-z0-9]+/gi, "-")}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not save image.");
+    }
+  }
+
+  async function handleSendToFinishId(rendering: RoomWithRelations["renderings"][number]) {
+    if (!rendering.uploaded_photo_url) return;
+    setSendingToFinishId(rendering.id);
+    const taskKey = `send-to-finish-id:${rendering.id}`;
+    try {
+      await run(taskKey, `Analyzing "${room.name}" — ${rendering.style} for finishes…`, async () => {
+        const res = await fetchWithRetry("/api/claude/identify-finishes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: rendering.uploaded_photo_url }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Finish identification failed.");
+
+        const results: IdentifiedFinish[] = (json.items ?? []).map((item: IdentifiedFinish) => ({
+          name: item.name,
+          category: FINISH_CATEGORY_SET.has(item.category) ? item.category : "Other",
+          description: item.description,
+          color: item.color,
+          confidence: item.confidence,
+        }));
+
+        const label = `${room.name} — ${rendering.style}`;
+        const saveRes = await saveFinishScan(projectId, rendering.uploaded_photo_url!, label, results);
+        if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save scan.");
+
+        notify(
+          "success",
+          results.length === 0
+            ? "Sent to Finish ID — no identifiable finishes found."
+            : `Sent to Finish ID — identified ${results.length} finish(es).`
+        );
+        router.push(`/projects/${projectId}/finish-id`);
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not send to Finish ID.");
+    } finally {
+      setSendingToFinishId(null);
+    }
+  }
 
   async function uploadPhotoBlob(renderingId: string, blob: Blob, fileExt: string) {
     const supabase = createClient();
@@ -203,9 +279,15 @@ export function RenderingPanel({
                 <details className="text-xs">
                   <summary className="cursor-pointer text-amber-dark">Image prompt (used by &quot;Generate image&quot;, or copy to ChatGPT/Midjourney by hand)</summary>
                   <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{r.image_prompt}</p>
+                  <button
+                    className="btn-ghost mt-1 text-xs"
+                    onClick={() => handleCopyPrompt(r.image_prompt!)}
+                  >
+                    Copy prompt
+                  </button>
                 </details>
               )}
-              <div className="mt-2 flex gap-1.5">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {r.image_prompt && (
                   <button
                     className="btn-amber flex-1 text-xs"
@@ -238,6 +320,25 @@ export function RenderingPanel({
                       ? "Replace photo"
                       : "Upload photo"}
                 </button>
+                {r.uploaded_photo_url && (
+                  <>
+                    <button
+                      className="btn-ghost flex-1 text-xs"
+                      onClick={() => handleSaveImage(r.uploaded_photo_url!, `${room.name}-${r.style}`)}
+                    >
+                      Save image
+                    </button>
+                    <button
+                      className="btn-ghost flex-1 text-xs"
+                      onClick={() => handleSendToFinishId(r)}
+                      disabled={sendingToFinishId === r.id || isRunning(`send-to-finish-id:${r.id}`)}
+                    >
+                      {sendingToFinishId === r.id || isRunning(`send-to-finish-id:${r.id}`)
+                        ? "Sending…"
+                        : "Send to Finish ID"}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}

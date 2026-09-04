@@ -331,7 +331,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               </Link>
             ) : (
               <button className="btn-amber ml-auto text-xs" onClick={() => setShowConvertConfirm(true)}>
-                Convert to construction project
+                Build this
               </button>
             )}
           </div>
@@ -466,9 +466,9 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
 
       <ConfirmDialog
         open={showConvertConfirm}
-        title="Convert to construction project?"
+        title="Build this?"
         message="This creates a new construction with this address, ready for you to add rooms, budget, checklist, and everything else. The deal record stays linked to it."
-        confirmLabel="Create construction"
+        confirmLabel="Build this"
         busy={converting}
         onCancel={() => setShowConvertConfirm(false)}
         onConfirm={handleConvert}
