@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { HashSessionBridge } from "@/app/invite/[token]/hash-session-bridge";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +36,12 @@ export default async function InvitePage({ params }: { params: { token: string }
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Middleware already sends unauthenticated visitors to /login?next=..., but
-  // guard here too in case this page is ever reached without a session.
+  // No cookie-based session yet — before assuming they're just not signed
+  // in, check client-side for a hash-fragment session (see
+  // HashSessionBridge's comment) rather than immediately bouncing to
+  // /login, since that's the common case for an invite email link.
   if (!user) {
-    redirect(`/login?next=${encodeURIComponent(`/invite/${params.token}`)}`);
+    return <HashSessionBridge token={params.token} />;
   }
 
   const admin = createAdminClient();
@@ -91,5 +94,9 @@ export default async function InvitePage({ params }: { params: { token: string }
     .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", invite.id);
 
-  redirect(`/projects/${invite.project_id}`);
+  // An account created via admin.inviteUserByEmail has no password at all —
+  // route through an optional "set a password" step rather than straight to
+  // the project, since otherwise the only way back in is another emailed
+  // link. Skippable, so this is harmless for someone who already has one.
+  redirect(`/set-password?next=${encodeURIComponent(`/projects/${invite.project_id}`)}`);
 }

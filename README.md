@@ -194,9 +194,31 @@ yet; each one only adds what a given feature needed.
   never blocks creating the invite — if the email doesn't go through (already
   has an account, no SMTP configured, rate-limited), the modal says so and
   the Developer copies the link and sends it manually instead; the link
-  always works regardless of whether the email did. The invitee accepts it
-  at `/invite/[token]` once signed in with the matching email,
-  which creates a `project_members` row for them; inviting someone as
+  always works regardless of whether the email did.
+
+  **Important Supabase dashboard setup**: Supabase's stock "Invite user"
+  email template (Authentication → Email Templates) links straight to
+  `{{ .SiteURL }}` with the session in the URL *fragment*
+  (`#access_token=...`) rather than through this app's `/auth/confirm`
+  route the way Magic Link/Signup do — clicking it authenticates the
+  browser, but skips the app-level join logic that creates the
+  `project_members` row, so it looks like the invite silently did nothing
+  and the person just lands on the main page. `app/invite/[token]/hash-session-bridge.tsx`
+  works around this — it's what actually appears first when someone clicks
+  an unmodified invite email: it picks the tokens out of the fragment
+  client-side, turns them into a real cookie session, then reloads so the
+  server-side join logic runs. For a cleaner flow (and so Redirect URLs
+  restrictions don't reject `redirectTo`), update the "Invite user"
+  template to `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type={{ .Type }}&next={{ .RedirectTo }}`
+  (matching the other templates) and add `/invite/*` to **Authentication →
+  URL Configuration → Redirect URLs**. An invited account also has no
+  password at all (`admin.inviteUserByEmail` creates it without one), so
+  accepting an invite always routes through `/set-password` next — an
+  optional, skippable "set a password so you can sign in directly next
+  time" step (`app/set-password/`) — before landing in the project.
+  The invitee accepts the invite itself at `/invite/[token]` once signed in
+  with the matching email, which creates a `project_members` row for them;
+  inviting someone as
   "Developer" specifically also promotes their account (`profiles.role`),
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
