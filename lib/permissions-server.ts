@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { PROJECT_TABS, type CurrentUser } from "@/lib/permissions";
+import { PROJECT_TABS, type CurrentUser, type ProjectTabDef } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
 // Server-side only (uses next/headers via lib/supabase/server). Falls back
@@ -18,14 +18,23 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
 // A Developer always has every tab, regardless of what's stored — the
 // tab_permissions table only governs Owner/PM/Contractor and is what the
-// Admin page edits.
-export async function getAllowedTabSlugs(role: UserRole): Promise<string[]> {
-  if (role === "developer") return PROJECT_TABS.map((t) => t.slug);
+// Admin page edits. `tabs` defaults to the per-project tabs but the same
+// table/shape also governs top-level sections like Buyers Guide
+// (lib/permissions.ts's TOP_LEVEL_TABS) — pass that in explicitly there.
+export async function getAllowedTabSlugs(role: UserRole, tabs: ProjectTabDef[] = PROJECT_TABS): Promise<string[]> {
+  if (role === "developer") return tabs.map((t) => t.slug);
 
   const supabase = createClient();
-  const { data } = await supabase.from("tab_permissions").select("tab, allowed").eq("role", role);
-  if (!data) return PROJECT_TABS.map((t) => t.slug);
+  const { data } = await supabase
+    .from("tab_permissions")
+    .select("tab, allowed")
+    .eq("role", role)
+    .in(
+      "tab",
+      tabs.map((t) => t.slug)
+    );
+  if (!data) return tabs.map((t) => t.slug);
 
   const disallowed = new Set(data.filter((row) => !row.allowed).map((row) => row.tab));
-  return PROJECT_TABS.filter((t) => !disallowed.has(t.slug)).map((t) => t.slug);
+  return tabs.filter((t) => !disallowed.has(t.slug)).map((t) => t.slug);
 }

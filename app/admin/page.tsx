@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { AdminClient, type AdminProject, type AdminUser } from "@/app/admin/admin-client";
-import { ROLE_VALUES, PROJECT_TABS } from "@/lib/permissions";
+import { ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
 import type { TabPermission } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,7 @@ export default async function AdminPage() {
   const permMap = new Map((tabPermissions ?? []).map((p: TabPermission) => [`${p.role}:${p.tab}`, p.allowed]));
   const matrix = ROLE_VALUES.filter((r) => r !== "developer").map((role) => ({
     role,
-    tabs: PROJECT_TABS.map((t) => ({ slug: t.slug, label: t.label, allowed: permMap.get(`${role}:${t.slug}`) ?? true })),
+    tabs: ALL_TABS.map((t) => ({ slug: t.slug, label: t.label, allowed: permMap.get(`${role}:${t.slug}`) ?? true })),
   }));
 
   return (

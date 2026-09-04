@@ -75,6 +75,17 @@ export default async function InvitePage({ params }: { params: { token: string }
     return <InviteMessage title="Couldn't join" body={memberError.message} />;
   }
 
+  // Inviting someone as "Developer" is a special case — it's an admin role,
+  // not a per-project one, so accepting it also promotes their account
+  // (profiles.role), granting them full access everywhere and the Admin
+  // page, not just this project.
+  if (invite.role === "developer") {
+    const { error: profileError } = await admin.from("profiles").update({ role: "developer" }).eq("id", user.id);
+    if (profileError) {
+      return <InviteMessage title="Couldn't grant Developer access" body={profileError.message} />;
+    }
+  }
+
   await admin
     .from("project_invites")
     .update({ status: "accepted", accepted_at: new Date().toISOString() })

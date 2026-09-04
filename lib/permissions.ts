@@ -32,6 +32,12 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "files", label: "Files" },
 ];
 
+// Top-level (not per-project) sections gated the same way as project tabs.
+// Shared with components/TopNav.tsx and app/deals/layout.tsx.
+export const TOP_LEVEL_TABS: ProjectTabDef[] = [{ slug: "deals", label: "Buyers Guide" }];
+
+export const ALL_TABS: ProjectTabDef[] = [...PROJECT_TABS, ...TOP_LEVEL_TABS];
+
 export interface CurrentUser {
   id: string;
   email: string | null;

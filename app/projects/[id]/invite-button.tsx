@@ -15,12 +15,11 @@ import {
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
-// Developer isn't an invitable project role — a real Developer account
-// already has full access to every project via is_developer(), so tagging
-// a project_members row "developer" would just be a confusing label with
-// no actual admin effect (that only comes from profiles.role, editable on
-// the Admin page's Users section).
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor"];
+// Inviting someone as "Developer" is a special case, handled on accept
+// (see app/invite/[token]/page.tsx) — it promotes their account role to
+// developer (full admin access everywhere), not just membership on this
+// one project.
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer"];
 
 export function InviteButton({ projectId }: { projectId: string }) {
   const { notify } = useToast();
@@ -132,6 +131,12 @@ export function InviteButton({ projectId }: { projectId: string }) {
               {sending ? "Sending…" : "Invite"}
             </button>
           </form>
+          {role === "developer" && (
+            <p className="-mt-3 text-xs text-amber-700">
+              Developer is an admin role — accepting this invite grants full access to every construction and
+              the Admin page, not just this one.
+            </p>
+          )}
 
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blueprint/50">Members</h3>

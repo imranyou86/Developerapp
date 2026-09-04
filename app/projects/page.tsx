@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { ProjectsClient, type ProjectSummary } from "@/app/projects/projects-client";
 import { TopNav } from "@/components/TopNav";
-import { getCurrentUser } from "@/lib/permissions-server";
+import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
+import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function ProjectsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
+  const showDeals = currentUser ? (await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS)).includes("deals") : false;
 
   const { data, error } = await supabase
     .from("projects")
@@ -67,7 +69,7 @@ export default async function ProjectsPage() {
             </button>
           </form>
         </div>
-        <TopNav showAdmin={currentUser?.role === "developer"} />
+        <TopNav showAdmin={currentUser?.role === "developer"} showDeals={showDeals} />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">

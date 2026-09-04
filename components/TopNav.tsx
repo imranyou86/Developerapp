@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const TABS = [
-  { href: "/projects", label: "Constructions" },
-  { href: "/deals", label: "Buyers Guide" },
-];
-
-export function TopNav({ showAdmin }: { showAdmin?: boolean } = {}) {
+export function TopNav({ showAdmin, showDeals = true }: { showAdmin?: boolean; showDeals?: boolean }) {
   const pathname = usePathname();
-  const tabs = showAdmin ? [...TABS, { href: "/admin", label: "Admin" }] : TABS;
+  const tabs = [
+    { href: "/projects", label: "Constructions" },
+    ...(showDeals ? [{ href: "/deals", label: "Buyers Guide" }] : []),
+    ...(showAdmin ? [{ href: "/admin", label: "Admin" }] : []),
+  ];
 
   return (
     <nav className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-6">

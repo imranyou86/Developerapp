@@ -15,10 +15,12 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ROLE_LABELS, ROLE_VALUES } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
-// Developer isn't an invitable project role — a real Developer account
-// already has full access to every project via is_developer(); that's
-// granted from the Users section below, not a per-project invite.
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor"];
+// Inviting someone as "Developer" is a special case, handled on accept
+// (see app/invite/[token]/page.tsx) — it promotes their account role to
+// developer (full admin access everywhere), not just membership on this
+// one project. A user's role can also be changed directly in the Users
+// section above without going through an invite at all.
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer"];
 
 export interface AdminUser {
   id: string;
@@ -273,6 +275,12 @@ function ProjectInvitePanel({ project }: { project: AdminProject }) {
           {sending ? "Sending…" : "Invite"}
         </button>
       </form>
+      {role === "developer" && (
+        <p className="-mt-3 text-xs text-amber-700">
+          Developer is an admin role — accepting this invite grants full access to every construction and the
+          Admin page, not just this one.
+        </p>
+      )}
 
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blueprint/50">Members</h3>

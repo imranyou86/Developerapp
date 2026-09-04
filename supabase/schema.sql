@@ -254,7 +254,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files')),
+  tab text not null check (tab in ('plan', 'rooms', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -311,12 +311,13 @@ create index if not exists idx_project_invites_project on project_invites (proje
 create index if not exists idx_project_invites_token on project_invites (token);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
--- every tab; Contractor defaults to the field-facing tabs only (no
--- financials) — all Developer-editable afterwards from the Admin page.
+-- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
+-- defaults to the field-facing tabs only (no financials/deal analysis) —
+-- all Developer-editable afterwards from the Admin page.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('finish-id', 'budget', 'cost', 'payments') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('finish-id', 'budget', 'cost', 'payments', 'deals') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new

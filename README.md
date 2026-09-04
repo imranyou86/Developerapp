@@ -178,25 +178,33 @@ yet; each one only adds what a given feature needed.
   Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
   trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer
   by `supabase/migrations/012_permissions.sql`). Developer is an admin role,
-  granted only by an existing Developer from the **Admin** page's Users
-  section (not selectable at sign-up). Only a Developer can invite someone
-  onto a construction — the "Invite" button next to "Share" on a project
-  page (Developer-only) creates a `project_invites` row with a role and a
-  one-time link; there's no email sending configured, so the Developer
-  copies the link and sends it however they like. The invitee accepts it at
-  `/invite/[token]` once signed in with the matching email, which creates a
-  `project_members` row for them. From the Admin page a Developer can also
-  edit the **tab permission matrix** — which project tabs (Plan, Rooms,
-  Finish ID, Checklist, Budget, Cost, Payments, Files) each role can see;
-  Developer itself always has every tab regardless of that table. Every
-  RLS policy that used to check `projects.user_id = auth.uid()` now goes
-  through a `has_project_access(project_id)` SQL helper that also allows a
+  granted either by an existing Developer directly changing someone's role
+  from the **Admin** page's Users section, or by inviting them as
+  "Developer" (see below) — not selectable at sign-up. Only a Developer can
+  invite someone onto a construction — the "Invite" button next to "Share"
+  on a project page (Developer-only) creates a `project_invites` row with a
+  role and a one-time link; there's no email sending configured, so the
+  Developer copies the link and sends it however they like. The invitee
+  accepts it at `/invite/[token]` once signed in with the matching email,
+  which creates a `project_members` row for them; inviting someone as
+  "Developer" specifically also promotes their account (`profiles.role`),
+  since Developer is an admin role, not a per-project one — they get full
+  access everywhere and the Admin page, not just that one project. From the
+  Admin page a Developer can also edit the **tab permission matrix** —
+  which sections each role can see, covering both the 8 per-project tabs
+  (Plan, Rooms, Finish ID, Checklist, Budget, Cost, Payments, Files) and the
+  top-level Buyers Guide tab (`deals`); Developer itself always has every
+  tab regardless of that table. Every RLS policy that used to check
+  `projects.user_id = auth.uid()` now goes through a
+  `has_project_access(project_id)` SQL helper that also allows a
   `project_members` row or a Developer account, so an invited PM/Contractor
   actually gets real data access to a project, not just a visible shell.
-  Tab-permission enforcement itself (which tabs render/redirect) happens in
-  the app layer (`app/projects/[id]/layout.tsx` + `TabAccessGuard`), not RLS
-  — RLS controls data access per project, the tab matrix controls which of
-  that project's pages a role is shown.
+  Tab-permission enforcement itself (which tabs/pages render or redirect)
+  happens in the app layer — `app/projects/[id]/layout.tsx` +
+  `TabAccessGuard` for the per-project tabs, `app/deals/layout.tsx` for
+  Buyers Guide — not RLS: RLS controls data access, the tab matrix controls
+  which pages a role is shown (including whether "Buyers Guide" even
+  appears in the top nav, via `TopNav`'s `showDeals` prop).
 - **Finish ID's product search** — sends the actual scan photo alongside the
   text description to Claude (vision + web search in one call), and is
   explicitly instructed to cross-check each search result's own product
