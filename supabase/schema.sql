@@ -341,6 +341,19 @@ create table if not exists subcontractors (
   created_at timestamptz not null default now()
 );
 
+-- Which subs are being used on which construction — many-to-many, since a
+-- sub works multiple projects and a project uses multiple subs. Scoped by
+-- has_project_access(project_id) rather than the subcontractor's own
+-- created_by, so any project member can tag "we're using this sub here"
+-- regardless of who originally added the sub to the shared directory.
+create table if not exists project_subcontractors (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  subcontractor_id uuid not null references subcontractors (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (project_id, subcontractor_id)
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -368,6 +381,8 @@ create index if not exists idx_project_invites_project on project_invites (proje
 create index if not exists idx_project_invites_token on project_invites (token);
 create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
 create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
+create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
+create index if not exists idx_project_subcontractors_sub on project_subcontractors (subcontractor_id);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
@@ -454,6 +469,7 @@ alter table tab_permissions enable row level security;
 alter table project_members enable row level security;
 alter table project_invites enable row level security;
 alter table subcontractors enable row level security;
+alter table project_subcontractors enable row level security;
 
 -- security definer so they can be called from other tables' RLS policies
 -- without recursing back through THEIR RLS.
@@ -568,6 +584,11 @@ create policy "subcontractors_update" on subcontractors
   for update using (auth.uid() = created_by or is_developer()) with check (auth.uid() = created_by or is_developer());
 create policy "subcontractors_delete" on subcontractors
   for delete using (auth.uid() = created_by or is_developer());
+
+-- Scoped by project access, not by who added the subcontractor row — any
+-- project member can tag a sub as being used on their project.
+create policy "project_subcontractors_member" on project_subcontractors
+  for all using (has_project_access(project_id)) with check (has_project_access(project_id));
 
 create policy "project_files_member" on project_files
   for all using (has_project_access(project_files.project_id))

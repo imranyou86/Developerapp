@@ -85,3 +85,28 @@ export async function deleteSubcontractor(id: string): Promise<ActionResult> {
   revalidatePath("/subcontractors");
   return { ok: true };
 }
+
+// Replaces this sub's project links with exactly `projectIds` — simpler
+// than diffing, and safe under RLS: project_subcontractors_member only lets
+// this delete touch rows for projects the caller actually has access to
+// (has_project_access(project_id)), so a sub linked to a project the caller
+// can't see is untouched by either step, never silently unlinked.
+export async function setSubcontractorProjects(subcontractorId: string, projectIds: string[]): Promise<ActionResult> {
+  const supabase = createClient();
+
+  const { error: delError } = await supabase
+    .from("project_subcontractors")
+    .delete()
+    .eq("subcontractor_id", subcontractorId);
+  if (delError) return { ok: false, error: delError.message };
+
+  if (projectIds.length > 0) {
+    const { error: insError } = await supabase
+      .from("project_subcontractors")
+      .insert(projectIds.map((project_id) => ({ project_id, subcontractor_id: subcontractorId })));
+    if (insError) return { ok: false, error: insError.message };
+  }
+
+  revalidatePath("/subcontractors");
+  return { ok: true };
+}

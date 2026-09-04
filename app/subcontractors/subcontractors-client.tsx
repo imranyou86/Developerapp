@@ -7,10 +7,16 @@ import { useToast } from "@/components/Toast";
 import {
   createSubcontractor,
   deleteSubcontractor,
+  setSubcontractorProjects,
   updateSubcontractor,
   type SubcontractorInput,
 } from "@/app/subcontractors/actions";
 import type { Subcontractor } from "@/lib/types";
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
 
 const EMPTY_INPUT: SubcontractorInput = {
   company_name: "",
@@ -66,19 +72,26 @@ export function SubcontractorsClient({
   initialSubs,
   currentUserId,
   isDeveloper,
+  allProjects,
+  initialProjectsBySubId,
 }: {
   initialSubs: Subcontractor[];
   currentUserId: string;
   isDeveloper: boolean;
+  allProjects: ProjectOption[];
+  initialProjectsBySubId: Record<string, string[]>;
 }) {
   const { notify } = useToast();
   const [subs, setSubs] = useState<Subcontractor[]>(initialSubs);
+  const [projectsBySubId, setProjectsBySubId] = useState<Record<string, string[]>>(initialProjectsBySubId);
   const [search, setSearch] = useState("");
   const [tradeFilter, setTradeFilter] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Subcontractor | null>(null);
   const [deleting, setDeleting] = useState<Subcontractor | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const projectNameById = useMemo(() => new Map(allProjects.map((p) => [p.id, p.name])), [allProjects]);
 
   const trades = useMemo(
     () => Array.from(new Set(subs.map((s) => s.trade).filter((t): t is string => !!t))).sort(),
@@ -202,6 +215,20 @@ export function SubcontractorsClient({
               </div>
 
               {s.notes && <p className="mt-2 text-xs text-blueprint/60">{s.notes}</p>}
+
+              {(projectsBySubId[s.id]?.length ?? 0) > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-blueprint/40">Working on:</span>
+                  {(projectsBySubId[s.id] ?? [])
+                    .map((pid) => projectNameById.get(pid))
+                    .filter((name): name is string => !!name)
+                    .map((name) => (
+                      <span key={name} className="badge-amber text-xs">
+                        {name}
+                      </span>
+                    ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -217,15 +244,18 @@ export function SubcontractorsClient({
           // into the next time the form opens.
           key={editing?.id ?? "new"}
           editing={editing}
+          allProjects={allProjects}
+          initialSelectedProjectIds={editing ? (projectsBySubId[editing.id] ?? []) : []}
           onClose={() => {
             setFormOpen(false);
             setEditing(null);
           }}
-          onSaved={(saved) => {
+          onSaved={(saved, projectIds) => {
             setSubs((prev) => {
               const exists = prev.some((s) => s.id === saved.id);
               return exists ? prev.map((s) => (s.id === saved.id ? saved : s)) : [...prev, saved].sort((a, b) => a.company_name.localeCompare(b.company_name));
             });
+            setProjectsBySubId((prev) => ({ ...prev, [saved.id]: projectIds }));
             notify("success", editing ? "Subcontractor updated." : "Subcontractor added.");
             setFormOpen(false);
             setEditing(null);
@@ -261,12 +291,16 @@ export function SubcontractorsClient({
 
 function SubcontractorFormModal({
   editing,
+  allProjects,
+  initialSelectedProjectIds,
   onClose,
   onSaved,
 }: {
   editing: Subcontractor | null;
+  allProjects: ProjectOption[];
+  initialSelectedProjectIds: string[];
   onClose: () => void;
-  onSaved: (saved: Subcontractor) => void;
+  onSaved: (saved: Subcontractor, projectIds: string[]) => void;
 }) {
   const { notify } = useToast();
   // No effect needed to re-seed this on target change — the parent gives
@@ -274,10 +308,15 @@ function SubcontractorFormModal({
   // (or reopening after a cancel) always mounts a fresh instance instead of
   // reusing one whose state could carry over a cancelled edit's leftovers.
   const [input, setInput] = useState<SubcontractorInput>(editing ? toInput(editing) : EMPTY_INPUT);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(initialSelectedProjectIds);
   const [pending, startTransition] = useTransition();
 
   function set<K extends keyof SubcontractorInput>(field: K, value: SubcontractorInput[K]) {
     setInput((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function toggleProject(id: string) {
+    setSelectedProjectIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   }
 
   function handleSave() {
@@ -287,7 +326,14 @@ function SubcontractorFormModal({
         notify("error", res.error ?? "Could not save.");
         return;
       }
-      onSaved(res.subcontractor);
+      // The subcontractor row itself is already saved at this point — a
+      // failure here only affects which projects it's tagged on, so it's
+      // reported but doesn't block treating the save as successful.
+      const linkRes = await setSubcontractorProjects(res.subcontractor.id, selectedProjectIds);
+      if (!linkRes.ok) {
+        notify("error", linkRes.error ?? "Saved, but could not update project associations.");
+      }
+      onSaved(res.subcontractor, linkRes.ok ? selectedProjectIds : (editing ? initialSelectedProjectIds : []));
     });
   }
 
@@ -407,6 +453,27 @@ function SubcontractorFormModal({
             onChange={(e) => set("notes", e.target.value)}
             placeholder="e.g. Great for tile work, slow on punch-list items…"
           />
+        </div>
+
+        <div>
+          <label className="label">Projects</label>
+          {allProjects.length === 0 ? (
+            <p className="text-xs text-blueprint/40">No constructions to assign yet.</p>
+          ) : (
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-blueprint/15 p-2">
+              {allProjects.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-concrete">
+                  <input
+                    type="checkbox"
+                    checked={selectedProjectIds.includes(p.id)}
+                    onChange={() => toggleProject(p.id)}
+                  />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-xs text-blueprint/40">Which constructions is this sub currently working on?</p>
         </div>
       </div>
     </Modal>

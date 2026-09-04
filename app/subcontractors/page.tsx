@@ -15,12 +15,27 @@ export default async function SubcontractorsPage() {
   const currentUser = await getCurrentUser();
   const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
 
-  const { data: subs, error } = await supabase
-    .from("subcontractors")
-    .select(
-      "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, reliability, cost_tier, notes, created_at"
-    )
-    .order("company_name");
+  const [{ data: subs, error }, { data: projects }, { data: links }] = await Promise.all([
+    supabase
+      .from("subcontractors")
+      .select(
+        "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, reliability, cost_tier, notes, created_at"
+      )
+      .order("company_name"),
+    // RLS (projects_select -> has_project_access) already scopes this to
+    // whatever the signed-in user can see, same as the Constructions list.
+    supabase.from("projects").select("id, name").order("name"),
+    // Same RLS scoping via project_subcontractors_member — a link to a
+    // project this user can't access simply won't come back, so the
+    // per-sub project chips/checkboxes only ever show what's actually
+    // visible to them.
+    supabase.from("project_subcontractors").select("project_id, subcontractor_id"),
+  ]);
+
+  const projectsBySubId: Record<string, string[]> = {};
+  for (const link of links ?? []) {
+    (projectsBySubId[link.subcontractor_id] ??= []).push(link.project_id);
+  }
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -67,6 +82,8 @@ export default async function SubcontractorsPage() {
           initialSubs={(subs ?? []) as Subcontractor[]}
           currentUserId={user?.id ?? ""}
           isDeveloper={!!currentUser?.isDeveloper}
+          allProjects={projects ?? []}
+          initialProjectsBySubId={projectsBySubId}
         />
       </main>
     </div>

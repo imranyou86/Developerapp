@@ -106,6 +106,23 @@ yet; each one only adds what a given feature needed.
   means switching targets, or even just reopening "Add" after cancelling
   a previous attempt, always mounts fresh internal form state instead of
   carrying over whatever was typed and abandoned last time.
+  - **Associating a sub with a construction** — a many-to-many
+    `project_subcontractors` join table
+    (`supabase/migrations/018_project_subcontractors.sql`), since a sub
+    works multiple projects and a project uses multiple subs. Deliberately
+    scoped by `has_project_access(project_id)` rather than the
+    subcontractor row's own `created_by` — any project member can tag "this
+    sub is working on my construction" regardless of who originally added
+    the sub to the shared directory, since that's really a project-team
+    decision, not a directory-ownership one. The add/edit form gets a
+    "Projects" checkbox list (scoped to whatever constructions the current
+    user can see, same as the Constructions list itself); each card shows
+    the resulting associations as "Working on: [project chips]".
+    `setSubcontractorProjects` (`app/subcontractors/actions.ts`) replaces a
+    sub's links wholesale (delete-then-reinsert) rather than diffing —
+    simpler, and still safe under RLS, since the delete step can only ever
+    touch rows for projects the caller has access to in the first place, so
+    a link to a project they can't see is silently left alone either way.
 - **Design system / motion pass** — the app leaned "industrial and clunky"
   (flat colors, hard edges, everything appearing/disappearing instantly), so
   this pass is a set of small, centralized changes that cascade everywhere
