@@ -131,6 +131,38 @@ yet; each one only adds what a given feature needed.
     feels off" jump reported and fixed here: grabbing an item anywhere but
     its exact center used to make it visibly teleport before you'd even
     moved the mouse.
+    - **Resizing** — the selected item gets a small handle at its
+      bottom-right corner; drag it to resize (anchored at the item's
+      top-left, same clamp/snap-on-release behavior, and the same
+      grab-offset preservation as moving — grabbing the handle imprecisely
+      no longer nudges the size before you've moved the pointer at all).
+      Resizing writes a per-instance `width`/`depth` straight onto that
+      `PlacedFixture`, independent of the catalog's default footprint.
+      Minimum size is 0.5ft; the handle's own touch target scales with the
+      room size so it stays grabbable in both a tiny closet and a great
+      room.
+    - **Measurements** — every placed item shows its current size as a
+      "W' × D'" caption (live-updated during a resize via the same direct
+      DOM writes as the drag, not React state); the room itself gets
+      architectural-style dimension lines with tick marks along its top
+      and left edges showing total width/depth, drawn in a margin added
+      outside the room in the SVG's `viewBox` (`MARGIN` in
+      `room-layout-editor.tsx`) so they don't overlap the fixtures. All
+      figures come directly from the same feet-based coordinates the
+      drag/resize/clamp math already uses, so what's displayed is what's
+      actually stored — not a separate, driftable label.
+    - **Full screen** — a "Full screen ⤢" toggle renders the same editor
+      instance (same drag/resize state, via `createPortal` to
+      `document.body`, matching the pattern `components/Modal.tsx` already
+      uses) in a large fixed overlay instead of the narrow column next to
+      the form, for more room to work precisely; Escape or "Exit full
+      screen" returns it inline.
+    - **Deleting** — besides the "Delete" button in the selected-item
+      toolbar, the selected item also gets a small × badge in its
+      top-right corner, and pressing Delete/Backspace removes it too (the
+      keyboard shortcut is skipped while focus is in a text input
+      elsewhere on the page, so backspacing the style/dimensions fields
+      doesn't also delete the current selection).
   - **"Example setup from plans"** — with plan pages uploaded on the Plan
     tab, this button (`/api/claude/suggest-room-layout`) sends Claude the
     same layout-marked plan sheets the Plan/Cost tabs use (vision, low

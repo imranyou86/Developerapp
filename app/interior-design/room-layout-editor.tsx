@@ -1,10 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getFixturesForRoomType, type FixtureType } from "@/lib/fixtureCatalog";
 import type { PlacedFixture } from "@/lib/types";
 
 const SNAP = 0.5; // feet
+const MIN_SIZE = 0.5; // feet — smallest a fixture can be resized to
+const MARGIN = 1.4; // feet of space reserved outside the room for dimension rulers
 
 function snap(n: number): number {
   return Math.round(n / SNAP) * SNAP;
@@ -14,14 +17,18 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(Math.max(n, min), max);
 }
 
-// Converts a pointer event's screen position into room-relative feet,
-// using the SVG's actual rendered box (the viewBox is in feet, so this is
-// the only place px<->ft conversion has to happen).
-function pointToFeet(svg: SVGSVGElement, clientX: number, clientY: number, roomWidth: number, roomDepth: number) {
+function fmt(n: number): string {
+  return (Math.round(n * 10) / 10).toString().replace(/\.0$/, "");
+}
+
+// Converts a pointer event's screen position into room-relative feet, using
+// the SVG's actual rendered box and its viewBox (which includes MARGIN on
+// each side for the dimension rulers, so it isn't simply roomWidth/roomDepth).
+function pointToFeet(svg: SVGSVGElement, clientX: number, clientY: number, viewW: number, viewH: number) {
   const rect = svg.getBoundingClientRect();
   return {
-    x: ((clientX - rect.left) / rect.width) * roomWidth,
-    y: ((clientY - rect.top) / rect.height) * roomDepth,
+    x: ((clientX - rect.left) / rect.width) * viewW - MARGIN,
+    y: ((clientY - rect.top) / rect.height) * viewH - MARGIN,
   };
 }
 
@@ -40,6 +47,52 @@ export function clampItemsToRoom(items: PlacedFixture[], roomWidth: number, room
   });
 }
 
+interface ItemRefs {
+  rect: SVGRectElement;
+  label: SVGTextElement;
+  size: SVGTextElement;
+  handle: SVGRectElement;
+}
+
+function DimensionLine({
+  x1,
+  y1,
+  x2,
+  y2,
+  label,
+  vertical,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  label: string;
+  vertical?: boolean;
+}) {
+  const tick = 0.12;
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+  return (
+    <g stroke="#8A8580" strokeWidth={0.015} className="select-none">
+      <line x1={x1} y1={y1} x2={x2} y2={y2} />
+      <line x1={x1} y1={y1 - tick} x2={x1} y2={y1 + tick} />
+      <line x1={x2} y1={y2 - tick} x2={x2} y2={y2 + tick} />
+      <text
+        x={midX}
+        y={midY}
+        fontSize={0.28}
+        fill="#5E5348"
+        textAnchor="middle"
+        dominantBaseline="middle"
+        transform={vertical ? `rotate(-90, ${midX}, ${midY})` : undefined}
+        stroke="none"
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
 export function RoomLayoutEditor({
   roomType,
   roomWidth,
@@ -54,13 +107,27 @@ export function RoomLayoutEditor({
   onChange: (items: PlacedFixture[]) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const itemRefs = useRef<Map<string, ItemRefs>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const fixtures = getFixturesForRoomType(roomType);
   const selected = items.find((it) => it.id === selectedId) ?? null;
+  const viewW = roomWidth + MARGIN * 2;
+  const viewH = roomDepth + MARGIN * 2;
+  // Scale the resize/rotate touch targets with room size so they stay
+  // comfortably grabbable in both a tiny closet and a large great room.
+  const handleSize = clamp(Math.max(roomWidth, roomDepth) * 0.035, 0.28, 0.6);
 
   function footprint(item: PlacedFixture) {
     return item.rotated ? { w: item.depth, d: item.width } : { w: item.width, d: item.depth };
+  }
+
+  function setItemRef(id: string, key: keyof ItemRefs, el: SVGRectElement | SVGTextElement | null) {
+    if (!el) return;
+    const existing = (itemRefs.current.get(id) ?? {}) as unknown as Record<string, unknown>;
+    existing[key] = el;
+    itemRefs.current.set(id, existing as unknown as ItemRefs);
   }
 
   function addItem(type: FixtureType, xCenter: number, yCenter: number) {
@@ -110,9 +177,9 @@ export function RoomLayoutEditor({
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
       if (ev.clientX < rect.left || ev.clientX > rect.right || ev.clientY < rect.top || ev.clientY > rect.bottom) {
-        return; // dropped outside the room — ignore
+        return; // dropped outside the canvas — ignore
       }
-      const { x, y } = pointToFeet(svg, ev.clientX, ev.clientY, roomWidth, roomDepth);
+      const { x, y } = pointToFeet(svg, ev.clientX, ev.clientY, viewW, viewH);
       addItem(type, x, y);
     }
     window.addEventListener("pointermove", onMove);
@@ -135,7 +202,7 @@ export function RoomLayoutEditor({
     target.setPointerCapture(e.pointerId);
 
     const { w, d } = footprint(item);
-    const grabStart = pointToFeet(svg, e.clientX, e.clientY, roomWidth, roomDepth);
+    const grabStart = pointToFeet(svg, e.clientX, e.clientY, viewW, viewH);
     const grabDx = grabStart.x - item.x;
     const grabDy = grabStart.y - item.y;
     let finalX = item.x;
@@ -144,7 +211,7 @@ export function RoomLayoutEditor({
 
     function onMove(ev: PointerEvent) {
       moved = true;
-      const p = pointToFeet(svg!, ev.clientX, ev.clientY, roomWidth, roomDepth);
+      const p = pointToFeet(svg!, ev.clientX, ev.clientY, viewW, viewH);
       finalX = clamp(p.x - grabDx, 0, Math.max(0, roomWidth - w));
       finalY = clamp(p.y - grabDy, 0, Math.max(0, roomDepth - d));
       target.setAttribute("transform", `translate(${finalX - item.x}, ${finalY - item.y})`);
@@ -158,6 +225,65 @@ export function RoomLayoutEditor({
         const snappedY = snap(finalY);
         onChange(items.map((it) => (it.id === item.id ? { ...it, x: snappedX, y: snappedY } : it)));
       }
+    }
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
+
+  // Resizing the SELECTED item from its bottom-right handle, anchored at
+  // its top-left corner (x/y don't move). Same direct-DOM-write approach as
+  // moving — the rect/label/size-caption/handle are updated live via refs,
+  // with the final size only snapped to the grid and committed to state on
+  // release.
+  function handleResizePointerDown(e: React.PointerEvent<SVGRectElement>, item: PlacedFixture) {
+    e.stopPropagation();
+    setSelectedId(item.id);
+    const svg = svgRef.current;
+    if (!svg) return;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const refs = itemRefs.current.get(item.id);
+
+    const { w: startW, d: startD } = footprint(item);
+    // Same offset-preservation as moving an item — the handle is small, so
+    // without this a grab anywhere but its exact center would jump the
+    // fixture's edge to the cursor on the very first pointermove.
+    const grabStart = pointToFeet(svg, e.clientX, e.clientY, viewW, viewH);
+    const grabDx = grabStart.x - (item.x + startW);
+    const grabDy = grabStart.y - (item.y + startD);
+    let finalW = startW;
+    let finalD = startD;
+
+    function onMove(ev: PointerEvent) {
+      const p = pointToFeet(svg!, ev.clientX, ev.clientY, viewW, viewH);
+      const rawW = p.x - grabDx - item.x;
+      const rawD = p.y - grabDy - item.y;
+      finalW = clamp(rawW, MIN_SIZE, Math.max(MIN_SIZE, roomWidth - item.x));
+      finalD = clamp(rawD, MIN_SIZE, Math.max(MIN_SIZE, roomDepth - item.y));
+      if (!refs) return;
+      refs.rect.setAttribute("width", String(finalW));
+      refs.rect.setAttribute("height", String(finalD));
+      // `label` only exists in the DOM for items rendered large enough to
+      // show one (see `compact` below) — a small fixture resized larger
+      // mid-drag won't grow a label until the next real render on release.
+      if (refs.label) {
+        refs.label.setAttribute("x", String(item.x + finalW / 2));
+        refs.label.setAttribute("y", String(item.y + finalD / 2 - Math.min(finalW, finalD) * 0.14));
+      }
+      refs.size.setAttribute("x", String(item.x + finalW / 2));
+      refs.size.setAttribute("y", String(item.y + finalD / 2 + Math.min(finalW, finalD) * 0.14));
+      refs.size.textContent = `${fmt(finalW)}' × ${fmt(finalD)}'`;
+      refs.handle.setAttribute("x", String(item.x + finalW - handleSize / 2));
+      refs.handle.setAttribute("y", String(item.y + finalD - handleSize / 2));
+    }
+    function onUp() {
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      const snappedW = snap(finalW);
+      const snappedD = snap(finalD);
+      const nextWidth = item.rotated ? snappedD : snappedW;
+      const nextDepth = item.rotated ? snappedW : snappedD;
+      onChange(items.map((it) => (it.id === item.id ? { ...it, width: nextWidth, depth: nextDepth } : it)));
     }
     target.addEventListener("pointermove", onMove);
     target.addEventListener("pointerup", onUp);
@@ -178,33 +304,75 @@ export function RoomLayoutEditor({
   function handleDelete() {
     if (!selected) return;
     onChange(items.filter((it) => it.id !== selected.id));
+    itemRefs.current.delete(selected.id);
     setSelectedId(null);
   }
 
-  return (
-    <div>
-      <div className="mb-2 flex flex-wrap gap-1.5">
-        {fixtures.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            className="cursor-grab select-none touch-none rounded-md border border-blueprint/15 px-2 py-1 text-xs font-medium active:cursor-grabbing"
-            style={{ backgroundColor: `${f.color}22`, borderColor: f.color }}
-            onPointerDown={(e) => handlePaletteDragStart(e, f)}
-          >
-            {f.label}
-          </button>
-        ))}
+  // Delete/Backspace removes the selected fixture — skipped while typing in
+  // a form field elsewhere on the page (e.g. the style/dimensions inputs),
+  // so backspacing text there doesn't also delete the current selection.
+  useEffect(() => {
+    if (!selectedId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const target = e.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      e.preventDefault();
+      handleDelete();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  // Escape exits full screen, matching components/Modal.tsx's convention.
+  useEffect(() => {
+    if (!expanded) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setExpanded(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [expanded]);
+
+  const canvas = (
+    <>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {fixtures.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className="cursor-grab select-none touch-none rounded-md border border-blueprint/15 px-2 py-1 text-xs font-medium active:cursor-grabbing"
+              style={{ backgroundColor: `${f.color}22`, borderColor: f.color }}
+              onPointerDown={(e) => handlePaletteDragStart(e, f)}
+            >
+              {f.label} — {fmt(f.width)}&apos; × {fmt(f.depth)}&apos;
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="btn-ghost shrink-0 whitespace-nowrap px-2 py-1 text-xs"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Exit full screen" : "Full screen ⤢"}
+        </button>
       </div>
-      <p className="mb-2 text-xs text-blueprint/40">Drag a fixture onto the room below, then drag it into place.</p>
+      <p className="mb-2 text-xs text-blueprint/40">
+        Drag a fixture onto the room, drag it to reposition, or drag its bottom-right corner to resize. All
+        measurements are in feet, to scale with the room.
+      </p>
 
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${roomWidth} ${roomDepth}`}
+        viewBox={`${-MARGIN} ${-MARGIN} ${viewW} ${viewH}`}
         className="w-full touch-none rounded-lg border border-blueprint/20 bg-white"
-        style={{ maxWidth: 520, aspectRatio: `${roomWidth} / ${roomDepth}` }}
+        style={{ maxWidth: expanded ? 1100 : 560, aspectRatio: `${viewW} / ${viewH}` }}
         onPointerDown={() => setSelectedId(null)}
       >
+        <rect x={0} y={0} width={roomWidth} height={roomDepth} fill="#FAFAF7" stroke="#3A3A38" strokeWidth={0.04} />
+
         {Array.from({ length: Math.floor(roomWidth / SNAP) + 1 }).map((_, i) => (
           <line key={`v${i}`} x1={i * SNAP} y1={0} x2={i * SNAP} y2={roomDepth} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
@@ -212,36 +380,90 @@ export function RoomLayoutEditor({
           <line key={`h${i}`} x1={0} y1={i * SNAP} x2={roomWidth} y2={i * SNAP} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
 
+        <DimensionLine x1={0} y1={-MARGIN * 0.55} x2={roomWidth} y2={-MARGIN * 0.55} label={`${fmt(roomWidth)}'`} />
+        <DimensionLine x1={-MARGIN * 0.55} y1={0} x2={-MARGIN * 0.55} y2={roomDepth} label={`${fmt(roomDepth)}'`} vertical />
+
         {items.map((item) => {
           const { w, d } = footprint(item);
           const isSelected = item.id === selectedId;
+          const fixtureColor = fixtures.find((f) => f.id === item.typeId)?.color ?? "#8A8580";
+          const compact = Math.min(w, d) <= 1.4;
           return (
-            <g
-              key={item.id}
-              onPointerDown={(e) => handleItemPointerDown(e, item)}
-              className="cursor-move touch-none"
-            >
+            <g key={item.id} onPointerDown={(e) => handleItemPointerDown(e, item)} className="cursor-move touch-none">
               <rect
+                ref={(el) => setItemRef(item.id, "rect", el)}
                 x={item.x}
                 y={item.y}
                 width={w}
                 height={d}
-                fill={fixtures.find((f) => f.id === item.typeId)?.color ?? "#8A8580"}
+                fill={fixtureColor}
                 fillOpacity={0.75}
                 stroke={isSelected ? "#C9822B" : "#3A3A38"}
                 strokeWidth={isSelected ? 0.08 : 0.03}
               />
+              {!compact && (
+                <text
+                  ref={(el) => setItemRef(item.id, "label", el)}
+                  x={item.x + w / 2}
+                  y={item.y + d / 2 - Math.min(w, d) * 0.14}
+                  fontSize={Math.min(w, d) > 2 ? 0.32 : 0.24}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill="#1F1F1D"
+                  className="pointer-events-none select-none"
+                >
+                  {item.label}
+                </text>
+              )}
               <text
+                ref={(el) => setItemRef(item.id, "size", el)}
                 x={item.x + w / 2}
-                y={item.y + d / 2}
-                fontSize={Math.min(w, d) > 2 ? 0.35 : 0.25}
+                y={compact ? item.y + d / 2 : item.y + d / 2 + Math.min(w, d) * 0.14}
+                fontSize={Math.min(w, d) > 2 ? 0.24 : 0.18}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill="#1F1F1D"
+                fillOpacity={0.75}
                 className="pointer-events-none select-none"
               >
-                {item.label}
+                {fmt(w)}&apos; × {fmt(d)}&apos;
               </text>
+              {isSelected && (
+                <>
+                  <rect
+                    ref={(el) => setItemRef(item.id, "handle", el)}
+                    x={item.x + w - handleSize / 2}
+                    y={item.y + d - handleSize / 2}
+                    width={handleSize}
+                    height={handleSize}
+                    fill="#ffffff"
+                    stroke="#C9822B"
+                    strokeWidth={0.05}
+                    className="cursor-nwse-resize touch-none"
+                    onPointerDown={(e) => handleResizePointerDown(e, item)}
+                  />
+                  <g
+                    className="cursor-pointer touch-none"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      handleDelete();
+                    }}
+                  >
+                    <circle cx={item.x + w} cy={item.y} r={handleSize / 2} fill="#DC2626" stroke="#ffffff" strokeWidth={0.03} />
+                    <text
+                      x={item.x + w}
+                      y={item.y}
+                      fontSize={handleSize * 0.8}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#ffffff"
+                      className="pointer-events-none select-none"
+                    >
+                      ×
+                    </text>
+                  </g>
+                </>
+              )}
             </g>
           );
         })}
@@ -249,7 +471,9 @@ export function RoomLayoutEditor({
 
       {selected && (
         <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-blueprint/60">Selected: {selected.label}</span>
+          <span className="text-blueprint/60">
+            Selected: {selected.label} ({fmt(footprint(selected).w)}&apos; × {fmt(footprint(selected).d)}&apos;)
+          </span>
           <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={handleRotate}>
             Rotate 90°
           </button>
@@ -258,6 +482,17 @@ export function RoomLayoutEditor({
           </button>
         </div>
       )}
-    </div>
+    </>
   );
+
+  if (expanded && typeof document !== "undefined") {
+    return createPortal(
+      <div className="fixed inset-0 z-[70] overflow-auto bg-blueprint-dark/40 p-4 sm:p-8">
+        <div className="mx-auto w-full max-w-[1200px] rounded-xl bg-white p-4 shadow-xl sm:p-6">{canvas}</div>
+      </div>,
+      document.body
+    );
+  }
+
+  return <div>{canvas}</div>;
 }
