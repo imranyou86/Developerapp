@@ -7,6 +7,7 @@ import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteProjectFile, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { FileCategory, ProjectFile } from "@/lib/types";
 
 const CATEGORY_LABEL: Record<FileCategory, string> = {
@@ -42,7 +43,7 @@ function isImage(url: string): boolean {
 export function FilesClient({ projectId, initialFiles }: { projectId: string; initialFiles: ProjectFile[] }) {
   const { notify } = useToast();
   const [files, setFiles] = useState<ProjectFile[]>(initialFiles);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = usePersistedSelection(`files-selected:${projectId}`, () => new Set());
   const [categoryFilter, setCategoryFilter] = useState<FileCategory | "all">("all");
   const [downloading, setDownloading] = useState(false);
   const [savingNotesFor, setSavingNotesFor] = useState<string | null>(null);
@@ -57,6 +58,14 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   );
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((f) => selected.has(f.id));
+
+  function selectAllFiltered(check: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      filtered.forEach((f) => (check ? next.add(f.id) : next.delete(f.id)));
+      return next;
+    });
+  }
 
   function toggleSelectAll() {
     setSelected((prev) => {
@@ -248,8 +257,15 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
           <div className="card overflow-hidden">
             <div className="flex items-center gap-3 border-b border-blueprint/10 bg-concrete/60 px-4 py-2 text-xs text-blueprint/60">
               <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll} />
-              <span>{allFilteredSelected ? "Deselect all" : "Select all"}</span>
+              <button className="font-medium text-amber-dark hover:underline" onClick={() => selectAllFiltered(true)}>
+                Check all
+              </button>
+              <span>·</span>
+              <button className="font-medium text-amber-dark hover:underline" onClick={() => selectAllFiltered(false)}>
+                Uncheck all
+              </button>
               <span className="ml-auto">
+                {selected.size > 0 && `${selected.size} selected · `}
                 {filtered.length} file{filtered.length === 1 ? "" : "s"}
               </span>
             </div>

@@ -7,6 +7,7 @@ import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { addFinish } from "@/app/projects/[id]/rooms/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import { deleteFinishScan, saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
 import type { FinishCategory, IdentifiedFinish } from "@/lib/types";
 
@@ -229,17 +230,21 @@ function ScanCard({
   onDelete: () => void;
 }) {
   const { notify } = useToast();
-  const [selected, setSelected] = useState<Set<number>>(new Set(scan.results.map((_, i) => i)));
+  const [selected, setSelected] = usePersistedSelection(`finish-scan-selected:${scan.id}`, () => new Set());
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<Set<number>>(new Set());
   const [matchByItem, setMatchByItem] = useState<Record<number, ProductMatch | null>>({});
 
+  function selectAll(check: boolean) {
+    setSelected(check ? new Set(scan.results.map((_, i) => String(i))) : new Set());
+  }
+
   async function handleAddSelected() {
     if (!roomId || selected.size === 0) return;
     setAdding(true);
     try {
-      const indices = Array.from(selected);
+      const indices = Array.from(selected, Number);
       for (const i of indices) {
         const item = scan.results[i];
         const match = matchByItem[i];
@@ -286,20 +291,29 @@ function ScanCard({
             <p className="text-sm text-blueprint/50">No identifiable finishes found in this photo.</p>
           ) : (
             <>
+              <div className="flex items-center gap-3 text-xs text-blueprint/60">
+                <button className="font-medium text-amber-dark hover:underline" onClick={() => selectAll(true)}>
+                  Check all
+                </button>
+                <span>·</span>
+                <button className="font-medium text-amber-dark hover:underline" onClick={() => selectAll(false)}>
+                  Uncheck all
+                </button>
+              </div>
               <div className="space-y-2">
                 {scan.results.map((item, i) => (
                   <IdentifiedItemRow
                     key={i}
                     item={item}
                     imageUrl={scan.storage_url}
-                    checked={selected.has(i)}
+                    checked={selected.has(String(i))}
                     disabled={added.has(i)}
                     added={added.has(i)}
                     onCheckedChange={(checked) =>
                       setSelected((prev) => {
                         const next = new Set(prev);
-                        if (checked) next.add(i);
-                        else next.delete(i);
+                        if (checked) next.add(String(i));
+                        else next.delete(String(i));
                         return next;
                       })
                     }

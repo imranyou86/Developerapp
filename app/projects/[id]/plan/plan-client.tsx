@@ -337,6 +337,18 @@ export function PlanClient({
               {detected.bedroom_count} bedroom(s), {detected.bathroom_count} bathroom(s) detected across all
               sheets. Rooms already in this project are unchecked by default.
             </p>
+            <div className="flex items-center gap-3 text-xs text-blueprint/60">
+              <button
+                className="font-medium text-amber-dark hover:underline"
+                onClick={() => setSelected(new Set(detected.rooms.map((_, i) => i)))}
+              >
+                Check all
+              </button>
+              <span>·</span>
+              <button className="font-medium text-amber-dark hover:underline" onClick={() => setSelected(new Set())}>
+                Uncheck all
+              </button>
+            </div>
             <div className="max-h-96 space-y-1 overflow-y-auto">
               {detected.rooms.map((r, i) => {
                 const already = existingLower.has(r.name.toLowerCase());
