@@ -123,6 +123,11 @@ yet; each one only adds what a given feature needed.
     simpler, and still safe under RLS, since the delete step can only ever
     touch rows for projects the caller has access to in the first place, so
     a link to a project they can't see is silently left alone either way.
+  - **Tap-to-call/email** — a saved phone number is a `tel:` link (stripped
+    to digits + a leading `+`, since that's the most reliably dialable form
+    across phone apps regardless of how the number was typed in) and a
+    saved email is a `mailto:` link — tapping either on a phone opens the
+    dialer or Mail app directly instead of just displaying the text.
 - **Design system / motion pass** — the app leaned "industrial and clunky"
   (flat colors, hard edges, everything appearing/disappearing instantly), so
   this pass is a set of small, centralized changes that cascade everywhere

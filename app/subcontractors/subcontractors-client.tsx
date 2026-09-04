@@ -58,6 +58,15 @@ function Stars({ value }: { value: number | null }) {
   );
 }
 
+// tel: links work with most formatting, but stripping to digits (keeping a
+// leading +) is the most reliably dialable form across phone apps rather
+// than passing through however the number was typed in (parens, dashes,
+// extra spaces).
+function telHref(phone: string): string {
+  const cleaned = phone.replace(/[^\d+]/g, "");
+  return `tel:${cleaned}`;
+}
+
 function CostTier({ value }: { value: number | null }) {
   if (!value) return <span className="text-xs text-blueprint/40">Not rated</span>;
   return (
@@ -179,13 +188,17 @@ export function SubcontractorsClient({
                 {s.phone && (
                   <div>
                     <span className="text-blueprint/40">Phone: </span>
-                    {s.phone}
+                    <a href={telHref(s.phone)} className="text-blueprint hover:text-amber hover:underline">
+                      {s.phone}
+                    </a>
                   </div>
                 )}
                 {s.email && (
                   <div>
                     <span className="text-blueprint/40">Email: </span>
-                    {s.email}
+                    <a href={`mailto:${s.email}`} className="text-blueprint hover:text-amber hover:underline">
+                      {s.email}
+                    </a>
                   </div>
                 )}
                 {s.address && (
