@@ -30,14 +30,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ notify }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2">
+      <div className="fixed bottom-4 right-4 z-[100] flex flex-col items-end gap-2">
         {messages.map((m) => (
           <div
             key={m.id}
-            className={`rounded-lg px-4 py-2 text-sm shadow-lg ${
+            className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm shadow-elevated animate-slide-in-right ${
               m.kind === "error" ? "bg-red-600 text-white" : "bg-sage-dark text-white"
             }`}
           >
+            <span aria-hidden className="text-base leading-none">
+              {m.kind === "error" ? "⚠" : "✓"}
+            </span>
             {m.text}
           </div>
         ))}

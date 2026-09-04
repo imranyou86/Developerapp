@@ -10,27 +10,67 @@
   body {
     @apply bg-concrete text-blueprint-dark antialiased;
   }
+
+  /* A visible focus ring matters for keyboard users, but the default blue
+     browser outline clashes with the palette and looks unpolished next to
+     .input's own amber focus ring — swap it for a themed one everywhere
+     instead of dropping it. */
+  :focus-visible {
+    outline: 2px solid theme("colors.amber.DEFAULT");
+    outline-offset: 2px;
+  }
+
+  /* Thin, muted scrollbars read as more "designed" than the chunky OS
+     default, especially in the long tab strips and modal bodies used
+     throughout. Firefox + WebKit only; falls back to the OS default
+     elsewhere, which is harmless. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.blueprint.DEFAULT / 20%") transparent;
+  }
+  *::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: theme("colors.blueprint.DEFAULT / 20%");
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-blueprint/10 bg-white shadow-sm;
+    @apply rounded-xl border border-blueprint/10 bg-white shadow-soft transition-shadow duration-200;
+  }
+
+  /* Opt-in lift/shadow affordance for cards containing (or mostly made of)
+     a click target — the projects grid, picker cards. No cursor-pointer
+     here: some of these cards have a real link over most of their area but
+     a separate non-link footer (e.g. Rename/Delete buttons), so the card
+     itself isn't uniformly clickable — the lift alone signals "hover me",
+     the actual pointer cursor still comes from whichever element inside
+     really is a link/button. */
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-blueprint/20 hover:shadow-elevated;
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100;
   }
 
   .btn-primary {
-    @apply btn bg-blueprint text-white hover:bg-blueprint-light;
+    @apply btn bg-blueprint text-white shadow-sm hover:bg-blueprint-light hover:shadow;
   }
 
   .btn-amber {
-    @apply btn bg-amber text-white hover:bg-amber-dark;
+    @apply btn bg-amber text-white shadow-sm hover:bg-amber-dark hover:shadow;
   }
 
   .btn-outline {
-    @apply btn border border-blueprint/20 bg-white text-blueprint hover:bg-concrete;
+    @apply btn border border-blueprint/20 bg-white text-blueprint hover:border-blueprint/30 hover:bg-concrete;
   }
 
   .btn-ghost {
@@ -38,7 +78,7 @@
   }
 
   .input {
-    @apply w-full rounded-lg border border-blueprint/20 bg-white px-3 py-2 text-sm text-blueprint-dark placeholder:text-blueprint/40 focus:border-amber focus:outline-none focus:ring-1 focus:ring-amber;
+    @apply w-full rounded-lg border border-blueprint/20 bg-white px-3 py-2 text-sm text-blueprint-dark placeholder:text-blueprint/40 transition-all duration-150 focus:border-amber focus:outline-none focus:ring-2 focus:ring-amber/30;
   }
 
   .label {

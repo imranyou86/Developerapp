@@ -80,6 +80,52 @@ yet; each one only adds what a given feature needed.
 
 ## Feature notes
 
+- **Design system / motion pass** — the app leaned "industrial and clunky"
+  (flat colors, hard edges, everything appearing/disappearing instantly), so
+  this pass is a set of small, centralized changes that cascade everywhere
+  rather than touching every screen individually:
+  - `tailwind.config.ts` adds reusable `animate-fade-in` / `animate-fade-in-up`
+    / `animate-scale-in` / `animate-slide-in-right` keyframes and `shadow-soft`
+    / `shadow-elevated` tokens — plain CSS, no animation library needed.
+  - `app/globals.css`'s shared `.btn`/`.card`/`.input` component classes
+    (used by nearly every screen in the app) got snappier transitions: a
+    tactile `active:scale-[0.97]` press on every button, a themed focus ring
+    (`:focus-visible`) instead of the default browser blue, thin themed
+    scrollbars, and a soft default card shadow. A new opt-in `.card-hover`
+    (lift + border + shadow on hover, no `cursor-pointer` baked in since not
+    every hoverable card is uniformly clickable — e.g. a project card's
+    Rename/Delete footer isn't part of its link) is used on the projects grid.
+  - `TopNav` and `ProjectTabs` (`components/TopNav.tsx`,
+    `app/projects/[id]/project-tabs.tsx`) switched from an underline tab
+    strip to an animated filled-pill active state — reads as more
+    "app-like" than a flat underline, and the pill transition
+    (`transition-all duration-200`) is what makes switching tabs feel snappy
+    rather than just an instant color swap.
+  - `Modal`/`ConfirmDialog` now fade+scale in (`animate-fade-in` backdrop,
+    `animate-scale-in` panel) instead of popping in instantly; `Toast`
+    messages slide in from the right (`animate-slide-in-right`) with a
+    ✓/⚠ glyph per kind.
+  - The **login page** (`app/login/page.tsx`) — the first thing anyone sees
+    — got the most direct attention: a soft radial glow plus a faint
+    blueprint-grid background (pure CSS, `aria-hidden`/`pointer-events-none`
+    since it's decorative), the card and logo mark fade/scale in on load,
+    and switching between Sign in/Create account/Magic link re-triggers a
+    quick fade on the field block (`key={mode}` on the wrapper forces a
+    remount, which restarts the `animate-fade-in` CSS animation) instead of
+    the fields just snapping to their new shape.
+  - The **projects grid** — the first authenticated screen — gets a
+    staggered fade-in-up entrance (`animationDelay` scaled by each card's
+    index, capped at 400ms so a long list doesn't drag out the entrance) on
+    top of the new `.card-hover` lift.
+  - Deliberately did not add a new animation dependency (no Framer Motion) —
+    everything here is Tailwind-generated CSS `@keyframes`, which is enough
+    for entrance/hover/press polish and keeps bundle size and complexity
+    down. Verified with a Playwright screenshot of `/login` in both its
+    sign-in and sign-up states (the only page in the app that renders
+    without needing a live Supabase session) rather than just eyeballing
+    the JSX — the rest of the app's screens require your live Supabase
+    project to authenticate into, which this sandboxed session's network
+    can't reach, so give the other tabs a look yourself.
 - **Plan tab** — every page of an uploaded plan PDF is rendered client-side
   (via pdf.js) and stored as its own labeled page in Supabase Storage.
   "Detect rooms from plan" sends every stored page together to Claude in one

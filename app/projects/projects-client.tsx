@@ -44,13 +44,17 @@ export function ProjectsClient({ projects }: { projects: ProjectSummary[] }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((p) => {
+          {projects.map((p, i) => {
             const taskPct = p.tasksTotal ? Math.round((p.tasksDone / p.tasksTotal) * 100) : 0;
             const budgetPct = p.budgeted ? Math.round((p.actual / p.budgeted) * 100) : 0;
             return (
-              <div key={p.id} className="card flex flex-col p-5">
+              <div
+                key={p.id}
+                className="card card-hover flex animate-fade-in-up flex-col p-5"
+                style={{ animationDelay: `${Math.min(i * 40, 400)}ms` }}
+              >
                 <Link href={`/projects/${p.id}`} className="flex-1">
-                  <h3 className="font-semibold text-blueprint-dark hover:text-amber">{p.name}</h3>
+                  <h3 className="font-semibold text-blueprint-dark transition-colors hover:text-amber">{p.name}</h3>
                   {p.address && <p className="mt-0.5 text-xs text-blueprint/50">{p.address}</p>}
 
                   <dl className="mt-4 space-y-2 text-sm">

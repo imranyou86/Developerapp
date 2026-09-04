@@ -70,10 +70,28 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-concrete px-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-concrete px-4">
+      {/* Soft radial glow + a faint blueprint grid behind the card — purely
+          decorative, so it's aria-hidden and pointer-events-none rather than
+          part of the page's actual content. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div
+          className="absolute left-1/2 top-[-10%] h-[560px] w-[560px] -translate-x-1/2 rounded-full opacity-40 blur-3xl"
+          style={{ background: "radial-gradient(circle, rgba(31,58,95,0.18), transparent 70%)" }}
+        />
+        <div
+          className="absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage:
+              "linear-gradient(#1F3A5F 1px, transparent 1px), linear-gradient(90deg, #1F3A5F 1px, transparent 1px)",
+            backgroundSize: "40px 40px",
+          }}
+        />
+      </div>
+
+      <div className="relative w-full max-w-sm animate-fade-in-up">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white">
+          <div className="mx-auto mb-3 flex h-12 w-12 animate-scale-in items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white shadow-elevated">
             TD
           </div>
           <h1 className="text-xl font-semibold text-blueprint-dark">The Developer</h1>
@@ -81,57 +99,64 @@ function LoginForm() {
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-4 p-6">
-          <div>
-            <label className="label" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              className="input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </div>
-
-          {mode !== "magic-link" && (
+          <div key={mode} className="animate-fade-in space-y-4">
             <div>
-              <label className="label" htmlFor="password">
-                Password
+              <label className="label" htmlFor="email">
+                Email
               </label>
               <input
-                id="password"
-                type="password"
+                id="email"
+                type="email"
                 required
-                minLength={6}
                 className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
               />
             </div>
-          )}
 
-          {mode === "sign-up" && (
-            <div>
-              <label className="label" htmlFor="role">
-                Login type
-              </label>
-              <select id="role" className="input" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
-                <option value="owner">Owner</option>
-                <option value="pm">PM</option>
-                <option value="contractor">Contractor</option>
-              </select>
-              <p className="mt-1 text-xs text-blueprint/40">
-                A Developer account is granted by an existing Developer, not chosen here.
-              </p>
-            </div>
-          )}
+            {mode !== "magic-link" && (
+              <div>
+                <label className="label" htmlFor="password">
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  minLength={6}
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+            )}
 
-          {status.kind === "error" && <p className="text-sm text-red-600">{status.message}</p>}
-          {status.kind === "sent" && <p className="text-sm text-sage-dark">{status.message}</p>}
+            {mode === "sign-up" && (
+              <div>
+                <label className="label" htmlFor="role">
+                  Login type
+                </label>
+                <select
+                  id="role"
+                  className="input"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as typeof role)}
+                >
+                  <option value="owner">Owner</option>
+                  <option value="pm">PM</option>
+                  <option value="contractor">Contractor</option>
+                </select>
+                <p className="mt-1 text-xs text-blueprint/40">
+                  A Developer account is granted by an existing Developer, not chosen here.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {status.kind === "error" && <p className="animate-fade-in text-sm text-red-600">{status.message}</p>}
+          {status.kind === "sent" && <p className="animate-fade-in text-sm text-sage-dark">{status.message}</p>}
 
           <button type="submit" className="btn-primary w-full" disabled={status.kind === "loading"}>
             {status.kind === "loading"
@@ -146,15 +171,19 @@ function LoginForm() {
           <div className="flex items-center justify-between text-xs text-blueprint/60">
             {mode === "password" ? (
               <>
-                <button type="button" className="hover:text-amber" onClick={() => setMode("sign-up")}>
+                <button type="button" className="transition-colors hover:text-amber" onClick={() => setMode("sign-up")}>
                   Create an account
                 </button>
-                <button type="button" className="hover:text-amber" onClick={() => setMode("magic-link")}>
+                <button
+                  type="button"
+                  className="transition-colors hover:text-amber"
+                  onClick={() => setMode("magic-link")}
+                >
                   Use a magic link instead
                 </button>
               </>
             ) : (
-              <button type="button" className="hover:text-amber" onClick={() => setMode("password")}>
+              <button type="button" className="transition-colors hover:text-amber" onClick={() => setMode("password")}>
                 Back to password sign-in
               </button>
             )}

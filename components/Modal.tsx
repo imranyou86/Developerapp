@@ -26,14 +26,14 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-blueprint-dark/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-blueprint-dark/40 p-4 animate-fade-in">
+      <div className="w-full max-w-md rounded-xl bg-white shadow-elevated animate-scale-in">
         <div className="flex items-center justify-between border-b border-blueprint/10 px-5 py-4">
           <h2 className="text-base font-semibold text-blueprint-dark">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-blueprint/50 hover:bg-concrete hover:text-blueprint"
+            className="rounded-md p-1 text-blueprint/50 transition-colors hover:bg-concrete hover:text-blueprint"
             aria-label="Close"
           >
             ✕
