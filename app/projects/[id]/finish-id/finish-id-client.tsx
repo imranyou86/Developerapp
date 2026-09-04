@@ -230,7 +230,11 @@ function ScanCard({
   onDelete: () => void;
 }) {
   const { notify } = useToast();
-  const [selected, setSelected] = usePersistedSelection(`finish-scan-selected:${scan.id}`, () => new Set());
+  // "v2" — bumped because pre-fix builds persisted an all-checked default
+  // under this same key; without the version bump, a stale sessionStorage
+  // entry from that older behavior would load back in and look like the
+  // "default unchecked" fix never took effect.
+  const [selected, setSelected] = usePersistedSelection(`finish-scan-selected-v2:${scan.id}`, () => new Set());
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<Set<number>>(new Set());
