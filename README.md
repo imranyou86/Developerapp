@@ -80,6 +80,32 @@ yet; each one only adds what a given feature needed.
 
 ## Feature notes
 
+- **Subcontractors** (top-level, next to Buyers Guide/Interior Design —
+  gated by the same `tab_permissions` matrix, `subcontractors` tab, default
+  hidden for Contractor) — a shared directory (`app/subcontractors/`), not
+  scoped to a single project, so anyone on the team can look up a vetted
+  sub while working any construction. Each entry holds company/contact
+  name, trade, phone, email, address, license number + state, free-text
+  notes, and two independent tags: **reliability** (1-5 stars) and
+  **cost** (1-4 "$" tier, like a Yelp price rating) — both optional until
+  someone's actually rated the sub. Trade is a free-text field with a
+  `<datalist>` of common trades as autocomplete suggestions, not a locked
+  enum, same call as the Rooms tab's style search. The list is searchable
+  (company/contact/trade/notes) and filterable by trade (the filter's
+  options are derived from whichever trades are actually in the data, not
+  a fixed list). RLS (`supabase/migrations/017_subcontractors.sql`) makes
+  the whole directory readable by any signed-in user — it's a shared
+  resource, unlike the per-user-private `deals` table — but only whoever
+  added an entry (`created_by`), or a Developer, can edit or delete it;
+  the Edit/Delete buttons themselves are hidden client-side for anyone
+  else, matching what RLS would reject anyway. The add/edit form is a
+  single reusable modal component that the parent only ever mounts
+  conditionally (`{formOpen && <SubcontractorFormModal key={editing?.id ??
+  "new"} .../>}`) rather than toggling a persistent instance via an `open`
+  prop — giving it a `key` derived from which row (if any) is being edited
+  means switching targets, or even just reopening "Add" after cancelling
+  a previous attempt, always mounts fresh internal form state instead of
+  carrying over whatever was typed and abandoned last time.
 - **Design system / motion pass** — the app leaned "industrial and clunky"
   (flat colors, hard edges, everything appearing/disappearing instantly), so
   this pass is a set of small, centralized changes that cascade everywhere
@@ -448,8 +474,8 @@ yet; each one only adds what a given feature needed.
   Admin page a Developer can also edit the **tab permission matrix** —
   which sections each role can see, covering both the 8 per-project tabs
   (Plan, Rooms, Finish ID, Checklist, Budget, Cost, Payments, Files) and the
-  top-level Buyers Guide tab (`deals`); Developer itself always has every
-  tab regardless of that table. Every RLS policy that used to check
+  top-level tabs (Buyers Guide/`deals`, Interior Design, Subcontractors);
+  Developer itself always has every tab regardless of that table. Every RLS policy that used to check
   `projects.user_id = auth.uid()` now goes through a
   `has_project_access(project_id)` SQL helper that also allows a
   `project_members` row or a Developer account, so an invited PM/Contractor

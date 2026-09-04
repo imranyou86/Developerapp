@@ -331,3 +331,25 @@ export interface CostEstimate {
   created_at: string;
 }
 
+// Shared subcontractor directory (app/subcontractors/) — not scoped to a
+// project. `reliability` is a 1-5 star rating, `cost_tier` a 1-4 "$" tier
+// (like a Yelp price rating); both null until someone's actually rated the
+// sub. `created_by` gates who can edit/delete a row (see the RLS policies
+// in supabase/schema.sql) — anyone signed in can read the whole directory.
+export interface Subcontractor {
+  id: string;
+  created_by: string;
+  company_name: string;
+  contact_name: string | null;
+  trade: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  license_number: string | null;
+  license_state: string | null;
+  reliability: number | null;
+  cost_tier: number | null;
+  notes: string | null;
+  created_at: string;
+}
+

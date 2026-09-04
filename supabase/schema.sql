@@ -283,7 +283,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals', 'subcontractors')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -315,6 +315,32 @@ create table if not exists project_invites (
   accepted_at timestamptz
 );
 
+-- Shared subcontractor directory — not scoped to a single project, so
+-- anyone can look up a vetted sub while working any construction. Any
+-- signed-in user can read the whole list (see the RLS policy below); only
+-- whoever added an entry, or a Developer, can edit/delete it. Trade,
+-- license state, etc. are free text (no fixed lists) rather than enums, on
+-- the same "don't lock the user into presets" call made for room styles.
+create table if not exists subcontractors (
+  id uuid primary key default gen_random_uuid(),
+  created_by uuid not null references auth.users (id) on delete cascade,
+  company_name text not null,
+  contact_name text,
+  trade text,
+  phone text,
+  email text,
+  address text,
+  license_number text,
+  license_state text,
+  -- 1-5 stars ("how much do we trust this sub"); 1-4 "$" tier ("how
+  -- expensive are they relative to other subs"). Both optional — not every
+  -- sub has been used enough to rate yet.
+  reliability smallint check (reliability between 1 and 5),
+  cost_tier smallint check (cost_tier between 1 and 4),
+  notes text,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -340,15 +366,18 @@ create index if not exists idx_project_members_project on project_members (proje
 create index if not exists idx_project_members_user on project_members (user_id);
 create index if not exists idx_project_invites_project on project_invites (project_id, created_at desc);
 create index if not exists idx_project_invites_token on project_invites (token);
+create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
+create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
--- defaults to the field-facing tabs only (no financials/deal analysis) —
--- all Developer-editable afterwards from the Admin page.
+-- defaults to the field-facing tabs only (no financials/deal analysis, and
+-- no sub cost/reliability info) — all Developer-editable afterwards from
+-- the Admin page.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'payments', 'deals') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'payments', 'deals', 'subcontractors') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals'), ('subcontractors')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -424,6 +453,7 @@ alter table profiles enable row level security;
 alter table tab_permissions enable row level security;
 alter table project_members enable row level security;
 alter table project_invites enable row level security;
+alter table subcontractors enable row level security;
 
 -- security definer so they can be called from other tables' RLS policies
 -- without recursing back through THEIR RLS.
@@ -525,6 +555,19 @@ create policy "deals_owner" on deals
 create policy "deal_analyses_owner" on deal_analyses
   for all using (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()))
   with check (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()));
+
+-- Shared directory, unlike deals — any signed-in user can read the whole
+-- list (whoever's using the app should be able to look up a sub while
+-- bidding out a project), but only whoever added an entry, or a Developer,
+-- can change or remove it.
+create policy "subcontractors_select" on subcontractors
+  for select using (auth.uid() is not null);
+create policy "subcontractors_insert" on subcontractors
+  for insert with check (auth.uid() = created_by);
+create policy "subcontractors_update" on subcontractors
+  for update using (auth.uid() = created_by or is_developer()) with check (auth.uid() = created_by or is_developer());
+create policy "subcontractors_delete" on subcontractors
+  for delete using (auth.uid() = created_by or is_developer());
 
 create policy "project_files_member" on project_files
   for all using (has_project_access(project_files.project_id))

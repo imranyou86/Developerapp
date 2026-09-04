@@ -1,22 +1,26 @@
 import { createClient } from "@/lib/supabase/server";
-import { DealsClient } from "@/app/deals/deals-client";
+import { SubcontractorsClient } from "@/app/subcontractors/subcontractors-client";
 import { TopNav } from "@/components/TopNav";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
+import type { Subcontractor } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function DealsPage() {
+export default async function SubcontractorsPage() {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
   const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
-  const { data: deals, error } = await supabase
-    .from("deals")
-    .select("id, address, city, state, zip_code, list_price, beds, baths, sqft, year_built, status, project_id, created_at")
-    .order("created_at", { ascending: false });
+
+  const { data: subs, error } = await supabase
+    .from("subcontractors")
+    .select(
+      "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, reliability, cost_tier, notes, created_at"
+    )
+    .order("company_name");
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -47,18 +51,23 @@ export default async function DealsPage() {
 
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold text-blueprint-dark">Buyers Guide</h2>
+          <h2 className="text-lg font-semibold text-blueprint-dark">Subcontractors</h2>
           <p className="text-sm text-blueprint/50">
-            Search homes for sale by ZIP code, pull comps, and evaluate whether a remodel or
-            ground-up rebuild pencils out before you buy.
+            A shared directory of subs — license info, contact details, and a reliability/cost tag from whoever&apos;s
+            worked with them. Visible to everyone on the team; only whoever added an entry (or a Developer) can edit
+            or remove it.
           </p>
         </div>
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load saved deals: {error.message}
+            Could not load subcontractors: {error.message}
           </div>
         )}
-        <DealsClient initialDeals={deals ?? []} />
+        <SubcontractorsClient
+          initialSubs={(subs ?? []) as Subcontractor[]}
+          currentUserId={user?.id ?? ""}
+          isDeveloper={!!currentUser?.isDeveloper}
+        />
       </main>
     </div>
   );

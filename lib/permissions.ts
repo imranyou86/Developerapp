@@ -38,6 +38,7 @@ export const PROJECT_TABS: ProjectTabDef[] = [
 export const TOP_LEVEL_TABS: ProjectTabDef[] = [
   { slug: "deals", label: "Buyers Guide" },
   { slug: "interior-design", label: "Interior Design" },
+  { slug: "subcontractors", label: "Subcontractors" },
 ];
 
 export const ALL_TABS: ProjectTabDef[] = [...PROJECT_TABS, ...TOP_LEVEL_TABS];

@@ -7,16 +7,19 @@ export function TopNav({
   showAdmin,
   showDeals = true,
   showInteriorDesign = true,
+  showSubcontractors = true,
 }: {
   showAdmin?: boolean;
   showDeals?: boolean;
   showInteriorDesign?: boolean;
+  showSubcontractors?: boolean;
 }) {
   const pathname = usePathname();
   const tabs = [
     { href: "/projects", label: "Constructions" },
     ...(showDeals ? [{ href: "/deals", label: "Buyers Guide" }] : []),
     ...(showInteriorDesign ? [{ href: "/interior-design", label: "Interior Design" }] : []),
+    ...(showSubcontractors ? [{ href: "/subcontractors", label: "Subcontractors" }] : []),
     ...(showAdmin ? [{ href: "/admin", label: "Admin" }] : []),
   ];
 

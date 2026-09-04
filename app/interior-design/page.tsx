@@ -54,6 +54,7 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
           showAdmin={currentUser?.role === "developer"}
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
+          showSubcontractors={allowedTopLevel.includes("subcontractors")}
         />
       </header>
 
