@@ -69,7 +69,12 @@ export default async function ProjectsPage() {
             </button>
           </form>
         </div>
-        <TopNav showAdmin={currentUser?.role === "developer"} showDeals={showDeals} />
+        <TopNav
+          showAdmin={currentUser?.role === "developer"}
+          showDeals={showDeals}
+          isDeveloper={currentUser?.isDeveloper}
+          previewRole={currentUser?.role}
+        />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">

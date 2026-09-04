@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { AdminClient, type AdminProject, type AdminUser } from "@/app/admin/admin-client";
 import { ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
+import { getCurrentUser } from "@/lib/permissions-server";
 import type { TabPermission } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +15,12 @@ export default async function AdminPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/admin");
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "developer") redirect("/projects");
+  // Goes through getCurrentUser() (not a raw profile query) so a Developer
+  // currently previewing another role gets redirected away too — the Admin
+  // page itself is part of what "test other permission types" should
+  // actually enforce, not just the tab nav.
+  const currentUser = await getCurrentUser();
+  if (currentUser?.role !== "developer") redirect("/projects");
 
   const [{ data: tabPermissions }, { data: profiles }, { data: projects }] = await Promise.all([
     supabase.from("tab_permissions").select("role, tab, allowed"),
@@ -28,6 +33,7 @@ export default async function AdminPage() {
     id: p.id,
     name: p.name,
     address: p.address,
+    ownerId: p.user_id,
     ownerEmail: users.find((u) => u.id === p.user_id)?.email ?? p.user_id,
   }));
 
@@ -53,7 +59,7 @@ export default async function AdminPage() {
             </div>
           </div>
         </div>
-        <TopNav showAdmin />
+        <TopNav showAdmin isDeveloper previewRole={currentUser.role} />
       </header>
 
       <main className="mx-auto max-w-5xl space-y-10 px-6 py-8">

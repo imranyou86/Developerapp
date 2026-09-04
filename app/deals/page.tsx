@@ -35,7 +35,11 @@ export default async function DealsPage() {
             </button>
           </form>
         </div>
-        <TopNav showAdmin={currentUser?.role === "developer"} />
+        <TopNav
+          showAdmin={currentUser?.role === "developer"}
+          isDeveloper={currentUser?.isDeveloper}
+          previewRole={currentUser?.role}
+        />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">

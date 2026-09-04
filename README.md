@@ -236,7 +236,32 @@ yet; each one only adds what a given feature needed.
   `TabAccessGuard` for the per-project tabs, `app/deals/layout.tsx` for
   Buyers Guide — not RLS: RLS controls data access, the tab matrix controls
   which pages a role is shown (including whether "Buyers Guide" even
-  appears in the top nav, via `TopNav`'s `showDeals` prop).
+  appears in the top nav, via `TopNav`'s `showDeals` prop). The Admin
+  page's Users section also has a **Delete** button per user
+  (`app/admin/actions.ts`'s `deleteUser`, using
+  `admin.auth.admin.deleteUser`) — it's blocked for your own account and
+  for the last remaining Developer, and the confirmation dialog calls out
+  up front if the account owns any constructions, since deleting a
+  project's owner cascades to permanently delete everything they own too
+  (`projects.user_id references auth.users(id) on delete cascade`), not
+  just their profile.
+- **Preview as another role** — a small "Preview as…" picker in `TopNav`,
+  visible only to a real Developer account, lets you browse the app as
+  Owner/PM/Contractor would see it (which tabs render, whether Buyers
+  Guide/Admin even show up in the nav) without creating a second test
+  account or touching your real role. It's a session cookie
+  (`PREVIEW_ROLE_COOKIE` in `lib/permissions.ts`, set by
+  `app/admin/preview-actions.ts`'s `setPreviewRole`, only honored server-side
+  for a caller whose real `profiles.role` is already "developer") that
+  `getCurrentUser()` (`lib/permissions-server.ts`) swaps in for the
+  effective role everywhere tab visibility is computed — including the
+  Admin page's own guard, so previewing as Contractor and navigating to
+  `/admin` correctly bounces you to `/projects`, same as a real Contractor.
+  It's UI-only: RLS/`has_project_access()` still check the real stored
+  `profiles.role`, so a previewing Developer keeps full underlying data
+  access regardless of what's shown — this tests *visibility*, not a real
+  security boundary. Clears itself when the browser session ends, or via
+  the same picker's "Preview as…" (no-preview) option.
 - **Finish ID's product search** — sends the actual scan photo alongside the
   text description to Claude (vision + web search in one call), and is
   explicitly instructed to cross-check each search result's own product

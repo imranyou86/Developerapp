@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useToast } from "@/components/Toast";
-import { updateTabPermission, updateUserRole } from "@/app/admin/actions";
+import { updateTabPermission, updateUserRole, deleteUser } from "@/app/admin/actions";
 import {
   sendProjectInvite,
   revokeInvite,
@@ -32,6 +32,7 @@ export interface AdminProject {
   id: string;
   name: string;
   address: string | null;
+  ownerId: string;
   ownerEmail: string;
 }
 
@@ -54,7 +55,7 @@ export function AdminClient({
   return (
     <div className="space-y-10">
       <TabPermissionMatrix initial={matrix} />
-      <UsersSection users={users} currentUserId={currentUserId} />
+      <UsersSection users={users} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
     </div>
   );
@@ -127,9 +128,19 @@ function TabPermissionMatrix({ initial }: { initial: MatrixRole[] }) {
   );
 }
 
-function UsersSection({ users, currentUserId }: { users: AdminUser[]; currentUserId: string }) {
+function UsersSection({
+  users,
+  projects,
+  currentUserId,
+}: {
+  users: AdminUser[];
+  projects: AdminProject[];
+  currentUserId: string;
+}) {
   const { notify } = useToast();
   const [rows, setRows] = useState(users);
+  const [deleting, setDeleting] = useState<AdminUser | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function handleChange(userId: string, role: UserRole) {
     const prev = rows;
@@ -141,6 +152,10 @@ function UsersSection({ users, currentUserId }: { users: AdminUser[]; currentUse
     } else {
       notify("success", "Role updated.");
     }
+  }
+
+  function ownedProjectCount(userId: string): number {
+    return projects.filter((p) => p.ownerId === userId).length;
   }
 
   return (
@@ -161,9 +176,49 @@ function UsersSection({ users, currentUserId }: { users: AdminUser[]; currentUse
                 </option>
               ))}
             </select>
+            {u.id !== currentUserId && (
+              <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(u)}>
+                Delete
+              </button>
+            )}
           </div>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete user?"
+        message={
+          deleting
+            ? `This permanently deletes ${deleting.email}'s account.${
+                ownedProjectCount(deleting.id) > 0
+                  ? ` They own ${ownedProjectCount(deleting.id)} construction${
+                      ownedProjectCount(deleting.id) === 1 ? "" : "s"
+                    }, which ${ownedProjectCount(deleting.id) === 1 ? "will" : "will all"} be permanently deleted too, along with everything in ${
+                      ownedProjectCount(deleting.id) === 1 ? "it" : "them"
+                    }. `
+                  : " "
+              }This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        danger
+        busy={busy}
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (!deleting) return;
+          setBusy(true);
+          const res = await deleteUser(deleting.id);
+          setBusy(false);
+          if (!res.ok) {
+            notify("error", res.error ?? "Could not delete user.");
+          } else {
+            notify("success", `${deleting.email} deleted.`);
+            setRows((r) => r.filter((u) => u.id !== deleting.id));
+          }
+          setDeleting(null);
+        }}
+      />
     </section>
   );
 }

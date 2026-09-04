@@ -41,5 +41,17 @@ export const ALL_TABS: ProjectTabDef[] = [...PROJECT_TABS, ...TOP_LEVEL_TABS];
 export interface CurrentUser {
   id: string;
   email: string | null;
+  /** Effective role — the previewed role while a Developer is previewing, otherwise the real one. */
   role: UserRole;
+  /** The real, stored account role is "developer", regardless of any active preview. */
+  isDeveloper: boolean;
 }
+
+// Cookie a Developer's "preview as" role picker writes/reads (see
+// app/admin/preview-actions.ts + components/TopNav.tsx) — lets a Developer
+// browse the app as Owner/PM/Contractor would see it (which tabs/pages
+// render) without touching their real account role. It's a UI-only
+// simulation: RLS and has_project_access() still check the real
+// profiles.role, so a previewing Developer keeps full data access
+// underneath regardless of what's shown.
+export const PREVIEW_ROLE_COOKIE = "preview_role";

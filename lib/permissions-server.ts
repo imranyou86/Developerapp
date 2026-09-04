@@ -1,10 +1,18 @@
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { PROJECT_TABS, type CurrentUser, type ProjectTabDef } from "@/lib/permissions";
+import { PROJECT_TABS, PREVIEW_ROLE_COOKIE, ROLE_VALUES, type CurrentUser, type ProjectTabDef } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
 // Server-side only (uses next/headers via lib/supabase/server). Falls back
 // to "owner" if a profile row is somehow missing (shouldn't happen post-
 // signup-trigger, but keeps the app usable rather than locking someone out).
+//
+// A Developer previewing another role (see PREVIEW_ROLE_COOKIE) gets back
+// `role` set to the previewed role — every caller that gates on `role`
+// (tab visibility, the Admin page's own guard, the Invite button, etc.)
+// then naturally behaves as that role would, without touching the real
+// account. `isDeveloper` always reflects the real, stored account role so
+// the preview picker itself keeps showing regardless of the active preview.
 export async function getCurrentUser(): Promise<CurrentUser | null> {
   const supabase = createClient();
   const {
@@ -13,7 +21,18 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!user) return null;
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  return { id: user.id, email: user.email ?? null, role: (profile?.role as UserRole) ?? "owner" };
+  const realRole = (profile?.role as UserRole) ?? "owner";
+  const isDeveloper = realRole === "developer";
+
+  let role = realRole;
+  if (isDeveloper) {
+    const preview = cookies().get(PREVIEW_ROLE_COOKIE)?.value;
+    if (preview && preview !== "developer" && ROLE_VALUES.includes(preview as UserRole)) {
+      role = preview as UserRole;
+    }
+  }
+
+  return { id: user.id, email: user.email ?? null, role, isDeveloper };
 }
 
 // A Developer always has every tab, regardless of what's stored — the
