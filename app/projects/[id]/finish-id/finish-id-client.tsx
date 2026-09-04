@@ -322,7 +322,12 @@ function ScanCard({
                       })
                     }
                     selectedMatch={matchByItem[i] ?? null}
-                    onMatchSelected={(match) => setMatchByItem((prev) => ({ ...prev, [i]: match }))}
+                    onMatchSelected={(match) => {
+                      setMatchByItem((prev) => ({ ...prev, [i]: match }));
+                      // Picking a specific product match is a clear signal the item is wanted —
+                      // check it automatically rather than making the user check it separately.
+                      if (match) setSelected((prev) => new Set(prev).add(String(i)));
+                    }}
                   />
                 ))}
               </div>
