@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteCostEstimate, saveCostEstimate } from "@/app/projects/[id]/cost/actions";
-import type { CostBreakdownLine, CostEstimate, QualityTier } from "@/lib/types";
+import type { CostBreakdownLine, CostEstimate, CostTier, QualityTier } from "@/lib/types";
 
 interface PlanPage {
   id: string;
@@ -18,6 +18,18 @@ const QUALITY_STYLE: Record<QualityTier, string> = {
   standard: "badge-sage",
   premium: "badge-amber",
   luxury: "badge bg-blueprint text-white",
+};
+
+const COST_TIER_STYLE: Record<CostTier, string> = {
+  low: "badge bg-blueprint/10 text-blueprint/60",
+  mid: "badge-sage",
+  high: "badge bg-blueprint text-white",
+};
+
+const COST_TIER_LABEL: Record<CostTier, string> = {
+  low: "Low tier · $250–300/sqft",
+  mid: "Mid tier · $350–400/sqft",
+  high: "High tier · $450+/sqft",
 };
 
 function currency(n: number | null | undefined): string {
@@ -82,7 +94,8 @@ export function CostClient({
             <p className="text-sm text-blueprint/60">
               Claude reads every sheet of the uploaded plan — dimensions, room complexity, roofline,
               fixture counts — and estimates total construction cost with a category breakdown,
-              instead of a flat guess.
+              instead of a flat guess. It also picks a pricing tier for you: Low ($250–300/sqft),
+              Mid ($350–400/sqft), or High ($450+/sqft), based on what the plan actually shows.
             </p>
           </div>
           {planPages.length === 0 ? (
@@ -140,7 +153,8 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
             Range {currency(estimate.total_cost_low)} – {currency(estimate.total_cost_high)}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {estimate.cost_tier && <span className={COST_TIER_STYLE[estimate.cost_tier]}>{COST_TIER_LABEL[estimate.cost_tier]}</span>}
           {estimate.quality_tier && <span className={QUALITY_STYLE[estimate.quality_tier]}>{estimate.quality_tier}</span>}
           <span className="text-xs text-blueprint/40">{new Date(estimate.created_at).toLocaleString()}</span>
         </div>

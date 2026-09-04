@@ -19,6 +19,14 @@ export async function addPlanPage(
   return { ok: true };
 }
 
+export async function setPlanPageLayout(projectId: string, pageId: string, isLayout: boolean): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("plan_pages").update({ is_layout: isLayout }).eq("id", pageId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/projects/${projectId}/plan`);
+  return { ok: true };
+}
+
 export async function deletePlanPage(projectId: string, pageId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("plan_pages").delete().eq("id", pageId);

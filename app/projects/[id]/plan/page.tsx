@@ -9,7 +9,7 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
   const [{ data: pages }, { data: rooms }] = await Promise.all([
     supabase
       .from("plan_pages")
-      .select("id, storage_url, label, sort_order")
+      .select("id, storage_url, label, sort_order, is_layout")
       .eq("project_id", params.id)
       .order("sort_order", { ascending: true }),
     supabase.from("rooms").select("name").eq("project_id", params.id),

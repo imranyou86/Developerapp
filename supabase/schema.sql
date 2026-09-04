@@ -21,6 +21,11 @@ create table if not exists plan_pages (
   storage_url text not null,
   label text not null,
   sort_order int not null default 0,
+  -- A plan set often mixes floor-plan sheets with elevations, sections,
+  -- details, and structural/MEP sheets. AI room detection and cost
+  -- estimation only need the layout sheets — defaults to true so existing
+  -- behavior (send everything) is unchanged until a user narrows it down.
+  is_layout boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -79,6 +84,7 @@ create table if not exists cost_estimates (
   total_sqft numeric,
   stories int,
   quality_tier text,
+  cost_tier text,
   cost_per_sqft_low numeric,
   cost_per_sqft_mid numeric,
   cost_per_sqft_high numeric,

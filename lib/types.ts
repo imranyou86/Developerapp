@@ -33,6 +33,7 @@ export interface PlanPage {
   storage_url: string;
   label: string;
   sort_order: number;
+  is_layout: boolean;
   created_at: string;
 }
 
@@ -208,6 +209,7 @@ export interface DealAnalysis {
 }
 
 export type QualityTier = "economy" | "standard" | "premium" | "luxury";
+export type CostTier = "low" | "mid" | "high";
 
 export interface CostBreakdownLine {
   category: string;
@@ -222,6 +224,7 @@ export interface CostEstimate {
   total_sqft: number | null;
   stories: number | null;
   quality_tier: QualityTier | null;
+  cost_tier: CostTier | null;
   cost_per_sqft_low: number | null;
   cost_per_sqft_mid: number | null;
   cost_per_sqft_high: number | null;

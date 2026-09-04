@@ -3,12 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
-import type { CostBreakdownLine, QualityTier } from "@/lib/types";
+import type { CostBreakdownLine, CostTier, QualityTier } from "@/lib/types";
 
 export interface SaveCostEstimateInput {
   total_sqft: number;
   stories: number | null;
   quality_tier: QualityTier;
+  cost_tier: CostTier;
   cost_per_sqft_low: number;
   cost_per_sqft_mid: number;
   cost_per_sqft_high: number;

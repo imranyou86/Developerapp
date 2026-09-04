@@ -8,7 +8,12 @@ export default async function CostPage({ params }: { params: { id: string } }) {
 
   const [{ data: project }, { data: planPages }, { data: rooms }, { data: estimates, error }] = await Promise.all([
     supabase.from("projects").select("address").eq("id", params.id).single(),
-    supabase.from("plan_pages").select("id, storage_url, label").eq("project_id", params.id).order("sort_order"),
+    supabase
+      .from("plan_pages")
+      .select("id, storage_url, label")
+      .eq("project_id", params.id)
+      .eq("is_layout", true)
+      .order("sort_order"),
     supabase.from("rooms").select("width, depth").eq("project_id", params.id),
     supabase
       .from("cost_estimates")

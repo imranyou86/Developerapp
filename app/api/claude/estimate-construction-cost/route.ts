@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
-import type { QualityTier } from "@/lib/types";
+import type { CostTier, QualityTier } from "@/lib/types";
+
+const COST_TIER_BANDS: Record<CostTier, { low: number; high: number }> = {
+  low: { low: 250, high: 300 },
+  mid: { low: 350, high: 400 },
+  high: { low: 450, high: 550 },
+};
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,6 +22,7 @@ interface CostEstimateResult {
   total_sqft: number;
   stories: number | null;
   quality_tier: QualityTier;
+  cost_tier: CostTier;
   cost_per_sqft_low: number;
   cost_per_sqft_mid: number;
   cost_per_sqft_high: number;
@@ -45,10 +52,15 @@ Your job:
    of bathrooms (plumbing-heavy), stories and stairs, foundation type implied by site conditions,
    pools/ADUs/garages if shown, unusual room counts, site access/grading implied. Be specific to
    what you see, not generic.
-5. Give cost_per_sqft_low/mid/high — a realistic range in USD for the assessed quality tier and
-   complexity, anchored to typical U.S. residential construction costs (roughly $300-500/sqft for
-   standard-to-premium work as a baseline, adjusted up for luxury/complexity or down for genuine
-   economy simplicity) and to the project's location if given.
+5. Pick cost_tier — "low", "mid", or "high" — the pricing tier that fits the assessed quality_tier
+   and complexity_factors for THIS plan, then give cost_per_sqft_low/mid/high priced within that
+   tier's band:
+     - low tier: $250-300/sqft (simple, efficient, economy-to-standard builds)
+     - mid tier: $350-400/sqft (standard-to-premium builds with moderate complexity)
+     - high tier: $450+/sqft (premium/luxury builds, high complexity, or an expensive market —
+       go above $550/sqft for genuinely high-end or highly complex projects)
+   Nudge the tier and the exact numbers within it up or down for the project's location if given
+   (e.g. a high-cost-of-construction metro pushes toward the top of a tier or into the next one).
 6. Give a breakdown — the standard cost categories (Sitework & Foundation, Framing & Structure,
    Roofing & Exterior Envelope, Windows & Doors, Plumbing, Electrical, HVAC, Interior Finishes,
    Cabinetry & Countertops, General Conditions & Permits — merge/adjust categories as sensible for
@@ -63,6 +75,7 @@ Respond with ONLY a JSON object, no prose, matching this shape exactly:
   "total_sqft": number,
   "stories": number | null,
   "quality_tier": "economy" | "standard" | "premium" | "luxury",
+  "cost_tier": "low" | "mid" | "high",
   "cost_per_sqft_low": number,
   "cost_per_sqft_mid": number,
   "cost_per_sqft_high": number,
@@ -138,9 +151,19 @@ export async function POST(req: Request) {
 
     const result = extractJson<CostEstimateResult>(text);
 
-    const totalCostLow = result.total_sqft * result.cost_per_sqft_low;
-    const totalCostMid = result.total_sqft * result.cost_per_sqft_mid;
-    const totalCostHigh = result.total_sqft * result.cost_per_sqft_high;
+    // Enforce the fixed $/sqft band for whatever tier Claude picked, rather than trusting its
+    // own arithmetic to stay in range — the tier's dollar bands are a product decision, not a
+    // suggestion.
+    const band = COST_TIER_BANDS[result.cost_tier] ?? COST_TIER_BANDS.mid;
+    const clampToBand = (n: number) =>
+      result.cost_tier === "high" ? Math.max(n, band.low) : Math.min(Math.max(n, band.low), band.high);
+    const costPerSqftLow = clampToBand(result.cost_per_sqft_low);
+    const costPerSqftMid = clampToBand(result.cost_per_sqft_mid);
+    const costPerSqftHigh = clampToBand(result.cost_per_sqft_high);
+
+    const totalCostLow = result.total_sqft * costPerSqftLow;
+    const totalCostMid = result.total_sqft * costPerSqftMid;
+    const totalCostHigh = result.total_sqft * costPerSqftHigh;
 
     const breakdown = result.breakdown.map((line) => ({
       category: line.category,
@@ -153,9 +176,10 @@ export async function POST(req: Request) {
       total_sqft: result.total_sqft,
       stories: result.stories,
       quality_tier: result.quality_tier,
-      cost_per_sqft_low: result.cost_per_sqft_low,
-      cost_per_sqft_mid: result.cost_per_sqft_mid,
-      cost_per_sqft_high: result.cost_per_sqft_high,
+      cost_tier: result.cost_tier,
+      cost_per_sqft_low: costPerSqftLow,
+      cost_per_sqft_mid: costPerSqftMid,
+      cost_per_sqft_high: costPerSqftHigh,
       total_cost_low: totalCostLow,
       total_cost_mid: totalCostMid,
       total_cost_high: totalCostHigh,

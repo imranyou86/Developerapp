@@ -6,13 +6,20 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { addDetectedRooms, addPlanPage, deletePlanPage, type DetectedRoomInput } from "@/app/projects/[id]/plan/actions";
+import {
+  addDetectedRooms,
+  addPlanPage,
+  deletePlanPage,
+  setPlanPageLayout,
+  type DetectedRoomInput,
+} from "@/app/projects/[id]/plan/actions";
 
 interface PlanPageRow {
   id: string;
   storage_url: string;
   label: string;
   sort_order: number;
+  is_layout: boolean;
 }
 
 interface DetectedRoom {
@@ -99,7 +106,7 @@ export function PlanClient({
 
     setPages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), storage_url: pub.publicUrl, label: file.name, sort_order: sortOrder },
+      { id: crypto.randomUUID(), storage_url: pub.publicUrl, label: file.name, sort_order: sortOrder, is_layout: true },
     ]);
     notify("success", `Added "${file.name}".`);
   }
@@ -148,15 +155,26 @@ export function PlanClient({
 
       setPages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), storage_url: pub.publicUrl, label, sort_order: sortOrder },
+        { id: crypto.randomUUID(), storage_url: pub.publicUrl, label, sort_order: sortOrder, is_layout: true },
       ]);
     }
     notify("success", `Added ${pdf.numPages} page(s) from "${file.name}".`);
   }
 
+  async function handleTogglePageLayout(page: PlanPageRow, isLayout: boolean) {
+    setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, is_layout: isLayout } : p)));
+    const res = await setPlanPageLayout(projectId, page.id, isLayout);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update page.");
+      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, is_layout: !isLayout } : p)));
+    }
+  }
+
+  const layoutPages = pages.filter((p) => p.is_layout);
+
   async function handleDetect() {
-    if (pages.length === 0) {
-      notify("error", "Upload at least one plan page first.");
+    if (layoutPages.length === 0) {
+      notify("error", "Mark at least one page as a floor plan layout first (checkbox under each thumbnail).");
       return;
     }
     setDetecting(true);
@@ -165,7 +183,7 @@ export function PlanClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pages: pages.map((p) => ({ label: p.label, url: p.storage_url })),
+          pages: layoutPages.map((p) => ({ label: p.label, url: p.storage_url })),
         }),
       });
       const json = await res.json();
@@ -218,15 +236,19 @@ export function PlanClient({
             <h2 className="font-semibold text-blueprint-dark">Architect&apos;s plan</h2>
             <p className="text-sm text-blueprint/60">
               Upload the plan as PDF or image. Every page of a multi-page PDF is stored and read
-              together, so multi-floor and ADU sheets are all covered.
+              together, so multi-floor and ADU sheets are all covered. Uncheck &quot;Floor plan
+              layout&quot; under any elevation, section, or detail sheets below — room detection
+              and cost estimates only read pages left checked, which is faster and more accurate.
             </p>
           </div>
           <div className="flex gap-2">
             <button className="btn-outline" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
               {uploading ? uploadStatus || "Uploading…" : "Upload plan"}
             </button>
-            <button className="btn-amber" onClick={handleDetect} disabled={detecting || pages.length === 0}>
-              {detecting ? "Analyzing plan…" : "Detect rooms from plan"}
+            <button className="btn-amber" onClick={handleDetect} disabled={detecting || layoutPages.length === 0}>
+              {detecting
+                ? "Analyzing plan…"
+                : `Detect rooms from plan (${layoutPages.length} page${layoutPages.length === 1 ? "" : "s"})`}
             </button>
           </div>
           <input
@@ -245,7 +267,7 @@ export function PlanClient({
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {pages.map((p) => (
-            <div key={p.id} className="card overflow-hidden">
+            <div key={p.id} className={`card overflow-hidden ${p.is_layout ? "" : "opacity-60"}`}>
               <div className="relative aspect-[4/3] bg-concrete">
                 <Image src={p.storage_url} alt={p.label} fill className="object-contain" unoptimized />
               </div>
@@ -260,6 +282,14 @@ export function PlanClient({
                   Remove
                 </button>
               </div>
+              <label className="flex items-center gap-1.5 border-t border-blueprint/10 px-2 py-1.5 text-xs text-blueprint/60">
+                <input
+                  type="checkbox"
+                  checked={p.is_layout}
+                  onChange={(e) => handleTogglePageLayout(p, e.target.checked)}
+                />
+                Floor plan layout
+              </label>
             </div>
           ))}
         </div>
