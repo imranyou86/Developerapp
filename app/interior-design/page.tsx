@@ -26,8 +26,9 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
 
   let rooms: { id: string; name: string; type: string | null; width: number | null; depth: number | null }[] = [];
   let designs: Awaited<ReturnType<typeof loadDesigns>> = [];
+  let planPages: { label: string; storage_url: string }[] = [];
   if (selectedId) {
-    [rooms, designs] = await Promise.all([loadRooms(selectedId), loadDesigns(selectedId)]);
+    [rooms, designs, planPages] = await Promise.all([loadRooms(selectedId), loadDesigns(selectedId), loadPlanPages(selectedId)]);
   }
 
   return (
@@ -72,7 +73,13 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
         </div>
 
         {selectedId && (
-          <InteriorDesignClient key={selectedId} projectId={selectedId} initialDesigns={designs} rooms={rooms} />
+          <InteriorDesignClient
+            key={selectedId}
+            projectId={selectedId}
+            initialDesigns={designs}
+            rooms={rooms}
+            planPages={planPages}
+          />
         )}
       </main>
     </div>
@@ -82,6 +89,17 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
 async function loadRooms(projectId: string) {
   const supabase = createClient();
   const { data } = await supabase.from("rooms").select("id, name, type, width, depth").eq("project_id", projectId).order("name");
+  return data ?? [];
+}
+
+async function loadPlanPages(projectId: string) {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("plan_pages")
+    .select("label, storage_url")
+    .eq("project_id", projectId)
+    .eq("is_layout", true)
+    .order("sort_order");
   return data ?? [];
 }
 

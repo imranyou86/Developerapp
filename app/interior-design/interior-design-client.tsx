@@ -11,6 +11,7 @@ import { STYLE_PALETTES } from "@/lib/styles";
 import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes";
 import { buildInteriorDesignPrompt, describeLayout } from "@/lib/interiorDesignPrompt";
 import { RoomLayoutEditor, clampItemsToRoom } from "@/app/interior-design/room-layout-editor";
+import { getFixturesForRoomType } from "@/lib/fixtureCatalog";
 import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
 import type { InteriorDesign, PlacedFixture } from "@/lib/types";
 
@@ -22,23 +23,33 @@ interface RoomOption {
   depth: number | null;
 }
 
+interface PlanPageOption {
+  label: string;
+  storage_url: string;
+}
+
 export function InteriorDesignClient({
   projectId,
   initialDesigns,
   rooms,
+  planPages,
 }: {
   projectId: string;
   initialDesigns: InteriorDesign[];
   rooms: RoomOption[];
+  planPages: PlanPageOption[];
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
   const taskKey = `interior-design:${projectId}`;
+  const suggestTaskKey = `interior-design-suggest:${projectId}`;
 
   const [designs, setDesigns] = useState<InteriorDesign[]>(initialDesigns);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const generating = submitting || isRunning(taskKey);
+  const [suggesting, setSuggesting] = useState(false);
+  const suggestingLayout = suggesting || isRunning(suggestTaskKey);
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -88,6 +99,74 @@ export function InteriorDesignClient({
     setRoomType(matchRoomType(room.type));
     setWidth(room.width != null ? String(room.width) : "");
     setDepth(room.depth != null ? String(room.depth) : "");
+  }
+
+  async function handleSuggestLayout() {
+    if (planPages.length === 0) {
+      notify("error", "Upload plan pages on the Plan tab first (marked as layout pages).");
+      return;
+    }
+    if (!hasRoomDims) {
+      notify("error", "Enter room dimensions first.");
+      return;
+    }
+    const room = roomSource === "existing" ? rooms.find((r) => r.id === selectedRoomId) : null;
+    const catalog = getFixturesForRoomType(roomType);
+
+    setSuggesting(true);
+    try {
+      await run(suggestTaskKey, `Reading plans for ${roomType.toLowerCase()} layout…`, async () => {
+        const res = await fetchWithRetry("/api/claude/suggest-room-layout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pages: planPages.map((p) => ({ label: p.label, url: p.storage_url })),
+            roomName: room?.name ?? null,
+            roomType,
+            roomWidth: numWidth,
+            roomDepth: numDepth,
+            fixtures: catalog.map((f) => ({ id: f.id, label: f.label, width: f.width, depth: f.depth })),
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Layout suggestion failed.");
+
+        const catalogById = new Map(catalog.map((f) => [f.id, f]));
+        const suggested: PlacedFixture[] = (json.items ?? [])
+          .map((it: { typeId: string; x: number; y: number; rotated: boolean }) => {
+            const f = catalogById.get(it.typeId);
+            if (!f) return null;
+            return {
+              id: crypto.randomUUID(),
+              typeId: f.id,
+              label: f.label,
+              x: it.x,
+              y: it.y,
+              width: f.width,
+              depth: f.depth,
+              rotated: !!it.rotated,
+            };
+          })
+          .filter((it: PlacedFixture | null): it is PlacedFixture => it !== null);
+
+        if (suggested.length === 0) {
+          notify("error", "Couldn't come up with a layout for this room — try placing fixtures manually.");
+          return;
+        }
+
+        setLayout(clampItemsToRoom(suggested, numWidth, numDepth));
+        notify(
+          "success",
+          json.found_on_plan
+            ? "Example layout placed from the plans — drag to adjust."
+            : `Example layout placed (not matched on the plans — a typical arrangement instead).${json.notes ? ` ${json.notes}` : ""}`
+        );
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Layout suggestion failed.");
+    } finally {
+      setSuggesting(false);
+    }
   }
 
   async function uploadToStorage(blob: Blob, ext: string, suffix: string): Promise<string> {
@@ -345,7 +424,20 @@ export function InteriorDesignClient({
           </div>
 
           <div>
-            <label className="label">Room layout (optional)</label>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="label mb-0">Room layout (optional)</label>
+              {hasRoomDims && (
+                <button
+                  type="button"
+                  className="btn-ghost px-2 py-1 text-xs"
+                  disabled={suggestingLayout || planPages.length === 0}
+                  onClick={handleSuggestLayout}
+                  title={planPages.length === 0 ? "Upload plan pages on the Plan tab first" : undefined}
+                >
+                  {suggestingLayout ? "Reading plans…" : "Example setup from plans"}
+                </button>
+              )}
+            </div>
             {hasRoomDims ? (
               <RoomLayoutEditor
                 roomType={roomType}

@@ -111,14 +111,39 @@ yet; each one only adds what a given feature needed.
     Kitchen, toilet/shower/tub/vanity for a Bathroom, bed/dresser for a
     Bedroom, etc.). Drag a chip from the palette onto the room to place it
     at that spot; drag a placed item to reposition it; a small toolbar
-    rotates 90° or deletes the selected item. Positions snap to a 0.5ft
-    grid and clamp to stay inside the room, including when you switch
-    rooms mid-edit. Built with pointer events (not the HTML5 Drag and Drop
-    API, which is unreliable on touch) — dragging in from the palette
-    tracks `window` pointermove/pointerup while a floating preview follows
-    the cursor; repositioning a placed item uses native pointer capture on
-    that element instead, so it keeps tracking even if the cursor leaves
-    it mid-drag.
+    rotates 90° or deletes the selected item. Positions clamp to stay
+    inside the room, including when you switch rooms mid-edit, and snap to
+    a 0.5ft grid once on release (not while dragging — see below).
+    Built with pointer events (not the HTML5 Drag and Drop API, which is
+    unreliable on touch) — dragging in from the palette tracks `window`
+    pointermove/pointerup while a floating preview (a raw DOM node moved by
+    direct style writes) follows the cursor; repositioning a placed item
+    uses native pointer capture on that element instead, so it keeps
+    tracking even if the cursor leaves it mid-drag. Moving an item is a
+    live SVG `transform` written directly to the DOM during the drag — not
+    a React state update on every pointermove — both because a state
+    update per move (previously via `onChange` mid-drag) forces a full
+    re-render of every item on the canvas, which felt janky, and because
+    the position only actually commits (and snaps to the grid) once, on
+    release; the drag also preserves the offset between where you grabbed
+    the item and its origin, rather than recentering it under the cursor
+    on the very first pointermove — that recentering was the "dragging
+    feels off" jump reported and fixed here: grabbing an item anywhere but
+    its exact center used to make it visibly teleport before you'd even
+    moved the mouse.
+  - **"Example setup from plans"** — with plan pages uploaded on the Plan
+    tab, this button (`/api/claude/suggest-room-layout`) sends Claude the
+    same layout-marked plan sheets the Plan/Cost tabs use (vision, low
+    thinking effort — same latency lesson as `detect-rooms`) along with the
+    room's name/type/size and the exact fixture catalog for that room type,
+    asking it to find this room on the plan and place fixtures matching
+    what's actually drawn (which wall the cabinet run is on, where the
+    island sits, etc.), falling back to a sensible generic arrangement
+    (flagged via `found_on_plan: false`) if the room can't be confidently
+    located. The server clamps/validates every returned placement against
+    the real catalog and room bounds before it reaches the client — never
+    trusts the model's arithmetic verbatim. Replaces whatever's currently
+    on the canvas; drag from there to adjust.
   - **Rendering from the layout** — `lib/interiorDesignPrompt.ts`'s
     `describeLayout` turns the placed items into a plain-language
     placement sentence ("kitchen island centered in the room; base
