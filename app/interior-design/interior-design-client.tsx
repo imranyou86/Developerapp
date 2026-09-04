@@ -10,7 +10,7 @@ import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { STYLE_PALETTES } from "@/lib/styles";
 import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes";
 import { buildInteriorDesignPrompt } from "@/lib/interiorDesignPrompt";
-import { saveInteriorDesign, deleteInteriorDesign } from "@/app/projects/[id]/interior-design/actions";
+import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
 import type { InteriorDesign } from "@/lib/types";
 
 interface RoomOption {

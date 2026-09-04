@@ -95,25 +95,32 @@ yet; each one only adds what a given feature needed.
   replacing the illustration; without that key, copy the same prompt into
   ChatGPT/Midjourney by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
-- **Interior Design tab** — a separate, project-level tab (not per-room like
-  Rooms & Tasks) for redesigning a real photo of an empty or framed-out
-  room. Upload the photo, pick a room type and a style (5 quick-fill
-  presets from the same palette list as Rooms & Tasks, or type your own),
-  and size the room either by selecting one of the project's pre-added
-  rooms (auto-fills width/depth from `rooms`) or entering dimensions/sqft
-  manually. Unlike Rooms & Tasks' text-to-image "Generate image", this uses
-  OpenAI's image *edit* endpoint (`editRoomImage` in `lib/openai.ts`, POST
-  `/api/openai/edit-room-image`) — an image-to-image call seeded with the
-  actual uploaded photo, not a blank canvas, so the room's real
-  architecture/windows/layout come through in the result rather than being
-  invented. The prompt itself is built deterministically
-  (`lib/interiorDesignPrompt.ts`, no Claude round-trip) — short and
-  front-loaded, the same lesson learned tuning Rooms & Tasks' prompts.
-  Every past design for the project is kept (not overwritten) in a gallery
-  with both the before photo and the generated result, "Copy prompt", and
-  "Save image"; deleting one removes both images and their File Library
-  entries. Requires `OPENAI_API_KEY` like the Rooms tab's image generation
-  does.
+- **Interior Design** (top-level, next to Buyers Guide — not a per-project
+  tab) — redesigns a real photo of an empty or framed-out room. Pick which
+  construction it's for first (`app/interior-design/project-picker.tsx`,
+  auto-selected when there's only one), then upload the photo, pick a room
+  type and a style (5 quick-fill presets from the same palette list as
+  Rooms & Tasks, or type your own), and size the room either by selecting
+  one of that project's pre-added rooms (auto-fills width/depth from
+  `rooms`) or entering dimensions/sqft manually. Unlike Rooms & Tasks'
+  text-to-image "Generate image", this uses OpenAI's image *edit* endpoint
+  (`editRoomImage` in `lib/openai.ts`, POST `/api/openai/edit-room-image`)
+  — an image-to-image call seeded with the actual uploaded photo, not a
+  blank canvas, so the room's real architecture/windows/layout come
+  through in the result rather than being invented. The prompt itself is
+  built deterministically (`lib/interiorDesignPrompt.ts`, no Claude
+  round-trip) — short and front-loaded, the same lesson learned tuning
+  Rooms & Tasks' prompts. Every past design for a project is kept (not
+  overwritten) in a gallery with both the before photo and the generated
+  result, "Copy prompt", and "Save image"; deleting one removes both
+  images and their File Library entries. Still belongs to a project under
+  the hood (`interior_designs.project_id`) — being top-level only changes
+  where you start (pick the construction up front, same as picking a deal
+  in Buyers Guide) — and it's gated by the same tab_permissions row
+  (`interior-design`) as before, just reclassified from `PROJECT_TABS` to
+  `TOP_LEVEL_TABS` in `lib/permissions.ts` (no migration needed for that,
+  the DB doesn't distinguish the two). Requires `OPENAI_API_KEY` like the
+  Rooms tab's image generation does.
 - **Construction Cost tab** — Claude reads every plan page marked "Floor
   plan layout" on the Plan tab and, grounded by a couple of web searches for
   current regional (or national, if no address) construction cost data, picks
@@ -264,23 +271,27 @@ yet; each one only adds what a given feature needed.
   project's owner cascades to permanently delete everything they own too
   (`projects.user_id references auth.users(id) on delete cascade`), not
   just their profile.
-- **Preview as another role** — a small "Preview as…" picker in `TopNav`,
-  visible only to a real Developer account, lets you browse the app as
-  Owner/PM/Contractor would see it (which tabs render, whether Buyers
-  Guide/Admin even show up in the nav) without creating a second test
-  account or touching your real role. It's a session cookie
+- **Preview as another role** — a "Preview as another role" picker on the
+  **Admin** page (`app/admin/admin-client.tsx`'s `PreviewRoleSection`),
+  visible only to a real Developer account, lets you browse the rest of
+  the app as Owner/PM/Contractor would see it (which tabs render, whether
+  Buyers Guide/Interior Design even show up in the nav) without creating a
+  second test account or touching your real role. It's a session cookie
   (`PREVIEW_ROLE_COOKIE` in `lib/permissions.ts`, set by
   `app/admin/preview-actions.ts`'s `setPreviewRole`, only honored server-side
   for a caller whose real `profiles.role` is already "developer") that
   `getCurrentUser()` (`lib/permissions-server.ts`) swaps in for the
-  effective role everywhere tab visibility is computed — including the
-  Admin page's own guard, so previewing as Contractor and navigating to
-  `/admin` correctly bounces you to `/projects`, same as a real Contractor.
-  It's UI-only: RLS/`has_project_access()` still check the real stored
-  `profiles.role`, so a previewing Developer keeps full underlying data
-  access regardless of what's shown — this tests *visibility*, not a real
-  security boundary. Clears itself when the browser session ends, or via
-  the same picker's "Preview as…" (no-preview) option.
+  effective role everywhere tab visibility is computed. It's UI-only:
+  RLS/`has_project_access()` still check the real stored `profiles.role`,
+  so a previewing Developer keeps full underlying data access regardless
+  of what's shown — this tests *visibility*, not a real security boundary.
+  The Admin page's own guard deliberately checks the real account role
+  (`currentUser.isDeveloper`), not the previewed one, so Admin — and the
+  picker itself — always stays reachable no matter what you're previewing;
+  otherwise turning on a preview from Admin would immediately lock you out
+  of the one page that can turn it back off. Clears itself when the
+  browser session ends, or by picking "Not previewing" in the same
+  section.
 - **Finish ID's product search** — sends the actual scan photo alongside the
   text description to Claude (vision + web search in one call), and is
   explicitly instructed to cross-check each search result's own product

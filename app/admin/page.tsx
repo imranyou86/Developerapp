@@ -15,12 +15,12 @@ export default async function AdminPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/admin");
 
-  // Goes through getCurrentUser() (not a raw profile query) so a Developer
-  // currently previewing another role gets redirected away too — the Admin
-  // page itself is part of what "test other permission types" should
-  // actually enforce, not just the tab nav.
+  // Checks the real account role (isDeveloper), not the effective/previewed
+  // one — the "Preview as…" picker itself lives on this page now, so it
+  // has to stay reachable to a real Developer no matter what role they're
+  // currently previewing, or there'd be no way back to turn it off.
   const currentUser = await getCurrentUser();
-  if (currentUser?.role !== "developer") redirect("/projects");
+  if (!currentUser?.isDeveloper) redirect("/projects");
 
   const [{ data: tabPermissions }, { data: profiles }, { data: projects }] = await Promise.all([
     supabase.from("tab_permissions").select("role, tab, allowed"),
@@ -59,11 +59,17 @@ export default async function AdminPage() {
             </div>
           </div>
         </div>
-        <TopNav showAdmin isDeveloper previewRole={currentUser.role} />
+        <TopNav showAdmin showDeals showInteriorDesign />
       </header>
 
       <main className="mx-auto max-w-5xl space-y-10 px-6 py-8">
-        <AdminClient matrix={matrix} users={users} projects={projectRows} currentUserId={user.id} />
+        <AdminClient
+          matrix={matrix}
+          users={users}
+          projects={projectRows}
+          currentUserId={user.id}
+          currentPreviewRole={currentUser.role}
+        />
       </main>
     </div>
   );

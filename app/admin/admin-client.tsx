@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 import { updateTabPermission, updateUserRole, deleteUser } from "@/app/admin/actions";
+import { setPreviewRole } from "@/app/admin/preview-actions";
 import {
   sendProjectInvite,
   revokeInvite,
@@ -14,6 +16,8 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ROLE_LABELS, ROLE_VALUES } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
+
+const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor"];
 
 // Inviting someone as "Developer" is a special case, handled on accept
 // (see app/invite/[token]/page.tsx) — it promotes their account role to
@@ -46,18 +50,64 @@ export function AdminClient({
   users,
   projects,
   currentUserId,
+  currentPreviewRole,
 }: {
   matrix: MatrixRole[];
   users: AdminUser[];
   projects: AdminProject[];
   currentUserId: string;
+  /** Effective role right now — "developer" means no preview active. */
+  currentPreviewRole: UserRole;
 }) {
   return (
     <div className="space-y-10">
+      <PreviewRoleSection currentPreviewRole={currentPreviewRole} />
       <TabPermissionMatrix initial={matrix} />
       <UsersSection users={users} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
     </div>
+  );
+}
+
+function PreviewRoleSection({ currentPreviewRole }: { currentPreviewRole: UserRole }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const previewing = currentPreviewRole !== "developer";
+
+  function handleChange(value: string) {
+    startTransition(async () => {
+      await setPreviewRole(value === "developer" ? null : (value as UserRole));
+      router.refresh();
+    });
+  }
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Preview as another role</h2>
+      <p className="mb-3 text-xs text-blueprint/50">
+        Browse the rest of the app as Owner/PM/Contractor would see it — which tabs render, whether Buyers
+        Guide/Interior Design even show up in the nav — without a second test account or touching your real role.
+        It only changes what&apos;s shown to you: your Developer account keeps full data access underneath, and
+        this Admin page always stays reachable regardless of what you&apos;re previewing. Come back here to turn
+        it off.
+      </p>
+      <div className="flex items-center gap-2">
+        <select
+          className="input w-auto"
+          value={previewing ? currentPreviewRole : "developer"}
+          disabled={pending}
+          onChange={(e) => handleChange(e.target.value)}
+        >
+          <option value="developer">Not previewing</option>
+          {PREVIEWABLE_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABELS[r]}
+            </option>
+          ))}
+        </select>
+        {previewing && <span className="badge-amber text-xs">Previewing as {ROLE_LABELS[currentPreviewRole]}</span>}
+      </div>
+    </section>
   );
 }
 

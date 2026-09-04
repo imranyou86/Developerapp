@@ -6,7 +6,7 @@ import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import type { ActionResult } from "@/app/projects/actions";
 
 function revalidate(projectId: string) {
-  revalidatePath(`/projects/${projectId}/interior-design`);
+  revalidatePath(`/interior-design`);
   revalidatePath(`/projects/${projectId}/files`);
 }
 

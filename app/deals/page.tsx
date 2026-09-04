@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { DealsClient } from "@/app/deals/deals-client";
 import { TopNav } from "@/components/TopNav";
-import { getCurrentUser } from "@/lib/permissions-server";
+import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
+import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function DealsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
   const { data: deals, error } = await supabase
     .from("deals")
     .select("id, address, city, state, zip_code, list_price, beds, baths, sqft, year_built, status, project_id, created_at")
@@ -37,8 +39,8 @@ export default async function DealsPage() {
         </div>
         <TopNav
           showAdmin={currentUser?.role === "developer"}
-          isDeveloper={currentUser?.isDeveloper}
-          previewRole={currentUser?.role}
+          showDeals={allowedTopLevel.includes("deals")}
+          showInteriorDesign={allowedTopLevel.includes("interior-design")}
         />
       </header>
 

@@ -24,7 +24,6 @@ export interface ProjectTabDef {
 export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "plan", label: "Plan" },
   { slug: "rooms", label: "Rooms & Tasks" },
-  { slug: "interior-design", label: "Interior Design" },
   { slug: "finish-id", label: "Finish ID" },
   { slug: "checklist", label: "Checklist" },
   { slug: "budget", label: "Budget" },
@@ -34,8 +33,12 @@ export const PROJECT_TABS: ProjectTabDef[] = [
 ];
 
 // Top-level (not per-project) sections gated the same way as project tabs.
-// Shared with components/TopNav.tsx and app/deals/layout.tsx.
-export const TOP_LEVEL_TABS: ProjectTabDef[] = [{ slug: "deals", label: "Buyers Guide" }];
+// Shared with components/TopNav.tsx, app/deals/layout.tsx, and
+// app/interior-design/layout.tsx.
+export const TOP_LEVEL_TABS: ProjectTabDef[] = [
+  { slug: "deals", label: "Buyers Guide" },
+  { slug: "interior-design", label: "Interior Design" },
+];
 
 export const ALL_TABS: ProjectTabDef[] = [...PROJECT_TABS, ...TOP_LEVEL_TABS];
 

@@ -12,7 +12,7 @@ export default async function ProjectsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
-  const showDeals = currentUser ? (await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS)).includes("deals") : false;
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
 
   const { data, error } = await supabase
     .from("projects")
@@ -71,9 +71,8 @@ export default async function ProjectsPage() {
         </div>
         <TopNav
           showAdmin={currentUser?.role === "developer"}
-          showDeals={showDeals}
-          isDeveloper={currentUser?.isDeveloper}
-          previewRole={currentUser?.role}
+          showDeals={allowedTopLevel.includes("deals")}
+          showInteriorDesign={allowedTopLevel.includes("interior-design")}
         />
       </header>
 
