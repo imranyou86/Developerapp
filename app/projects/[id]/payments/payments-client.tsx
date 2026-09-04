@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteBid, markPaymentPaid, saveBid, type SaveBidInput } from "@/app/projects/[id]/payments/actions";
@@ -31,19 +32,42 @@ function currency(n: number): string {
 
 export function PaymentsClient({ projectId, initialBids }: { projectId: string; initialBids: BidRow[] }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const extractTaskKey = `bid-extract:${projectId}`;
+  const reviewStorageKey = `bid-review:${projectId}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [bids, setBids] = useState<BidRow[]>(initialBids);
   const [extracting, setExtracting] = useState(false);
   const [extractStatus, setExtractStatus] = useState("");
   const [deleting, setDeleting] = useState<BidRow | null>(null);
 
-  const [review, setReview] = useState<{
+  type ReviewDraft = {
     contractor: string;
     total_amount: number;
     file_name: string | null;
     file_url: string | null;
     payment_schedule: { label: string; amount: number }[];
-  } | null>(null);
+  };
+
+  const [review, setReviewState] = useState<ReviewDraft | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem(reviewStorageKey);
+      return raw ? (JSON.parse(raw) as ReviewDraft) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  function setReview(next: ReviewDraft | null) {
+    setReviewState(next);
+    try {
+      if (next) sessionStorage.setItem(reviewStorageKey, JSON.stringify(next));
+      else sessionStorage.removeItem(reviewStorageKey);
+    } catch {
+      // ignore — storage unavailable
+    }
+  }
 
   const projectPaid = bids.reduce(
     (sum, b) => sum + b.payment_schedule_items.filter((l) => l.paid).reduce((s, l) => s + Number(l.amount), 0),
@@ -55,86 +79,88 @@ export function PaymentsClient({ projectId, initialBids }: { projectId: string; 
     setExtracting(true);
     setExtractStatus("Reading PDF…");
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
+      await run(extractTaskKey, `Extracting bid details from "${file.name}"…`, async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
 
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
 
-      // Extract the full text of every page — payment schedules often sit on
-      // later pages of long documents, so nothing here is truncated.
-      let fullText = "";
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((it) => ("str" in it ? it.str : "")).join(" ");
-        fullText += `\n\n--- Page ${pageNum} ---\n${pageText}`;
-      }
-
-      // Upload the original PDF for reference regardless of extraction path.
-      setExtractStatus("Uploading document…");
-      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("bid-files").upload(path, file, {
-        contentType: "application/pdf",
-      });
-      if (uploadError) throw new Error(uploadError.message);
-      const { data: pub } = supabase.storage.from("bid-files").getPublicUrl(path);
-
-      let requestBody: { text?: string; pageImageUrls?: string[] };
-
-      if (fullText.trim().length > 200) {
-        requestBody = { text: fullText };
-      } else {
-        // Likely a scanned/image-only document — fall back to page images.
-        setExtractStatus("Document looks scanned — rendering pages for image-based reading…");
-        const pageImageUrls: string[] = [];
+        // Extract the full text of every page — payment schedules often sit on
+        // later pages of long documents, so nothing here is truncated.
+        let fullText = "";
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
           const page = await pdf.getPage(pageNum);
-          const viewport = page.getViewport({ scale: 2 });
-          const canvas = document.createElement("canvas");
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const context = canvas.getContext("2d");
-          if (!context) throw new Error("Canvas rendering is not supported in this browser.");
-          await page.render({ canvasContext: context, viewport }).promise;
-          const blob: Blob = await new Promise((resolve, reject) =>
-            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode page image."))), "image/png")
-          );
-          const imgPath = `${user.id}/${projectId}/${Date.now()}-p${pageNum}-${file.name}.png`;
-          const { error: imgUploadError } = await supabase.storage.from("bid-files").upload(imgPath, blob, {
-            contentType: "image/png",
-          });
-          if (imgUploadError) throw new Error(imgUploadError.message);
-          const { data: imgPub } = supabase.storage.from("bid-files").getPublicUrl(imgPath);
-          pageImageUrls.push(imgPub.publicUrl);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((it) => ("str" in it ? it.str : "")).join(" ");
+          fullText += `\n\n--- Page ${pageNum} ---\n${pageText}`;
         }
-        requestBody = { pageImageUrls };
-      }
 
-      setExtractStatus("Extracting contractor, total & payment schedule…");
-      const res = await fetchWithRetry("/api/claude/extract-bid", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Extraction failed.");
+        // Upload the original PDF for reference regardless of extraction path.
+        setExtractStatus("Uploading document…");
+        const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("bid-files").upload(path, file, {
+          contentType: "application/pdf",
+        });
+        if (uploadError) throw new Error(uploadError.message);
+        const { data: pub } = supabase.storage.from("bid-files").getPublicUrl(path);
 
-      setReview({
-        contractor: json.contractor ?? "",
-        total_amount: Number(json.total_amount) || 0,
-        file_name: file.name,
-        file_url: pub.publicUrl,
-        payment_schedule: (json.payment_schedule ?? []).map((l: { label: string; amount: number }) => ({
-          label: l.label,
-          amount: Number(l.amount) || 0,
-        })),
+        let requestBody: { text?: string; pageImageUrls?: string[] };
+
+        if (fullText.trim().length > 200) {
+          requestBody = { text: fullText };
+        } else {
+          // Likely a scanned/image-only document — fall back to page images.
+          setExtractStatus("Document looks scanned — rendering pages for image-based reading…");
+          const pageImageUrls: string[] = [];
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("Canvas rendering is not supported in this browser.");
+            await page.render({ canvasContext: context, viewport }).promise;
+            const blob: Blob = await new Promise((resolve, reject) =>
+              canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode page image."))), "image/png")
+            );
+            const imgPath = `${user.id}/${projectId}/${Date.now()}-p${pageNum}-${file.name}.png`;
+            const { error: imgUploadError } = await supabase.storage.from("bid-files").upload(imgPath, blob, {
+              contentType: "image/png",
+            });
+            if (imgUploadError) throw new Error(imgUploadError.message);
+            const { data: imgPub } = supabase.storage.from("bid-files").getPublicUrl(imgPath);
+            pageImageUrls.push(imgPub.publicUrl);
+          }
+          requestBody = { pageImageUrls };
+        }
+
+        setExtractStatus("Extracting contractor, total & payment schedule…");
+        const res = await fetchWithRetry("/api/claude/extract-bid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Extraction failed.");
+
+        setReview({
+          contractor: json.contractor ?? "",
+          total_amount: Number(json.total_amount) || 0,
+          file_name: file.name,
+          file_url: pub.publicUrl,
+          payment_schedule: (json.payment_schedule ?? []).map((l: { label: string; amount: number }) => ({
+            label: l.label,
+            amount: Number(l.amount) || 0,
+          })),
+        });
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Could not process bid document.");
@@ -162,8 +188,12 @@ export function PaymentsClient({ projectId, initialBids }: { projectId: string; 
               extracted automatically for you to review before saving.
             </p>
           </div>
-          <button className="btn-amber" onClick={() => fileInputRef.current?.click()} disabled={extracting}>
-            {extracting ? extractStatus || "Processing…" : "Upload bid"}
+          <button
+            className="btn-amber"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={extracting || isRunning(extractTaskKey)}
+          >
+            {extracting || isRunning(extractTaskKey) ? extractStatus || "Processing…" : "Upload bid"}
           </button>
           <input
             ref={fileInputRef}

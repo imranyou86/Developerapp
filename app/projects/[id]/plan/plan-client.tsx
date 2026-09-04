@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -43,6 +44,9 @@ export function PlanClient({
   existingRoomNames: string[];
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const uploadTaskKey = `plan-upload:${projectId}`;
+  const detectTaskKey = `plan-detect:${projectId}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pages, setPages] = useState<PlanPageRow[]>(initialPages);
   const [uploading, setUploading] = useState(false);
@@ -64,21 +68,23 @@ export function PlanClient({
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
+      await run(uploadTaskKey, "Uploading plan pages…", async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
 
-      for (const file of Array.from(files)) {
-        if (file.type === "application/pdf") {
-          await uploadPdfPages(supabase, user.id, file);
-        } else if (file.type.startsWith("image/")) {
-          await uploadImagePage(supabase, user.id, file);
-        } else {
-          notify("error", `Skipped "${file.name}": unsupported file type.`);
+        for (const file of Array.from(files)) {
+          if (file.type === "application/pdf") {
+            await uploadPdfPages(supabase, user.id, file);
+          } else if (file.type.startsWith("image/")) {
+            await uploadImagePage(supabase, user.id, file);
+          } else {
+            notify("error", `Skipped "${file.name}": unsupported file type.`);
+          }
         }
-      }
+      });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -180,16 +186,18 @@ export function PlanClient({
     }
     setDetecting(true);
     try {
-      const res = await fetchWithRetry("/api/claude/detect-rooms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pages: layoutPages.map((p) => ({ label: p.label, url: p.storage_url })),
-        }),
+      const result = await run(detectTaskKey, "Detecting rooms from plan…", async () => {
+        const res = await fetchWithRetry("/api/claude/detect-rooms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pages: layoutPages.map((p) => ({ label: p.label, url: p.storage_url })),
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Room detection failed.");
+        return json as { rooms: DetectedRoom[]; bedroom_count: number; bathroom_count: number };
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Room detection failed.");
-      const result = json as { rooms: DetectedRoom[]; bedroom_count: number; bathroom_count: number };
       setDetected(result);
       // Pre-select every room that doesn't already exist.
       const initial = new Set<number>();
@@ -243,11 +251,19 @@ export function PlanClient({
             </p>
           </div>
           <div className="flex gap-2">
-            <button className="btn-outline" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? uploadStatus || "Uploading…" : "Upload plan"}
+            <button
+              className="btn-outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isRunning(uploadTaskKey)}
+            >
+              {uploading || isRunning(uploadTaskKey) ? uploadStatus || "Uploading…" : "Upload plan"}
             </button>
-            <button className="btn-amber" onClick={handleDetect} disabled={detecting || layoutPages.length === 0}>
-              {detecting
+            <button
+              className="btn-amber"
+              onClick={handleDetect}
+              disabled={detecting || isRunning(detectTaskKey) || layoutPages.length === 0}
+            >
+              {detecting || isRunning(detectTaskKey)
                 ? "Analyzing plan…"
                 : `Detect rooms from plan (${layoutPages.length} page${layoutPages.length === 1 ? "" : "s"})`}
             </button>

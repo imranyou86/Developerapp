@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteProjectFile, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -42,6 +43,8 @@ function isImage(url: string): boolean {
 
 export function FilesClient({ projectId, initialFiles }: { projectId: string; initialFiles: ProjectFile[] }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const uploadTaskKey = `files-upload:${projectId}`;
   const [files, setFiles] = useState<ProjectFile[]>(initialFiles);
   const [selected, setSelected] = usePersistedSelection(`files-selected:${projectId}`, () => new Set());
   const [categoryFilter, setCategoryFilter] = useState<FileCategory | "all">("all");
@@ -92,24 +95,26 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   async function handleDownloadZip(fileIds: string[] | null) {
     setDownloading(true);
     try {
-      const res = await fetchWithRetry(`/api/projects/${projectId}/files/zip`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileIds: fileIds ?? undefined }),
+      await run(`files-zip:${projectId}`, "Preparing file download…", async () => {
+        const res = await fetchWithRetry(`/api/projects/${projectId}/files/zip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileIds: fileIds ?? undefined }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error ?? "Download failed.");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "project-files.zip";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
       });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? "Download failed.");
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "project-files.zip";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Download failed.");
     } finally {
@@ -129,37 +134,39 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   async function handleUpload(file: File) {
     setUploading(true);
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
+      await run(uploadTaskKey, `Uploading "${file.name}"…`, async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
 
-      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
-        contentType: file.type || "application/octet-stream",
+        const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
+          contentType: file.type || "application/octet-stream",
+        });
+        if (uploadError) throw new Error(uploadError.message);
+
+        const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
+        const res = await uploadProjectFile(projectId, pub.publicUrl, file.name, uploadCategory);
+        if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save file.");
+
+        setFiles((prev) => [
+          {
+            id: res.id!,
+            project_id: projectId,
+            storage_url: pub.publicUrl,
+            file_name: file.name,
+            category: uploadCategory,
+            source_table: null,
+            source_id: null,
+            notes: null,
+            created_at: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        notify("success", `Uploaded "${file.name}".`);
       });
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
-      const res = await uploadProjectFile(projectId, pub.publicUrl, file.name, uploadCategory);
-      if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save file.");
-
-      setFiles((prev) => [
-        {
-          id: res.id!,
-          project_id: projectId,
-          storage_url: pub.publicUrl,
-          file_name: file.name,
-          category: uploadCategory,
-          source_table: null,
-          source_id: null,
-          notes: null,
-          created_at: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      notify("success", `Uploaded "${file.name}".`);
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -196,7 +203,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
               className="input w-auto text-xs"
               value={uploadCategory}
               onChange={(e) => setUploadCategory(e.target.value as FileCategory)}
-              disabled={uploading}
+              disabled={uploading || isRunning(uploadTaskKey)}
             >
               {UPLOAD_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
@@ -213,15 +220,19 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
                 if (file) handleUpload(file);
               }}
             />
-            <button className="btn-amber text-xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? "Uploading…" : "Upload file"}
+            <button
+              className="btn-amber text-xs"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isRunning(uploadTaskKey)}
+            >
+              {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "Upload file"}
             </button>
             <button
               className="btn-outline text-xs"
               onClick={() => handleDownloadZip(selected.size > 0 ? Array.from(selected) : null)}
-              disabled={downloading || files.length === 0}
+              disabled={downloading || isRunning(`files-zip:${projectId}`) || files.length === 0}
             >
-              {downloading
+              {downloading || isRunning(`files-zip:${projectId}`)
                 ? "Preparing…"
                 : selected.size > 0
                   ? `Download selected (${selected.size})`

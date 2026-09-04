@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { convertDealToProject, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
 import { saveDealAnalysis } from "@/app/deals/[id]/actions";
@@ -29,6 +30,9 @@ function currency(n: number | null | undefined): string {
 
 export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initialAnalyses: DealAnalysis[] }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const lookupTaskKey = `deal-lookup:${deal.id}`;
+  const evaluateTaskKey = `deal-evaluate:${deal.id}`;
   const [status, setStatus] = useState<DealStatus>(deal.status);
   const [projectId, setProjectId] = useState<string | null>(deal.project_id);
   const [analyses, setAnalyses] = useState<DealAnalysis[]>(initialAnalyses);
@@ -64,22 +68,24 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   async function handleLookupLotSize() {
     setLookingUpDetails(true);
     try {
-      const res = await fetchWithRetry("/api/claude/lookup-property-details", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: deal.address, city: deal.city, state: deal.state, zipCode: deal.zip_code }),
+      await run(lookupTaskKey, `Looking up lot size for ${deal.address}…`, async () => {
+        const res = await fetchWithRetry("/api/claude/lookup-property-details", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: deal.address, city: deal.city, state: deal.state, zipCode: deal.zip_code }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
+        if (json.lot_size == null) {
+          notify("error", "Couldn't find a lot size for this address from public sources.");
+          return;
+        }
+        setLotSize(json.lot_size);
+        notify(
+          "success",
+          `Lot size: ${json.lot_size.toLocaleString()} sqft (${json.confidence} confidence, via ${json.source ?? "web search"}). Review and save.`
+        );
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
-      if (json.lot_size == null) {
-        notify("error", "Couldn't find a lot size for this address from public sources.");
-        return;
-      }
-      setLotSize(json.lot_size);
-      notify(
-        "success",
-        `Lot size: ${json.lot_size.toLocaleString()} sqft (${json.confidence} confidence, via ${json.source ?? "web search"}). Review and save.`
-      );
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Lookup failed.");
     } finally {
@@ -161,52 +167,31 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
     setAnalyzing(true);
     setAnalyzeStatus("Pulling comps and researching value…");
     try {
-      const res = await fetchWithRetry("/api/claude/evaluate-deal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address: deal.address,
-          city: deal.city,
-          state: deal.state,
-          zipCode: deal.zip_code,
-          listPrice: deal.list_price,
-          sqft: deal.sqft,
-          targetSqft: sqftBasis,
-          beds: deal.beds,
-          baths: deal.baths,
-          yearBuilt: deal.year_built,
-          scope,
-          scopeDescription,
-          costPerSqft,
-          constructionBudget: budget,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Analysis failed.");
+      await run(evaluateTaskKey, `Evaluating ${deal.address}…`, async () => {
+        const res = await fetchWithRetry("/api/claude/evaluate-deal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: deal.address,
+            city: deal.city,
+            state: deal.state,
+            zipCode: deal.zip_code,
+            listPrice: deal.list_price,
+            sqft: deal.sqft,
+            targetSqft: sqftBasis,
+            beds: deal.beds,
+            baths: deal.baths,
+            yearBuilt: deal.year_built,
+            scope,
+            scopeDescription,
+            costPerSqft,
+            constructionBudget: budget,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Analysis failed.");
 
-      const saveRes = await saveDealAnalysis(deal.id, {
-        scope,
-        scope_description: scopeDescription,
-        target_sqft: sqftBasis,
-        cost_per_sqft: costPerSqft,
-        construction_budget: budget,
-        current_value_estimate: json.current_value_estimate,
-        arv_estimate: json.arv_estimate,
-        arv_low: json.arv_low,
-        arv_high: json.arv_high,
-        total_cost: json.total_cost,
-        estimated_profit: json.estimated_profit,
-        profit_margin_pct: json.profit_margin_pct,
-        verdict: json.verdict,
-        reasoning: json.reasoning,
-        comps: json.comps,
-      });
-      if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save analysis.");
-
-      setAnalyses((prev) => [
-        {
-          id: saveRes.id!,
-          deal_id: deal.id,
+        const saveRes = await saveDealAnalysis(deal.id, {
           scope,
           scope_description: scopeDescription,
           target_sqft: sqftBasis,
@@ -222,11 +207,34 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
           verdict: json.verdict,
           reasoning: json.reasoning,
           comps: json.comps,
-          created_at: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      notify("success", "Analysis complete.");
+        });
+        if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save analysis.");
+
+        setAnalyses((prev) => [
+          {
+            id: saveRes.id!,
+            deal_id: deal.id,
+            scope,
+            scope_description: scopeDescription,
+            target_sqft: sqftBasis,
+            cost_per_sqft: costPerSqft,
+            construction_budget: budget,
+            current_value_estimate: json.current_value_estimate,
+            arv_estimate: json.arv_estimate,
+            arv_low: json.arv_low,
+            arv_high: json.arv_high,
+            total_cost: json.total_cost,
+            estimated_profit: json.estimated_profit,
+            profit_margin_pct: json.profit_margin_pct,
+            verdict: json.verdict,
+            reasoning: json.reasoning,
+            comps: json.comps,
+            created_at: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
+        notify("success", "Analysis complete.");
+      });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Analysis failed.");
     } finally {
@@ -274,8 +282,13 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                 )}
               </p>
               <div className="flex gap-2">
-                <button type="button" className="text-xs text-amber-dark hover:underline" onClick={handleLookupLotSize} disabled={lookingUpDetails}>
-                  {lookingUpDetails ? "Looking up…" : "Look up from web ↗"}
+                <button
+                  type="button"
+                  className="text-xs text-amber-dark hover:underline"
+                  onClick={handleLookupLotSize}
+                  disabled={lookingUpDetails || isRunning(lookupTaskKey)}
+                >
+                  {lookingUpDetails || isRunning(lookupTaskKey) ? "Looking up…" : "Look up from web ↗"}
                 </button>
                 {lotSize !== "" && Number(lotSize) !== (deal.lot_size ?? null) && (
                   <button type="button" className="text-xs text-sage-dark hover:underline" onClick={handleSaveZoning} disabled={savingZoning}>
@@ -433,8 +446,8 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               </p>
             )}
 
-            <button className="btn-amber w-full" onClick={handleAnalyze} disabled={analyzing}>
-              {analyzing ? analyzeStatus || "Analyzing…" : "Run analysis"}
+            <button className="btn-amber w-full" onClick={handleAnalyze} disabled={analyzing || isRunning(evaluateTaskKey)}>
+              {analyzing || isRunning(evaluateTaskKey) ? analyzeStatus || "Analyzing…" : "Run analysis"}
             </button>
           </div>
         </div>

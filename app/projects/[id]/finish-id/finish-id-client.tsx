@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { addFinish } from "@/app/projects/[id]/rooms/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -60,6 +61,8 @@ export function FinishIdClient({
   initialScans: FinishScanRow[];
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const uploadTaskKey = `finish-upload:${projectId}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scans, setScans] = useState<FinishScanRow[]>(initialScans);
   const [uploading, setUploading] = useState(false);
@@ -71,55 +74,57 @@ export function FinishIdClient({
     setUploading(true);
     setUploadStatus("Uploading photo…");
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
+      await run(uploadTaskKey, `Identifying finishes in "${file.name}"…`, async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
 
-      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("finish-scans").upload(path, file, {
-        contentType: file.type,
+        const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("finish-scans").upload(path, file, {
+          contentType: file.type,
+        });
+        if (uploadError) throw new Error(uploadError.message);
+
+        const { data: pub } = supabase.storage.from("finish-scans").getPublicUrl(path);
+
+        setUploadStatus("Identifying finishes…");
+        const res = await fetchWithRetry("/api/claude/identify-finishes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: pub.publicUrl }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Finish identification failed.");
+
+        const results: IdentifiedFinish[] = (json.items ?? []).map((item: IdentifiedFinish) => ({
+          name: item.name,
+          category: FINISH_CATEGORY_SET.has(item.category) ? item.category : "Other",
+          description: item.description,
+          color: item.color,
+          confidence: item.confidence,
+        }));
+
+        const saveRes = await saveFinishScan(projectId, pub.publicUrl, file.name, results);
+        if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save scan.");
+
+        const newScan: FinishScanRow = {
+          id: saveRes.id,
+          storage_url: pub.publicUrl,
+          label: file.name,
+          results,
+          created_at: new Date().toISOString(),
+        };
+        setScans((prev) => [newScan, ...prev]);
+        setExpandedScanId(newScan.id);
+
+        if (results.length === 0) {
+          notify("success", "Scanned — no identifiable finishes found in this photo.");
+        } else {
+          notify("success", `Identified ${results.length} finish(es).`);
+        }
       });
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: pub } = supabase.storage.from("finish-scans").getPublicUrl(path);
-
-      setUploadStatus("Identifying finishes…");
-      const res = await fetchWithRetry("/api/claude/identify-finishes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: pub.publicUrl }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Finish identification failed.");
-
-      const results: IdentifiedFinish[] = (json.items ?? []).map((item: IdentifiedFinish) => ({
-        name: item.name,
-        category: FINISH_CATEGORY_SET.has(item.category) ? item.category : "Other",
-        description: item.description,
-        color: item.color,
-        confidence: item.confidence,
-      }));
-
-      const saveRes = await saveFinishScan(projectId, pub.publicUrl, file.name, results);
-      if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save scan.");
-
-      const newScan: FinishScanRow = {
-        id: saveRes.id,
-        storage_url: pub.publicUrl,
-        label: file.name,
-        results,
-        created_at: new Date().toISOString(),
-      };
-      setScans((prev) => [newScan, ...prev]);
-      setExpandedScanId(newScan.id);
-
-      if (results.length === 0) {
-        notify("success", "Scanned — no identifiable finishes found in this photo.");
-      } else {
-        notify("success", `Identified ${results.length} finish(es).`);
-      }
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Could not process photo.");
     } finally {
@@ -141,8 +146,12 @@ export function FinishIdClient({
               finishes it can see, so you can add the ones you like straight to a room.
             </p>
           </div>
-          <button className="btn-amber" onClick={() => fileInputRef.current?.click()} disabled={uploading || rooms.length === 0}>
-            {uploading ? uploadStatus || "Working…" : "Upload photo"}
+          <button
+            className="btn-amber"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || isRunning(uploadTaskKey) || rooms.length === 0}
+          >
+            {uploading || isRunning(uploadTaskKey) ? uploadStatus || "Working…" : "Upload photo"}
           </button>
           <input
             ref={fileInputRef}
@@ -308,6 +317,7 @@ function ScanCard({
                 {scan.results.map((item, i) => (
                   <IdentifiedItemRow
                     key={i}
+                    taskKey={`finish-search:${scan.id}:${i}`}
                     item={item}
                     imageUrl={scan.storage_url}
                     checked={selected.has(String(i))}
@@ -359,6 +369,7 @@ function ScanCard({
 }
 
 function IdentifiedItemRow({
+  taskKey,
   item,
   imageUrl,
   checked,
@@ -368,6 +379,7 @@ function IdentifiedItemRow({
   selectedMatch,
   onMatchSelected,
 }: {
+  taskKey: string;
   item: IdentifiedFinish;
   imageUrl: string;
   checked: boolean;
@@ -378,27 +390,46 @@ function IdentifiedItemRow({
   onMatchSelected: (match: ProductMatch | null) => void;
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
   const [searching, setSearching] = useState(false);
-  const [matches, setMatches] = useState<ProductMatch[] | null>(null);
+  // Loaded lazily (not from sessionStorage on every keystroke) so a search
+  // still shown as running via isRunning() after a remount can, once it
+  // finishes, be picked up here instead of the result being silently lost.
+  const [matches, setMatches] = useState<ProductMatch[] | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem(`finish-search-result:${taskKey}`);
+      return raw ? (JSON.parse(raw) as ProductMatch[]) : null;
+    } catch {
+      return null;
+    }
+  });
 
   async function handleSearch() {
     setSearching(true);
     try {
-      const res = await fetchWithRetry("/api/claude/find-product", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: item.name,
-          category: item.category,
-          description: item.description,
-          color: item.color,
-          imageUrl,
-        }),
+      const found = await run(taskKey, `Searching the web for "${item.name}"…`, async () => {
+        const res = await fetchWithRetry("/api/claude/find-product", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: item.name,
+            category: item.category,
+            description: item.description,
+            color: item.color,
+            imageUrl,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Product search failed.");
+        return (json.matches ?? []) as ProductMatch[];
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Product search failed.");
-      const found: ProductMatch[] = json.matches ?? [];
       setMatches(found);
+      try {
+        sessionStorage.setItem(`finish-search-result:${taskKey}`, JSON.stringify(found));
+      } catch {
+        // ignore — storage unavailable
+      }
       if (found.length === 0) {
         notify("success", "No confident product match found on the web.");
       }

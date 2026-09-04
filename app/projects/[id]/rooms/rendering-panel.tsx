@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { STYLE_PALETTES, getPalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
@@ -22,6 +23,7 @@ export function RenderingPanel({
   onRoomUpdated: (room: RoomWithRelations) => void;
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
   const [generating, setGenerating] = useState<StyleName | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -52,26 +54,29 @@ export function RenderingPanel({
   async function handleGenerateImage(rendering: RoomWithRelations["renderings"][number]) {
     if (!rendering.image_prompt) return;
     setGeneratingImageFor(rendering.id);
+    const taskKey = `room-image:${rendering.id}`;
     try {
-      const res = await fetchWithRetry("/api/openai/generate-room-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: rendering.image_prompt }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Image generation failed.");
+      await run(taskKey, `Generating "${room.name}" — ${rendering.style} image…`, async () => {
+        const res = await fetchWithRetry("/api/openai/generate-room-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: rendering.image_prompt }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Image generation failed.");
 
-      const byteChars = atob(json.base64);
-      const bytes = new Uint8Array(byteChars.length);
-      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
-      const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
+        const byteChars = atob(json.base64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
 
-      const url = await uploadPhotoBlob(rendering.id, blob, "png");
-      onRoomUpdated({
-        ...room,
-        renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+        const url = await uploadPhotoBlob(rendering.id, blob, "png");
+        onRoomUpdated({
+          ...room,
+          renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+        });
+        notify("success", "AI image generated.");
       });
-      notify("success", "AI image generated.");
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Image generation failed.");
     } finally {
@@ -81,50 +86,53 @@ export function RenderingPanel({
 
   async function handleGenerate(style: StyleName) {
     setGenerating(style);
+    const taskKey = `room-concept:${room.id}:${style}`;
     try {
-      const palette = getPalette(style);
-      const illustration_svg = buildRoomIllustration(room.name, palette);
+      await run(taskKey, `Generating "${room.name}" — ${style} concept…`, async () => {
+        const palette = getPalette(style);
+        const illustration_svg = buildRoomIllustration(room.name, palette);
 
-      const res = await fetchWithRetry("/api/claude/room-concept", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomName: room.name,
-          roomType: room.type,
-          style,
-          width: room.width,
-          depth: room.depth,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Concept generation failed.");
-
-      const saveRes = await saveRendering(projectId, room.id, {
-        style,
-        colors: palette.colors,
-        description: json.description,
-        image_prompt: json.image_prompt,
-        illustration_svg,
-      });
-      if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save rendering.");
-
-      onRoomUpdated({
-        ...room,
-        renderings: [
-          {
-            id: crypto.randomUUID(),
+        const res = await fetchWithRetry("/api/claude/room-concept", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomName: room.name,
+            roomType: room.type,
             style,
-            colors: palette.colors,
-            description: json.description,
-            image_prompt: json.image_prompt,
-            illustration_svg,
-            uploaded_photo_url: null,
-            created_at: new Date().toISOString(),
-          },
-          ...room.renderings,
-        ],
+            width: room.width,
+            depth: room.depth,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Concept generation failed.");
+
+        const saveRes = await saveRendering(projectId, room.id, {
+          style,
+          colors: palette.colors,
+          description: json.description,
+          image_prompt: json.image_prompt,
+          illustration_svg,
+        });
+        if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save rendering.");
+
+        onRoomUpdated({
+          ...room,
+          renderings: [
+            {
+              id: crypto.randomUUID(),
+              style,
+              colors: palette.colors,
+              description: json.description,
+              image_prompt: json.image_prompt,
+              illustration_svg,
+              uploaded_photo_url: null,
+              created_at: new Date().toISOString(),
+            },
+            ...room.renderings,
+          ],
+        });
+        notify("success", `Generated a ${style} rendering.`);
       });
-      notify("success", `Generated a ${style} rendering.`);
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Rendering generation failed.");
     } finally {
@@ -157,10 +165,10 @@ export function RenderingPanel({
           <button
             key={p.name}
             className="btn-outline text-xs"
-            disabled={generating !== null}
+            disabled={generating !== null || isRunning(`room-concept:${room.id}:${p.name}`)}
             onClick={() => handleGenerate(p.name)}
           >
-            {generating === p.name ? "Generating…" : p.name}
+            {generating === p.name || isRunning(`room-concept:${room.id}:${p.name}`) ? "Generating…" : p.name}
             <span className="ml-1.5 flex">
               {p.colors.slice(0, 3).map((c) => (
                 <span key={c} className="-ml-1 h-3 w-3 rounded-full border border-white" style={{ backgroundColor: c }} />
@@ -202,9 +210,9 @@ export function RenderingPanel({
                   <button
                     className="btn-amber flex-1 text-xs"
                     onClick={() => handleGenerateImage(r)}
-                    disabled={generatingImageFor === r.id}
+                    disabled={generatingImageFor === r.id || isRunning(`room-image:${r.id}`)}
                   >
-                    {generatingImageFor === r.id ? "Generating…" : "Generate image (AI)"}
+                    {generatingImageFor === r.id || isRunning(`room-image:${r.id}`) ? "Generating…" : "Generate image (AI)"}
                   </button>
                 )}
                 <input

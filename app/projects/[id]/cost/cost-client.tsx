@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteCostEstimate, saveCostEstimate } from "@/app/projects/[id]/cost/actions";
 import { COST_TIER_BANDS, COST_TIER_LABEL } from "@/lib/costTiers";
@@ -55,6 +56,8 @@ export function CostClient({
   initialEstimates: CostEstimate[];
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const estimateTaskKey = `cost-estimate:${projectId}`;
   const [estimates, setEstimates] = useState<CostEstimate[]>(initialEstimates);
   const [estimating, setEstimating] = useState(false);
   const [estimateStatus, setEstimateStatus] = useState("");
@@ -64,23 +67,25 @@ export function CostClient({
     setEstimating(true);
     setEstimateStatus("Reading plan pages…");
     try {
-      const res = await fetchWithRetry("/api/claude/estimate-construction-cost", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pages: planPages.map((p) => ({ label: p.label, url: p.storage_url })),
-          projectAddress,
-          roomsSqftHint,
-        }),
+      await run(estimateTaskKey, "Estimating construction cost…", async () => {
+        const res = await fetchWithRetry("/api/claude/estimate-construction-cost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pages: planPages.map((p) => ({ label: p.label, url: p.storage_url })),
+            projectAddress,
+            roomsSqftHint,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Cost estimation failed.");
+
+        const saveRes = await saveCostEstimate(projectId, json);
+        if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save estimate.");
+
+        setEstimates((prev) => [{ id: saveRes.id!, project_id: projectId, ...json, created_at: new Date().toISOString() }, ...prev]);
+        notify("success", "Cost estimate ready.");
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Cost estimation failed.");
-
-      const saveRes = await saveCostEstimate(projectId, json);
-      if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save estimate.");
-
-      setEstimates((prev) => [{ id: saveRes.id!, project_id: projectId, ...json, created_at: new Date().toISOString() }, ...prev]);
-      notify("success", "Cost estimate ready.");
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Cost estimation failed.");
     } finally {
@@ -107,8 +112,8 @@ export function CostClient({
               Upload a plan first →
             </Link>
           ) : (
-            <button className="btn-amber" onClick={handleEstimate} disabled={estimating}>
-              {estimating ? estimateStatus || "Estimating…" : "Estimate cost from plan"}
+            <button className="btn-amber" onClick={handleEstimate} disabled={estimating || isRunning(estimateTaskKey)}>
+              {estimating || isRunning(estimateTaskKey) ? estimateStatus || "Estimating…" : "Estimate cost from plan"}
             </button>
           )}
         </div>
