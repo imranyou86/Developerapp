@@ -119,6 +119,13 @@ export async function POST(req: Request) {
       model: CLAUDE_MODEL,
       max_tokens: 8000,
       system: SYSTEM_PROMPT,
+      // Adaptive thinking at low effort — full-effort reasoning over several plan-sheet images
+      // routinely blew past Vercel's 60s function timeout, which surfaced client-side as an
+      // endless "Analyzing plan…" spinner rather than a clean error. Do NOT use
+      // `thinking: {type: "disabled"}` instead — tested and confirmed to leak reasoning into
+      // plain visible text instead of staying in its own thinking block.
+      thinking: { type: "adaptive" },
+      output_config: { effort: "low" },
       messages: [{ role: "user", content }],
     });
 
