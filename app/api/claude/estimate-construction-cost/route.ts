@@ -2,13 +2,8 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
+import { COST_TIER_BANDS } from "@/lib/costTiers";
 import type { CostTier, QualityTier } from "@/lib/types";
-
-const COST_TIER_BANDS: Record<CostTier, { low: number; high: number }> = {
-  low: { low: 250, high: 300 },
-  mid: { low: 350, high: 400 },
-  high: { low: 450, high: 550 },
-};
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -40,6 +35,20 @@ shown every sheet of an architect's plan set together (floors, elevations, site 
 was provided) and asked to produce a grounded construction cost estimate from what's actually
 drawn, not a generic guess.
 
+Before pricing anything, use the web_search tool to ground your numbers in real, current data
+instead of relying only on your training knowledge:
+- Search for the current cost per square foot to build a house in the project's specific city/
+  metro if a location was given (e.g. "average cost per square foot to build a house in
+  <city/region> 2026", local builder association or cost-estimator sources, recent local news on
+  construction costs). If no location was given, search for the current U.S. national average
+  residential construction cost per square foot instead.
+- Do 1-3 searches — enough to anchor the tier and rate to what real sources say right now, not
+  more. Prioritize recent (last 1-2 years) sources over old ones; construction costs move with
+  material/labor inflation.
+- In prediction_notes, briefly say what you found and how it moved your number (e.g. "regional
+  data put mid-range builds in this metro at $370-420/sqft, above the national baseline, which
+  pushed this estimate to the top of the mid tier").
+
 Your job:
 1. Determine total_sqft — the total conditioned/living square footage across all floors, read
    from dimensions and room labels on the plan. Cross-reference multiple sheets if the plan spans
@@ -63,8 +72,9 @@ Your job:
      - mid tier: $350-400/sqft (standard-to-premium builds with moderate complexity)
      - high tier: $450+/sqft (premium/luxury builds, high complexity, or an expensive market —
        go above $550/sqft for genuinely high-end or highly complex projects)
-   Nudge the tier and the exact numbers within it up or down for the project's location if given
-   (e.g. a high-cost-of-construction metro pushes toward the top of a tier or into the next one).
+   Nudge the tier and the exact numbers within it up or down using what you found via web search
+   for the project's location (e.g. a high-cost-of-construction metro pushes toward the top of a
+   tier or into the next one).
 6. Give a breakdown — the standard cost categories (Sitework & Foundation, Framing & Structure,
    Roofing & Exterior Envelope, Windows & Doors, Plumbing, Electrical, HVAC, Interior Finishes,
    Cabinetry & Countertops, General Conditions & Permits — merge/adjust categories as sensible for
@@ -160,6 +170,9 @@ export async function POST(req: Request) {
       system: SYSTEM_PROMPT,
       thinking: { type: "adaptive" },
       output_config: { effort: "low" },
+      // Basic search tool (not the sandboxed 20260209 variant) — that one took 60-90s+ in
+      // testing, well past this route's own 60s function timeout.
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
       messages: [{ role: "user", content }],
     });
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteCostEstimate, saveCostEstimate } from "@/app/projects/[id]/cost/actions";
+import { COST_TIER_BANDS, COST_TIER_LABEL } from "@/lib/costTiers";
 import type { CostBreakdownLine, CostEstimate, CostTier, QualityTier } from "@/lib/types";
 
 interface PlanPage {
@@ -26,11 +27,7 @@ const COST_TIER_STYLE: Record<CostTier, string> = {
   high: "badge bg-blueprint text-white",
 };
 
-const COST_TIER_LABEL: Record<CostTier, string> = {
-  low: "Low tier · $250–300/sqft",
-  mid: "Mid tier · $350–400/sqft",
-  high: "High tier · $450+/sqft",
-};
+const COST_TIERS: CostTier[] = ["low", "mid", "high"];
 
 const CONFIDENCE_STYLE: Record<string, string> = {
   high: "badge-sage",
@@ -150,28 +147,75 @@ export function CostClient({
 }
 
 function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete: () => void }) {
+  const recommendedTier = estimate.cost_tier ?? "mid";
+  const [selectedTier, setSelectedTier] = useState<CostTier>(recommendedTier);
+  const isRecommended = selectedTier === recommendedTier;
+  const sqft = estimate.total_sqft ?? 0;
+  const band = COST_TIER_BANDS[selectedTier];
+
+  // The AI's own headline numbers only apply to the tier it actually reasoned about. Swapping to
+  // a different tier falls back to a straight sqft × fixed-band calc — still deterministic and
+  // useful, just not AI-reasoned for this specific plan.
+  const perSqftLow = isRecommended && estimate.cost_per_sqft_low != null ? estimate.cost_per_sqft_low : band.low;
+  const perSqftHigh = isRecommended && estimate.cost_per_sqft_high != null ? estimate.cost_per_sqft_high : band.high;
+  const headlinePerSqft = isRecommended && estimate.predicted_cost_per_sqft != null
+    ? estimate.predicted_cost_per_sqft
+    : (band.low + band.high) / 2;
+  const contingencyPct = isRecommended ? estimate.contingency_pct ?? 0 : 0;
+  const headlineTotal = isRecommended && estimate.predicted_total_cost != null
+    ? estimate.predicted_total_cost
+    : Math.round(sqft * headlinePerSqft);
+  const totalLow = sqft * perSqftLow;
+  const totalHigh = sqft * perSqftHigh;
+  const midForBreakdown = isRecommended && estimate.total_cost_mid != null ? estimate.total_cost_mid : sqft * ((band.low + band.high) / 2);
+
   return (
     <div className="card p-5">
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {COST_TIERS.map((tier) => (
+          <button
+            key={tier}
+            onClick={() => setSelectedTier(tier)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              selectedTier === tier
+                ? "border-amber-dark bg-amber-dark text-white"
+                : "border-blueprint/15 text-blueprint/60 hover:border-blueprint/30"
+            }`}
+          >
+            {COST_TIER_LABEL[tier]}
+            {tier === recommendedTier && <span className="ml-1 opacity-80">· AI pick</span>}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wide text-blueprint/50">AI predicted cost</p>
-          <p className="text-2xl font-bold text-blueprint-dark">{currency(estimate.predicted_total_cost ?? estimate.total_cost_mid)}</p>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">
+            {isRecommended ? "AI predicted cost" : "Tier estimate (not AI-reasoned for this plan)"}
+          </p>
+          <p className="text-2xl font-bold text-blueprint-dark">{currency(headlineTotal)}</p>
           <p className="text-xs text-blueprint/50">
-            Likely range {currency(estimate.total_cost_low)} – {currency(estimate.total_cost_high)}
+            Likely range {currency(totalLow)} – {currency(totalHigh)}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {estimate.prediction_confidence && (
+          {isRecommended && estimate.prediction_confidence && (
             <span className={CONFIDENCE_STYLE[estimate.prediction_confidence]}>{estimate.prediction_confidence} confidence</span>
           )}
-          {estimate.cost_tier && <span className={COST_TIER_STYLE[estimate.cost_tier]}>{COST_TIER_LABEL[estimate.cost_tier]}</span>}
           {estimate.quality_tier && <span className={QUALITY_STYLE[estimate.quality_tier]}>{estimate.quality_tier}</span>}
           <span className="text-xs text-blueprint/40">{new Date(estimate.created_at).toLocaleString()}</span>
         </div>
       </div>
 
-      {estimate.prediction_notes && (
+      {isRecommended && estimate.prediction_notes && (
         <p className="mb-4 rounded-lg bg-amber/10 px-3 py-2 text-sm text-blueprint-dark">{estimate.prediction_notes}</p>
+      )}
+      {!isRecommended && (
+        <p className="mb-4 rounded-lg bg-blueprint/5 px-3 py-2 text-sm text-blueprint/60">
+          Claude recommended the {COST_TIER_LABEL[recommendedTier]} for this plan. This {COST_TIER_LABEL[selectedTier]} view is a
+          straight {estimate.total_sqft?.toLocaleString() ?? "—"} sqft × fixed-band calculation, not reasoned against the plan&apos;s
+          specific complexity.
+        </p>
       )}
 
       <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -184,32 +228,18 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
           <p className="font-semibold text-blueprint-dark">{estimate.stories ?? "—"}</p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-blueprint/50">Predicted $/sqft</p>
-          <p className="font-semibold text-blueprint-dark">
-            {estimate.predicted_cost_per_sqft ? `$${Math.round(estimate.predicted_cost_per_sqft)}` : "—"}
-          </p>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">{isRecommended ? "Predicted $/sqft" : "$/sqft (mid)"}</p>
+          <p className="font-semibold text-blueprint-dark">{headlinePerSqft ? `$${Math.round(headlinePerSqft)}` : "—"}</p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-wide text-blueprint/50">Contingency</p>
+          <p className="text-xs uppercase tracking-wide text-blueprint/50">{isRecommended ? "Contingency" : "$/sqft range"}</p>
           <p className="font-semibold text-blueprint-dark">
-            {estimate.contingency_pct != null ? `${Math.round(estimate.contingency_pct)}%` : "—"}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-blueprint/50">$/sqft (mid)</p>
-          <p className="font-semibold text-blueprint-dark">{estimate.cost_per_sqft_mid ? `$${Math.round(estimate.cost_per_sqft_mid)}` : "—"}</p>
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-blueprint/50">$/sqft range</p>
-          <p className="font-semibold text-blueprint-dark">
-            {estimate.cost_per_sqft_low && estimate.cost_per_sqft_high
-              ? `$${Math.round(estimate.cost_per_sqft_low)}–$${Math.round(estimate.cost_per_sqft_high)}`
-              : "—"}
+            {isRecommended ? `${Math.round(contingencyPct)}%` : `$${Math.round(perSqftLow)}–$${Math.round(perSqftHigh)}`}
           </p>
         </div>
       </div>
 
-      {estimate.breakdown.length > 0 && <BreakdownBars breakdown={estimate.breakdown} />}
+      {estimate.breakdown.length > 0 && <BreakdownBars breakdown={estimate.breakdown} total={midForBreakdown} />}
 
       {estimate.complexity_factors.length > 0 && (
         <div className="mt-4">
@@ -231,7 +261,7 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
   );
 }
 
-function BreakdownBars({ breakdown }: { breakdown: CostBreakdownLine[] }) {
+function BreakdownBars({ breakdown, total }: { breakdown: CostBreakdownLine[]; total: number }) {
   return (
     <div>
       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-blueprint/50">Cost breakdown</p>
@@ -241,7 +271,7 @@ function BreakdownBars({ breakdown }: { breakdown: CostBreakdownLine[] }) {
             <div className="flex items-center justify-between text-sm">
               <span className="text-blueprint-dark">{line.category}</span>
               <span className="text-blueprint/60">
-                {currency(line.cost)} · {line.pct.toFixed(0)}%
+                {currency(Math.round(total * (line.pct / 100)))} · {line.pct.toFixed(0)}%
               </span>
             </div>
             <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-concrete">

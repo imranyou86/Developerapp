@@ -25,6 +25,56 @@ export function RenderingPanel({
   const [deleting, setDeleting] = useState<string | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
+  const [generatingImageFor, setGeneratingImageFor] = useState<string | null>(null);
+
+  async function uploadPhotoBlob(renderingId: string, blob: Blob, fileExt: string) {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not signed in.");
+
+    const path = `${user.id}/${projectId}/${renderingId}-${Date.now()}.${fileExt}`;
+    const { error: uploadError } = await supabase.storage.from("rendering-photos").upload(path, blob, {
+      contentType: blob.type,
+    });
+    if (uploadError) throw new Error(uploadError.message);
+
+    const { data: pub } = supabase.storage.from("rendering-photos").getPublicUrl(path);
+    const res = await saveRenderingPhoto(projectId, renderingId, pub.publicUrl);
+    if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
+    return pub.publicUrl;
+  }
+
+  async function handleGenerateImage(rendering: RoomWithRelations["renderings"][number]) {
+    if (!rendering.image_prompt) return;
+    setGeneratingImageFor(rendering.id);
+    try {
+      const res = await fetch("/api/openai/generate-room-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: rendering.image_prompt }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Image generation failed.");
+
+      const byteChars = atob(json.base64);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
+
+      const url = await uploadPhotoBlob(rendering.id, blob, "png");
+      onRoomUpdated({
+        ...room,
+        renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+      });
+      notify("success", "AI image generated.");
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Image generation failed.");
+    } finally {
+      setGeneratingImageFor(null);
+    }
+  }
 
   async function handleGenerate(style: StyleName) {
     setGenerating(style);
@@ -82,27 +132,11 @@ export function RenderingPanel({
   async function handlePhotoUpload(renderingId: string, file: File) {
     setUploadingPhotoFor(renderingId);
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
-
-      const path = `${user.id}/${projectId}/${renderingId}-${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("rendering-photos").upload(path, file, {
-        contentType: file.type,
-      });
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: pub } = supabase.storage.from("rendering-photos").getPublicUrl(path);
-      const res = await saveRenderingPhoto(projectId, renderingId, pub.publicUrl);
-      if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
-
+      const ext = file.name.split(".").pop() || "jpg";
+      const url = await uploadPhotoBlob(renderingId, file, ext);
       onRoomUpdated({
         ...room,
-        renderings: room.renderings.map((r) =>
-          r.id === renderingId ? { ...r, uploaded_photo_url: pub.publicUrl } : r
-        ),
+        renderings: room.renderings.map((r) => (r.id === renderingId ? { ...r, uploaded_photo_url: url } : r)),
       });
       notify("success", "Photo added — it now replaces the illustration.");
     } catch (err) {
@@ -156,11 +190,20 @@ export function RenderingPanel({
               {r.description && <p className="mb-2 text-xs text-blueprint/70">{r.description}</p>}
               {r.image_prompt && (
                 <details className="text-xs">
-                  <summary className="cursor-pointer text-amber-dark">Photorealistic prompt (copy to ChatGPT/image tool)</summary>
+                  <summary className="cursor-pointer text-amber-dark">Image prompt (used by &quot;Generate image&quot;, or copy to ChatGPT/Midjourney by hand)</summary>
                   <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{r.image_prompt}</p>
                 </details>
               )}
-              <div className="mt-2">
+              <div className="mt-2 flex gap-1.5">
+                {r.image_prompt && (
+                  <button
+                    className="btn-amber flex-1 text-xs"
+                    onClick={() => handleGenerateImage(r)}
+                    disabled={generatingImageFor === r.id}
+                  >
+                    {generatingImageFor === r.id ? "Generating…" : "Generate image (AI)"}
+                  </button>
+                )}
                 <input
                   ref={(el) => {
                     fileInputs.current[r.id] = el;
@@ -174,7 +217,7 @@ export function RenderingPanel({
                   }}
                 />
                 <button
-                  className="btn-ghost w-full text-xs"
+                  className="btn-ghost flex-1 text-xs"
                   onClick={() => fileInputs.current[r.id]?.click()}
                   disabled={uploadingPhotoFor === r.id}
                 >
@@ -182,7 +225,7 @@ export function RenderingPanel({
                     ? "Uploading…"
                     : r.uploaded_photo_url
                       ? "Replace photo"
-                      : "Upload photo (from external image tool)"}
+                      : "Upload photo"}
                 </button>
               </div>
             </div>

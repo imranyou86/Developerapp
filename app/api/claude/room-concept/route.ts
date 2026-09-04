@@ -40,11 +40,14 @@ export async function POST(req: Request) {
 Write two things:
 1. A short (2-3 sentence) design concept description a homeowner would enjoy reading —
    materials, colors, mood, a couple of signature details.
-2. A detailed, ready-to-paste photorealistic interior-design image-generation prompt
-   (for an external tool like ChatGPT image generation or Midjourney) describing this
-   room fully furnished and finished in the "${body.style}" style: camera angle, lighting,
-   materials, furniture, fixtures, and color palette. Write it as one dense paragraph,
-   the way a professional prompt-engineer would for an interior photography render.
+2. A concise, ready-to-paste image-generation prompt for an external tool (ChatGPT image
+   generation, Midjourney, etc). Image models follow short, concrete, front-loaded prompts far
+   better than long descriptive paragraphs — pack in the specifics, cut the flowery language.
+   Keep it to 40-60 words, structured in this order: [shot type] of a [style] [room type],
+   [3-4 concrete materials/finishes], [2-3 furniture/fixture pieces], [lighting], [camera/angle],
+   photorealistic, architectural photography. No scene-setting prose, no adjectives that don't
+   change what's rendered (skip "beautiful", "stunning", "inviting" — every word should be a
+   visual instruction).
 
 Respond with ONLY a JSON object: {"description": string, "image_prompt": string}`;
 

@@ -38,13 +38,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Project Settings -> API -> anon public key
 SUPABASE_SERVICE_ROLE_KEY=       # Project Settings -> API -> service_role key
 ANTHROPIC_API_KEY=               # console.anthropic.com -> API keys
 RENTCAST_API_KEY=                # rentcast.io -> API keys (Buyers Guide only)
+OPENAI_API_KEY=                  # platform.openai.com -> API keys (optional, Rooms tab image generation only)
 ```
 
-`ANTHROPIC_API_KEY` and `RENTCAST_API_KEY` are server-only and must never be
-exposed with a `NEXT_PUBLIC_` prefix — they're read only inside
-`app/api/*` routes. `RENTCAST_API_KEY` is only needed for the Buyers Guide
-tab (ZIP search + comps/value estimates) — the rest of the app works without
-it.
+`ANTHROPIC_API_KEY`, `RENTCAST_API_KEY`, and `OPENAI_API_KEY` are server-only
+and must never be exposed with a `NEXT_PUBLIC_` prefix — they're read only
+inside `app/api/*` routes. `RENTCAST_API_KEY` is only needed for the Buyers
+Guide tab (ZIP search + comps/value estimates); `OPENAI_API_KEY` is only
+needed for the Rooms tab's "Generate image (AI)" button — the rest of the
+app works without either.
 
 ### 3. Run locally
 
@@ -58,8 +60,8 @@ Visit `http://localhost:3000`, create an account, and start a construction.
 ### 4. Deploy
 
 Push to a Git repo and import it into [Vercel](https://vercel.com). Add the
-same four environment variables under Project Settings → Environment
-Variables, then deploy.
+same environment variables under Project Settings → Environment Variables,
+then deploy.
 
 ## Data model
 
@@ -85,10 +87,25 @@ yet; each one only adds what a given feature needed.
   rather than only reading page 1.
 - **Rooms & Tasks tab** — the flat "shoebox" room illustration is built
   entirely client-side from SVG (`lib/illustration.ts`), no AI call needed.
-  Claude is only used to write the short design concept and the
-  photorealistic image-generation prompt; actually generating a photoreal
-  image happens outside the app (ChatGPT, Midjourney, etc.) and the result
-  is uploaded back in, replacing the illustration.
+  Claude writes a short design concept plus a concise (40-60 word,
+  front-loaded) image-generation prompt — image models follow short concrete
+  prompts much better than long descriptive paragraphs. If `OPENAI_API_KEY`
+  is set, "Generate image (AI)" calls OpenAI's image API (`lib/openai.ts`)
+  with that prompt and uploads the result straight into the rendering,
+  replacing the illustration; without that key, copy the same prompt into
+  ChatGPT/Midjourney by hand and upload the result instead — the manual path
+  always works, the button is a convenience on top of it.
+- **Construction Cost tab** — Claude reads every plan page marked "Floor
+  plan layout" on the Plan tab and, grounded by a couple of web searches for
+  current regional (or national, if no address) construction cost data, picks
+  a pricing tier (Low $250-300/sqft, Mid $350-400/sqft, High $450+/sqft) and
+  gives both a single "most accurate" predicted total (with a contingency %
+  for what the plan can't show) and the tier's range, plus a category cost
+  breakdown. The $/sqft numbers are clamped server-side to the chosen tier's
+  fixed band rather than trusted verbatim from the model. You can manually
+  swap the displayed tier (Low/Mid/High buttons on each estimate) to compare
+  — swapping away from the AI-recommended tier falls back to a deterministic
+  sqft × fixed-band calculation rather than a second AI call.
 - **Payments tab** — bid PDFs are read client-side with pdf.js first; the
   *full* extracted text (not a truncated prefix) is sent to Claude, with the
   section around a detected "Payment Schedule" heading prioritized if the
@@ -115,8 +132,9 @@ yet; each one only adds what a given feature needed.
   comps) and estimate the after-repair/rebuild value (ARV). The buy/pass
   verdict and profit margin are computed deterministically from those
   numbers, not left to the model. A pursued deal converts into a real
-  construction project with one click. Both Claude web-search tool calls in
-  this app deliberately use the **basic** `web_search_20250305` tool type,
-  not the newer sandboxed variant — that one took 60-90+ seconds in testing
-  (routes searches through a server-side Python sandbox), well past a
-  serverless function's timeout.
+  construction project with one click. Every Claude web-search tool call in
+  this app (Buyers Guide, Finish ID's product match, Construction Cost)
+  deliberately uses the **basic** `web_search_20250305` tool type, not the
+  newer sandboxed variant — that one took 60-90+ seconds in testing (routes
+  searches through a server-side Python sandbox), well past a serverless
+  function's timeout.
