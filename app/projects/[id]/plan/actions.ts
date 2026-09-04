@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
+import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
 export async function addPlanPage(
   projectId: string,
@@ -11,12 +12,24 @@ export async function addPlanPage(
   sortOrder: number
 ): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase
+  const { error, data } = await supabase
     .from("plan_pages")
-    .insert({ project_id: projectId, storage_url: storageUrl, label, sort_order: sortOrder });
+    .insert({ project_id: projectId, storage_url: storageUrl, label, sort_order: sortOrder })
+    .select("id")
+    .single();
   if (error) return { ok: false, error: error.message };
+
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl,
+    fileName: label,
+    category: "plan",
+    sourceTable: "plan_pages",
+    sourceId: data.id,
+  });
+
   revalidatePath(`/projects/${projectId}/plan`);
-  return { ok: true };
+  return { ok: true, id: data.id };
 }
 
 export async function setPlanPageLayout(projectId: string, pageId: string, isLayout: boolean): Promise<ActionResult> {
@@ -31,6 +44,7 @@ export async function deletePlanPage(projectId: string, pageId: string): Promise
   const supabase = createClient();
   const { error } = await supabase.from("plan_pages").delete().eq("id", pageId);
   if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "plan_pages", pageId);
   revalidatePath(`/projects/${projectId}/plan`);
   return { ok: true };
 }

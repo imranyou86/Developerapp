@@ -202,7 +202,7 @@ function ChecklistItemRow({
       if (uploadError) throw new Error(uploadError.message);
 
       const { data: pub } = supabase.storage.from("checklist-photos").getPublicUrl(path);
-      const res = await addChecklistPhoto(projectId, item.id, pub.publicUrl);
+      const res = await addChecklistPhoto(projectId, item.id, pub.publicUrl, item.title);
       if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
 
       onUpdate(item.id, {

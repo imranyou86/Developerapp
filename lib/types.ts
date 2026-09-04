@@ -150,6 +150,20 @@ export interface ProjectShare {
   revoked_at: string | null;
 }
 
+export type FileCategory = "plan" | "bid" | "checklist_photo" | "rendering" | "finish_scan";
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  storage_url: string;
+  file_name: string;
+  category: FileCategory;
+  source_table: string;
+  source_id: string;
+  notes: string | null;
+  created_at: string;
+}
+
 export type DealStatus = "researching" | "pursuing" | "passed" | "converted";
 
 export interface Deal {

@@ -138,3 +138,15 @@ yet; each one only adds what a given feature needed.
   newer sandboxed variant — that one took 60-90+ seconds in testing (routes
   searches through a server-side Python sandbox), well past a serverless
   function's timeout.
+- **Files tab** — every upload across the app (plan pages, bid files,
+  checklist photos, rendering photos, finish scans) is mirrored into a
+  `project_files` row by the same server action that saves it
+  (`lib/projectFiles.ts`), so the Files tab lists everything in one place
+  without querying five different tables at once. It's a convenience index,
+  not a second source of truth — deleting the original (from its own tab)
+  removes the library row too, and re-uploading (e.g. replacing a rendering
+  photo) deletes-then-reinserts rather than piling up stale duplicates. Add
+  a note per file, then download individually (proxied through an API route
+  so the correct filename survives cross-origin — a plain link to a public
+  Supabase Storage URL won't) or select several and download as one zip
+  (`jszip`, built in-memory server-side).

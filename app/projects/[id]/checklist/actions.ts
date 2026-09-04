@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import type { ChecklistPhase } from "@/lib/types";
 import { CHECKLIST_SEED } from "@/lib/checklist-seed";
+import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/checklist`);
@@ -83,19 +84,35 @@ export async function deleteChecklistItem(projectId: string, itemId: string): Pr
 export async function addChecklistPhoto(
   projectId: string,
   itemId: string,
-  storageUrl: string
+  storageUrl: string,
+  itemTitle?: string
 ): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase.from("checklist_photos").insert({ checklist_item_id: itemId, storage_url: storageUrl });
+  const { error, data } = await supabase
+    .from("checklist_photos")
+    .insert({ checklist_item_id: itemId, storage_url: storageUrl })
+    .select("id")
+    .single();
   if (error) return { ok: false, error: error.message };
+
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl,
+    fileName: itemTitle ? `${itemTitle} photo` : "Checklist photo",
+    category: "checklist_photo",
+    sourceTable: "checklist_photos",
+    sourceId: data.id,
+  });
+
   revalidate(projectId);
-  return { ok: true };
+  return { ok: true, id: data.id };
 }
 
 export async function deleteChecklistPhoto(projectId: string, photoId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("checklist_photos").delete().eq("id", photoId);
   if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "checklist_photos", photoId);
   revalidate(projectId);
   return { ok: true };
 }

@@ -11,6 +11,7 @@ const TABS = [
   { slug: "budget", label: "Budget" },
   { slug: "cost", label: "Construction Cost" },
   { slug: "payments", label: "Payments" },
+  { slug: "files", label: "Files" },
 ];
 
 export function ProjectTabs({ projectId }: { projectId: string }) {

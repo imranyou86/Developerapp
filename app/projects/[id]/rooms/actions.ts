@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import type { FinishCategory, StyleName } from "@/lib/types";
+import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/rooms`);
@@ -114,7 +115,8 @@ export async function saveRendering(
 export async function saveRenderingPhoto(
   projectId: string,
   renderingId: string,
-  photoUrl: string
+  photoUrl: string,
+  label?: string
 ): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase
@@ -122,6 +124,16 @@ export async function saveRenderingPhoto(
     .update({ uploaded_photo_url: photoUrl })
     .eq("id", renderingId);
   if (error) return { ok: false, error: error.message };
+
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl: photoUrl,
+    fileName: label ?? "Room rendering",
+    category: "rendering",
+    sourceTable: "renderings",
+    sourceId: renderingId,
+  });
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -130,6 +142,7 @@ export async function deleteRendering(projectId: string, renderingId: string): P
   const supabase = createClient();
   const { error } = await supabase.from("renderings").delete().eq("id", renderingId);
   if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "renderings", renderingId);
   revalidate(projectId);
   return { ok: true };
 }

@@ -213,6 +213,25 @@ create table if not exists deal_analyses (
   created_at timestamptz not null default now()
 );
 
+-- Aggregation layer over every uploaded file across the app (plan pages, bid
+-- files, checklist photos, rendering photos, finish scans), kept in sync by
+-- the upload/delete server actions in each feature via lib/projectFiles.ts.
+-- source_table/source_id identify the originating row 1:1 so a re-upload
+-- (replacing a photo) deletes-then-reinserts rather than accumulating stale
+-- duplicates. This table is a convenience index, not a second source of
+-- truth — the feature tables above remain authoritative for their own data.
+create table if not exists project_files (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  storage_url text not null,
+  file_name text not null,
+  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan')),
+  source_table text not null,
+  source_id uuid not null,
+  notes text,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -229,6 +248,8 @@ create index if not exists idx_project_shares_project on project_shares (project
 create index if not exists idx_project_shares_token on project_shares (token);
 create index if not exists idx_deals_user on deals (user_id, created_at desc);
 create index if not exists idx_deal_analyses_deal on deal_analyses (deal_id, created_at desc);
+create unique index if not exists idx_project_files_source on project_files (source_table, source_id);
+create index if not exists idx_project_files_project on project_files (project_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
 -- Row level security — every row is scoped back to projects.user_id = auth.uid()
@@ -250,6 +271,7 @@ alter table payment_schedule_items enable row level security;
 alter table project_shares enable row level security;
 alter table deals enable row level security;
 alter table deal_analyses enable row level security;
+alter table project_files enable row level security;
 
 create policy "projects_owner" on projects
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -316,6 +338,10 @@ create policy "deals_owner" on deals
 create policy "deal_analyses_owner" on deal_analyses
   for all using (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()))
   with check (exists (select 1 from deals d where d.id = deal_analyses.deal_id and d.user_id = auth.uid()));
+
+create policy "project_files_owner" on project_files
+  for all using (exists (select 1 from projects p where p.id = project_files.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from projects p where p.id = project_files.project_id and p.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,

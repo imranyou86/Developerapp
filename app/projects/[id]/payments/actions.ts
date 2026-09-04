@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
+import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/payments`);
@@ -33,6 +34,17 @@ export async function saveBid(projectId: string, input: SaveBidInput): Promise<A
     .single();
   if (error) return { ok: false, error: error.message };
 
+  if (input.file_url) {
+    await recordProjectFile(supabase, {
+      projectId,
+      storageUrl: input.file_url,
+      fileName: input.file_name ?? `${input.contractor} bid`,
+      category: "bid",
+      sourceTable: "bids",
+      sourceId: bid.id,
+    });
+  }
+
   if (input.payment_schedule.length > 0) {
     const { error: scheduleError } = await supabase.from("payment_schedule_items").insert(
       input.payment_schedule.map((line) => ({ bid_id: bid.id, label: line.label, amount: line.amount }))
@@ -50,6 +62,7 @@ export async function deleteBid(projectId: string, bidId: string): Promise<Actio
   const supabase = createClient();
   const { error } = await supabase.from("bids").delete().eq("id", bidId);
   if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "bids", bidId);
   revalidate(projectId);
   return { ok: true };
 }

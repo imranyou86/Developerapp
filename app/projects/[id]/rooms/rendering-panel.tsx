@@ -41,7 +41,9 @@ export function RenderingPanel({
     if (uploadError) throw new Error(uploadError.message);
 
     const { data: pub } = supabase.storage.from("rendering-photos").getPublicUrl(path);
-    const res = await saveRenderingPhoto(projectId, renderingId, pub.publicUrl);
+    const style = room.renderings.find((r) => r.id === renderingId)?.style;
+    const label = style ? `${room.name} — ${style}` : room.name;
+    const res = await saveRenderingPhoto(projectId, renderingId, pub.publicUrl, label);
     if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
     return pub.publicUrl;
   }
