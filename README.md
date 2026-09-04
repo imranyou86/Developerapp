@@ -144,6 +144,19 @@ yet; each one only adds what a given feature needed.
   newer sandboxed variant — that one took 60-90+ seconds in testing (routes
   searches through a server-side Python sandbox), well past a serverless
   function's timeout.
+- **Buyers Guide ground-up rebuild calculator** — the zone field is a
+  dropdown of LA (LAMC) residential zones (`lib/laZoning.ts`), with an
+  "Other" fallback for anything not listed. "Look up %" grounds a starting
+  max-lot-coverage-percentage estimate for the selected zone in a web
+  search (`/api/claude/lookup-zoning-coverage`) — verified against the real
+  API: R1 correctly comes back medium-confidence with the Baseline
+  Hillside/RFA sliding-scale caveat spelled out, while a flat-coverage zone
+  like RD1.5 comes back high-confidence. Remodel and ground-up scopes each
+  keep their own manually-entered $/sqft and construction budget
+  (`costPerSqftByScope`/`budgetByScope`), so switching scope to compare
+  them doesn't overwrite whichever number you'd already typed for the
+  other one — analysis always runs against whichever scope is currently
+  selected.
 - **Files tab** — every upload across the app (plan pages, bid files,
   checklist photos, rendering photos, finish scans) is mirrored into a
   `project_files` row by the same server action that saves it

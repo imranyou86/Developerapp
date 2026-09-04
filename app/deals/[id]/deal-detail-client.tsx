@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { convertDealToProject, updateDealStatus, updateDealZoning } from "@/app/deals/actions";
 import { saveDealAnalysis } from "@/app/deals/[id]/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { LA_ZONES } from "@/lib/laZoning";
 import type { Deal, DealAnalysis, DealScope, DealStatus, DealVerdict } from "@/lib/types";
 
 const STATUS_STYLE: Record<DealStatus, string> = {
@@ -43,14 +44,26 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   const [scopeDescription, setScopeDescription] = useState(
     "Full interior remodel: kitchen, baths, flooring, paint, updated systems."
   );
-  const [costPerSqft, setCostPerSqft] = useState(400);
+  // Remodel and ground-up are different projects with different costs — each
+  // scope keeps its own manually-entered $/sqft and budget, so switching
+  // between them (e.g. to compare) doesn't clobber whichever number you
+  // already typed in for the other one.
+  const [costPerSqftByScope, setCostPerSqftByScope] = useState<Record<DealScope, number>>({
+    remodel: 400,
+    ground_up: 400,
+  });
+  const costPerSqft = costPerSqftByScope[scope];
   // Ground-up rebuilds aren't bounded by the existing structure's footprint —
   // what you can actually build depends on the lot's zoning (FAR, setbacks,
   // lot coverage, height limits), which varies by jurisdiction. Remodels use
   // the existing home's sqft; ground-up uses this separate, editable target.
   const [buildableSqft, setBuildableSqft] = useState(() => deal.sqft ?? 2000);
   const sqftBasis = scope === "ground_up" ? buildableSqft : (deal.sqft ?? buildableSqft);
-  const [budget, setBudget] = useState(() => Math.round((deal.sqft ?? 2000) * 400));
+  const [budgetByScope, setBudgetByScope] = useState<Record<DealScope, number>>({
+    remodel: Math.round((deal.sqft ?? 2000) * 400),
+    ground_up: Math.round((deal.sqft ?? 2000) * 400),
+  });
+  const budget = budgetByScope[scope];
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeStatus, setAnalyzeStatus] = useState("");
 
@@ -61,9 +74,12 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   // formula, not a flat lot-coverage %.
   const [lotSize, setLotSize] = useState(deal.lot_size ?? "");
   const [zone, setZone] = useState(deal.zone ?? "");
+  const [zoneIsOther, setZoneIsOther] = useState(() => !!deal.zone && !LA_ZONES.some((z) => z.code === deal.zone));
   const [lotCoveragePct, setLotCoveragePct] = useState(deal.lot_coverage_pct ?? "");
   const [savingZoning, setSavingZoning] = useState(false);
   const [lookingUpDetails, setLookingUpDetails] = useState(false);
+  const [lookingUpCoverage, setLookingUpCoverage] = useState(false);
+  const coverageLookupTaskKey = `deal-zoning-coverage:${deal.id}`;
 
   async function handleLookupLotSize() {
     setLookingUpDetails(true);
@@ -119,19 +135,52 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
   }
 
   function handleCostPerSqftChange(value: number) {
-    setCostPerSqft(value);
-    setBudget(Math.round(sqftBasis * value));
+    setCostPerSqftByScope((prev) => ({ ...prev, [scope]: value }));
+    setBudgetByScope((prev) => ({ ...prev, [scope]: Math.round(sqftBasis * value) }));
+  }
+
+  function handleBudgetChange(value: number) {
+    setBudgetByScope((prev) => ({ ...prev, [scope]: value }));
   }
 
   function handleBuildableSqftChange(value: number) {
     setBuildableSqft(value);
-    if (scope === "ground_up") setBudget(Math.round(value * costPerSqft));
+    if (scope === "ground_up") {
+      setBudgetByScope((prev) => ({ ...prev, ground_up: Math.round(value * costPerSqftByScope.ground_up) }));
+    }
   }
 
   function handleScopeChange(next: DealScope) {
     setScope(next);
-    const basis = next === "ground_up" ? buildableSqft : (deal.sqft ?? buildableSqft);
-    setBudget(Math.round(basis * costPerSqft));
+  }
+
+  async function handleLookupCoverage() {
+    if (!zone.trim()) {
+      notify("error", "Select a zone first.");
+      return;
+    }
+    setLookingUpCoverage(true);
+    try {
+      await run(coverageLookupTaskKey, `Looking up max lot coverage for ${zone}…`, async () => {
+        const res = await fetchWithRetry("/api/claude/lookup-zoning-coverage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zone: zone.trim(), address: deal.address, city: deal.city, state: deal.state }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
+        if (json.buildable_pct == null) {
+          notify("error", json.notes || "Couldn't find a buildable percentage for this zone from public sources.");
+          return;
+        }
+        setLotCoveragePct(json.buildable_pct);
+        notify("success", `${json.buildable_pct}% (${json.confidence} confidence). ${json.notes}`);
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Lookup failed.");
+    } finally {
+      setLookingUpCoverage(false);
+    }
   }
 
   async function handleStatusChange(next: DealStatus) {
@@ -391,8 +440,49 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                       <input className="input" type="number" value={lotSize} onChange={(e) => setLotSize(e.target.value === "" ? "" : Number(e.target.value))} />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[11px] text-blueprint/50">Zone (e.g. R1, RD1.5)</label>
-                      <input className="input" value={zone} onChange={(e) => setZone(e.target.value)} />
+                      <label className="mb-1 block text-[11px] text-blueprint/50">Zone</label>
+                      {zoneIsOther ? (
+                        <div className="flex gap-1">
+                          <input
+                            className="input"
+                            value={zone}
+                            onChange={(e) => setZone(e.target.value)}
+                            placeholder="e.g. RA4-1"
+                          />
+                          <button
+                            type="button"
+                            className="btn-ghost shrink-0 px-2 text-xs"
+                            onClick={() => {
+                              setZoneIsOther(false);
+                              setZone("");
+                            }}
+                            title="Back to zone list"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          className="input"
+                          value={zone}
+                          onChange={(e) => {
+                            if (e.target.value === "__other__") {
+                              setZoneIsOther(true);
+                              setZone("");
+                            } else {
+                              setZone(e.target.value);
+                            }
+                          }}
+                        >
+                          <option value="">Select zone…</option>
+                          {LA_ZONES.map((z) => (
+                            <option key={z.code} value={z.code}>
+                              {z.label}
+                            </option>
+                          ))}
+                          <option value="__other__">Other / not listed…</option>
+                        </select>
+                      )}
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-blueprint/50">Max lot coverage %</label>
@@ -402,16 +492,25 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                         value={lotCoveragePct}
                         onChange={(e) => setLotCoveragePct(e.target.value === "" ? "" : Number(e.target.value))}
                       />
+                      <button
+                        type="button"
+                        className="mt-1 text-[11px] text-amber-dark hover:underline"
+                        onClick={handleLookupCoverage}
+                        disabled={lookingUpCoverage || isRunning(coverageLookupTaskKey) || !zone.trim()}
+                      >
+                        {lookingUpCoverage || isRunning(coverageLookupTaskKey) ? "Looking up…" : "Look up % ↗"}
+                      </button>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-blueprint/50">
-                    Look up this parcel&apos;s zone and lot coverage/floor-area limit on{" "}
+                    &quot;Look up %&quot; grounds a starting-point figure in a web search for this zone. LA single-family
+                    zones (R1 and variants) use a sliding-scale Residential Floor Area formula rather than a flat %, so a
+                    figure directly reported on{" "}
                     <a href="https://zimas.lacity.org/" target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
                       ZIMAS
                     </a>{" "}
-                    (search the address → Zoning Information tab). Note: LA single-family zones (R1 and variants) use a
-                    sliding-scale Residential Floor Area formula rather than a flat %, so a directly-reported max is more
-                    accurate there than this calculator — this is a starting point, not an authoritative figure.
+                    for this specific parcel is more accurate there than either — this is a starting point, not an
+                    authoritative figure.
                   </p>
                   <div className="mt-2 flex gap-2">
                     <button type="button" className="btn-outline flex-1 text-xs" onClick={handleCalculateFromCoverage}>
@@ -437,9 +536,13 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
               </div>
               <div>
                 <label className="label">Construction budget</label>
-                <input className="input" type="number" value={budget} onChange={(e) => setBudget(Number(e.target.value) || 0)} />
+                <input className="input" type="number" value={budget} onChange={(e) => handleBudgetChange(Number(e.target.value) || 0)} />
               </div>
             </div>
+            <p className="text-xs text-blueprint/50">
+              Remodel and ground-up each keep their own $/sqft and budget — switching scope above
+              won&apos;t overwrite whichever number you&apos;ve entered for the other one.
+            </p>
             {!deal.sqft && scope === "remodel" && (
               <p className="text-xs text-amber-dark">
                 This listing has no square footage on file — enter the construction budget directly.
