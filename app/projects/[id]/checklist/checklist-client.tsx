@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
+import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   addChecklistItem,
@@ -160,6 +161,8 @@ function ChecklistItemRow({
   onRemove: (id: string) => void;
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const uploadTaskKey = `checklist-photo:${item.id}`;
   const [expanded, setExpanded] = useState(false);
   const [comment, setComment] = useState(item.comment ?? "");
   const [savingComment, setSavingComment] = useState(false);
@@ -189,26 +192,28 @@ function ChecklistItemRow({
   async function handlePhotoUpload(file: File) {
     setUploading(true);
     try {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in.");
+      await run(uploadTaskKey, `Uploading photo for "${item.title}"…`, async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
 
-      const path = `${user.id}/${projectId}/${item.id}-${Date.now()}-${file.name}`;
-      const { error: uploadError } = await supabase.storage.from("checklist-photos").upload(path, file, {
-        contentType: file.type,
+        const path = `${user.id}/${projectId}/${item.id}-${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("checklist-photos").upload(path, file, {
+          contentType: file.type,
+        });
+        if (uploadError) throw new Error(uploadError.message);
+
+        const { data: pub } = supabase.storage.from("checklist-photos").getPublicUrl(path);
+        const res = await addChecklistPhoto(projectId, item.id, pub.publicUrl, item.title);
+        if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
+
+        onUpdate(item.id, {
+          checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.publicUrl }],
+        });
+        notify("success", "Photo added.");
       });
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: pub } = supabase.storage.from("checklist-photos").getPublicUrl(path);
-      const res = await addChecklistPhoto(projectId, item.id, pub.publicUrl, item.title);
-      if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
-
-      onUpdate(item.id, {
-        checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.publicUrl }],
-      });
-      notify("success", "Photo added.");
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Photo upload failed.");
     } finally {
@@ -235,13 +240,15 @@ function ChecklistItemRow({
         >
           {item.title}
         </button>
-        {(item.comment || item.checklist_photos.length > 0) && (
-          <span className="text-xs text-blueprint/40">
-            {item.comment && "📝"} {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length}`}
-          </span>
-        )}
-        <button className="text-xs text-blueprint/40 hover:text-amber" onClick={() => setExpanded((e) => !e)}>
-          {expanded ? "▾" : "▸"}
+        <button
+          className={`shrink-0 text-xs hover:underline ${
+            item.comment || item.checklist_photos.length > 0 ? "text-amber-dark" : "text-blueprint/40"
+          }`}
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {item.comment && "📝 "}
+          {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
+          {expanded ? "Notes & photos ▾" : "Notes & photos ▸"}
         </button>
         <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
           Remove
@@ -277,7 +284,7 @@ function ChecklistItemRow({
           )}
 
           <label className="btn-ghost inline-block cursor-pointer text-xs">
-            {uploading ? "Uploading…" : "+ Add photo"}
+            {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Add photo"}
             <input
               type="file"
               accept="image/*"
