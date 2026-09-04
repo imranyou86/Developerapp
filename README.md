@@ -83,34 +83,34 @@ yet; each one only adds what a given feature needed.
 - **Certificate of Occupancy** (the last per-project tab, `PROJECT_TABS` in
   `lib/permissions.ts`, `certificate-of-occupancy` slug — defaults visible
   to every role including Contractor, since inspection/clearance status is
-  field-relevant, not a financial tab) — looks up the construction's
-  Certificate of Occupancy status from its address: whether one's been
-  issued (and its CO number/issue date if so), any open or remaining
-  clearances blocking it, every issued permit it can find, and inspector
-  contact info when available (phone/email render as tap-to-call/email
-  `tel:`/`mailto:` links via the same `lib/phone.ts` helper Subcontractors
-  uses). One row per project (`certificate_of_occupancy_checks`, unique on
-  `project_id`) that "Update information" overwrites in place rather than
-  accumulating history — this is about current status, not a timeline of
-  past checks. If the construction has no address on file yet, the tab
-  shows an inline "enter one" field instead of the report — saving it
+  field-relevant, not a financial tab). First pass at this embedded LADBS's
+  "Property Activity Report" search behind a Claude web-search call, the
+  same pattern as the Buyers Guide's zoning/property-detail lookups — but
+  that tool is an interactive form (type an address, click search, results
+  load dynamically), not something search-engine-indexed or reachable by a
+  simple fetch, so a generic web search came back empty every time in
+  practice. Replaced with something that actually works: the tab embeds
+  LADBS's real Property Activity Report tool
+  (`https://www.ladbsservices2.lacity.org/OnlineServices/?service=plr`) in
+  an `<iframe>` — you search the construction's address yourself, directly
+  against LADBS's live tool, with a "Copy address" button and an "Open in
+  new tab" fallback alongside it in case LADBS blocks being framed (common
+  for city sites; nothing to do about that client-side if it happens). A
+  "Record findings" modal then lets you save what you found — status, CO
+  number, issue date, a growing list of open/remaining clearances, a
+  growing list of issued permits, and inspector contact info (phone/email
+  render as tap-to-call/email `tel:`/`mailto:` links via the shared
+  `lib/phone.ts` helper Subcontractors also uses) — displayed the same
+  clean way either way. One row per project
+  (`certificate_of_occupancy_checks`, unique on `project_id`, unchanged
+  from the first pass) that each save overwrites in place rather than
+  accumulating history — this is current status, not a timeline of past
+  checks — so it's only ever as current as whoever last recorded it,
+  which the tab says outright. If the construction has no address on file
+  yet, the tab shows an inline "enter one" field instead — saving it
   writes straight to `projects.address` (via the existing `renameProject`
   action, so it's consistent everywhere else in the app that uses it, not
-  a separate one-off address) and immediately kicks off the first check.
-  `app/api/claude/lookup-certificate-of-occupancy` does the actual
-  research — Claude with the same bounded web-search tool used for the
-  Buyers Guide's zoning/property-detail lookups (`web_search_20250305`,
-  capped uses, low thinking effort, 30s `maxDuration` to fit a serverless
-  function), primarily targeting LADBS (Los Angeles Department of Building
-  and Safety). This is inherently best-effort: LADBS's own permit-lookup
-  portal is an interactive form a general web search often can't reach
-  directly, so the prompt explicitly tells Claude to be honest about that
-  limitation (say what's missing in `notes`, keep `confidence` at
-  medium/low) rather than presenting a search-engine guess as fact — never
-  invent a CO/permit number or inspector name. The tab carries a standing
-  disclaimer that this only covers LADBS's jurisdiction (City of LA) and
-  is a research aid to verify against LADBS directly, not a live query
-  against their database.
+  a separate one-off address).
 - **Subcontractors** (top-level, next to Buyers Guide/Interior Design —
   gated by the same `tab_permissions` matrix, `subcontractors` tab, default
   hidden for Contractor) — a shared directory (`app/subcontractors/`), not
