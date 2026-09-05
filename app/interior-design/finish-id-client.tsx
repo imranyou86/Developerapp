@@ -9,8 +9,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { addFinish } from "@/app/projects/[id]/rooms/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { usePersistedSelection } from "@/lib/usePersistedSelection";
-import { deleteFinishScan, saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
+import { deleteFinishScan, saveFinishScan } from "@/app/interior-design/finish-id-actions";
 import type { FinishCategory, IdentifiedFinish } from "@/lib/types";
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
 
 interface RoomOption {
   id: string;
@@ -52,17 +57,17 @@ function currency(n: number): string {
 }
 
 export function FinishIdClient({
-  projectId,
-  rooms,
+  projects,
+  roomsByProject,
   initialScans,
 }: {
-  projectId: string;
-  rooms: RoomOption[];
+  projects: ProjectOption[];
+  roomsByProject: Record<string, RoomOption[]>;
   initialScans: FinishScanRow[];
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
-  const uploadTaskKey = `finish-upload:${projectId}`;
+  const uploadTaskKey = "finish-upload";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scans, setScans] = useState<FinishScanRow[]>(initialScans);
   const [uploading, setUploading] = useState(false);
@@ -81,7 +86,9 @@ export function FinishIdClient({
         } = await supabase.auth.getUser();
         if (!user) throw new Error("Not signed in.");
 
-        const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+        // No project segment — a scan isn't tied to a construction up
+        // front, unlike every other feature's storage path.
+        const path = `${user.id}/${Date.now()}-${file.name}`;
         const { error: uploadError } = await supabase.storage.from("finish-scans").upload(path, file, {
           contentType: file.type,
         });
@@ -106,7 +113,7 @@ export function FinishIdClient({
           confidence: item.confidence,
         }));
 
-        const saveRes = await saveFinishScan(projectId, pub.publicUrl, file.name, results);
+        const saveRes = await saveFinishScan(pub.publicUrl, file.name, results);
         if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save scan.");
 
         const newScan: FinishScanRow = {
@@ -141,16 +148,12 @@ export function FinishIdClient({
           <div>
             <h2 className="font-semibold text-blueprint-dark">Identify finishes from a photo</h2>
             <p className="text-sm text-blueprint/60">
-              Upload any photo or screenshot — a listing photo, a Pinterest screenshot, a snapshot
-              from a showroom — and Claude will identify the stone, tile, faucets, paint, and other
-              finishes it can see, so you can add the ones you like straight to a room.
+              Upload any photo or screenshot — a listing photo, a Pinterest screenshot, a snapshot from a showroom —
+              and Claude will identify the stone, tile, faucets, paint, and other finishes it can see. Once
+              identified, send the ones you like to a specific construction&apos;s room.
             </p>
           </div>
-          <button
-            className="btn-amber"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || isRunning(uploadTaskKey) || rooms.length === 0}
-          >
+          <button className="btn-amber" onClick={() => fileInputRef.current?.click()} disabled={uploading || isRunning(uploadTaskKey)}>
             {uploading || isRunning(uploadTaskKey) ? uploadStatus || "Working…" : "Upload photo"}
           </button>
           <input
@@ -164,9 +167,6 @@ export function FinishIdClient({
             }}
           />
         </div>
-        {rooms.length === 0 && (
-          <p className="mt-2 text-xs text-amber-dark">Add a room first (Rooms &amp; Tasks tab) so identified finishes have somewhere to go.</p>
-        )}
       </div>
 
       {scans.length === 0 ? (
@@ -176,9 +176,9 @@ export function FinishIdClient({
           {scans.map((scan) => (
             <ScanCard
               key={scan.id}
-              projectId={projectId}
               scan={scan}
-              rooms={rooms}
+              projects={projects}
+              roomsByProject={roomsByProject}
               expanded={expandedScanId === scan.id}
               onToggle={() => setExpandedScanId((id) => (id === scan.id ? null : scan.id))}
               onDelete={() => setDeleting(scan)}
@@ -190,13 +190,13 @@ export function FinishIdClient({
       <ConfirmDialog
         open={!!deleting}
         title="Delete scan?"
-        message="This photo and its identified finishes list will be permanently removed. Anything already added to a room's Finishes list stays there."
+        message="This photo and its identified finishes list will be permanently removed. Anything already sent to a construction's room stays there."
         confirmLabel="Delete"
         danger
         onCancel={() => setDeleting(null)}
         onConfirm={async () => {
           if (!deleting) return;
-          const res = await deleteFinishScan(projectId, deleting.id);
+          const res = await deleteFinishScan(deleting.id);
           if (!res.ok) {
             notify("error", res.error ?? "Could not delete scan.");
           } else {
@@ -224,16 +224,16 @@ const FINISH_CATEGORY_SET = new Set<string>([
 ]);
 
 function ScanCard({
-  projectId,
   scan,
-  rooms,
+  projects,
+  roomsByProject,
   expanded,
   onToggle,
   onDelete,
 }: {
-  projectId: string;
   scan: FinishScanRow;
-  rooms: RoomOption[];
+  projects: ProjectOption[];
+  roomsByProject: Record<string, RoomOption[]>;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
@@ -244,17 +244,24 @@ function ScanCard({
   // entry from that older behavior would load back in and look like the
   // "default unchecked" fix never took effect.
   const [selected, setSelected] = usePersistedSelection(`finish-scan-selected-v2:${scan.id}`, () => new Set());
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const rooms = roomsByProject[projectId] ?? [];
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<Set<number>>(new Set());
   const [matchByItem, setMatchByItem] = useState<Record<number, ProductMatch | null>>({});
+
+  function handleProjectChange(id: string) {
+    setProjectId(id);
+    setRoomId(roomsByProject[id]?.[0]?.id ?? "");
+  }
 
   function selectAll(check: boolean) {
     setSelected(check ? new Set(scan.results.map((_, i) => String(i))) : new Set());
   }
 
   async function handleAddSelected() {
-    if (!roomId || selected.size === 0) return;
+    if (!projectId || !roomId || selected.size === 0) return;
     setAdding(true);
     try {
       const indices = Array.from(selected, Number);
@@ -275,9 +282,9 @@ function ScanCard({
         if (!res.ok) throw new Error(res.error ?? `Could not add "${item.name}".`);
       }
       setAdded((prev) => new Set([...prev, ...indices]));
-      notify("success", `Added ${indices.length} item(s) to the room's finishes.`);
+      notify("success", `Sent ${indices.length} item(s) to the room's finishes.`);
     } catch (err) {
-      notify("error", err instanceof Error ? err.message : "Could not add items.");
+      notify("error", err instanceof Error ? err.message : "Could not send items.");
     } finally {
       setAdding(false);
     }
@@ -342,19 +349,37 @@ function ScanCard({
                 ))}
               </div>
 
-              {rooms.length > 0 && (
-                <div className="flex items-center gap-2 border-t border-blueprint/10 pt-3">
-                  <select className="input flex-1" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
-                    {rooms.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="btn-primary" onClick={handleAddSelected} disabled={adding || selected.size === 0}>
-                    {adding ? "Adding…" : `Add ${selected.size} to room`}
-                  </button>
+              {projects.length > 0 ? (
+                <div className="space-y-2 border-t border-blueprint/10 pt-3">
+                  <p className="text-xs font-medium text-blueprint-dark">Send selected to a construction</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select className="input flex-1" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {rooms.length > 0 ? (
+                      <select className="input flex-1" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+                        {rooms.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="flex-1 text-xs text-amber-dark">No rooms in this construction yet.</p>
+                    )}
+                    <button className="btn-primary" onClick={handleAddSelected} disabled={adding || selected.size === 0 || rooms.length === 0}>
+                      {adding ? "Sending…" : `Send ${selected.size} to room`}
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <p className="border-t border-blueprint/10 pt-3 text-xs text-amber-dark">
+                  Add a construction first so identified finishes have somewhere to go.
+                </p>
               )}
             </>
           )}
@@ -447,7 +472,7 @@ function IdentifiedItemRow({
         <span className="flex-1">
           <span className="font-medium text-blueprint-dark">{item.name}</span>
           <span className={`ml-2 ${CONFIDENCE_STYLE[item.confidence]}`}>{item.confidence} confidence</span>
-          {added && <span className="badge-sage ml-2">added</span>}
+          {added && <span className="badge-sage ml-2">sent</span>}
           <br />
           <span className="text-xs text-blueprint/60">
             {item.category}

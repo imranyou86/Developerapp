@@ -63,7 +63,7 @@ export default async function AdminPage() {
             </button>
           </form>
         </div>
-        <TopNav showAdmin showDeals showInteriorDesign showConstructionCost showSubcontractors />
+        <TopNav showAdmin showDeals showInteriorDesign showConstructionCost showLandscape showSubcontractors />
       </header>
 
       <main className="mx-auto max-w-5xl space-y-10 px-6 py-8">

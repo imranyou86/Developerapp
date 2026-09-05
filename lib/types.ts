@@ -159,7 +159,8 @@ export type FileCategory =
   | "finish_scan"
   | "document"
   | "photo"
-  | "interior_design";
+  | "interior_design"
+  | "landscape_design";
 
 export interface ProjectFile {
   id: string;
@@ -195,6 +196,24 @@ export interface InteriorDesign {
   sqft: number | null;
   layout: PlacedFixture[];
   original_photo_url: string | null;
+  generated_image_url: string;
+  prompt: string;
+  created_at: string;
+}
+
+export interface LandscapeComponentSelection {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+export interface LandscapeDesign {
+  id: string;
+  project_id: string;
+  style: string;
+  components: LandscapeComponentSelection[];
+  notes: string | null;
+  original_photo_url: string;
   generated_image_url: string;
   prompt: string;
   created_at: string;

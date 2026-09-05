@@ -1,10 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
-import { ProjectPicker } from "@/components/ProjectPicker";
-import { InteriorDesignClient } from "@/app/interior-design/interior-design-client";
+import { InteriorDesignSections } from "@/app/interior-design/interior-design-sections";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
+import type { IdentifiedFinish } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,9 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
 
   // Fall back to the only project when there's just one — otherwise require
   // an explicit pick, since interior_designs always belongs to one
-  // construction and there's no reasonable default among several.
+  // construction and there's no reasonable default among several. Only
+  // matters for the "Design a room" section — Finish ID is universal and
+  // doesn't need a selected construction to work.
   const requested = searchParams.project;
   const selectedId = requested && projectList.some((p) => p.id === requested) ? requested : projectList.length === 1 ? projectList[0].id : null;
 
@@ -30,6 +32,12 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
   let planPages: { label: string; storage_url: string }[] = [];
   if (selectedId) {
     [rooms, designs, planPages] = await Promise.all([loadRooms(selectedId), loadDesigns(selectedId), loadPlanPages(selectedId)]);
+  }
+
+  const [scans, allRooms] = await Promise.all([loadFinishScans(), loadAllRooms()]);
+  const roomsByProject: Record<string, { id: string; name: string }[]> = {};
+  for (const r of allRooms) {
+    (roomsByProject[r.project_id] ??= []).push({ id: r.id, name: r.name });
   }
 
   return (
@@ -54,34 +62,22 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
           showConstructionCost={allowedTopLevel.includes("cost")}
+          showLandscape={allowedTopLevel.includes("landscape")}
           showSubcontractors={allowedTopLevel.includes("subcontractors")}
         />
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-6">
-          <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Interior Design</h2>
-          <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction this design is for — sizing can come from that project&apos;s pre-added rooms.
-          </p>
-          {projectList.length === 0 ? (
-            <p className="text-sm text-blueprint/50">
-              No constructions yet — create one under Constructions first, then come back here.
-            </p>
-          ) : (
-            <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/interior-design" />
-          )}
-        </div>
-
-        {selectedId && (
-          <InteriorDesignClient
-            key={selectedId}
-            projectId={selectedId}
-            initialDesigns={designs}
-            rooms={rooms}
-            planPages={planPages}
-          />
-        )}
+        <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Interior Design</h2>
+        <InteriorDesignSections
+          projectList={projectList}
+          selectedId={selectedId}
+          rooms={rooms}
+          designs={designs}
+          planPages={planPages}
+          scans={scans}
+          roomsByProject={roomsByProject}
+        />
       </main>
     </div>
   );
@@ -90,6 +86,12 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
 async function loadRooms(projectId: string) {
   const supabase = createClient();
   const { data } = await supabase.from("rooms").select("id, name, type, width, depth").eq("project_id", projectId).order("name");
+  return data ?? [];
+}
+
+async function loadAllRooms() {
+  const supabase = createClient();
+  const { data } = await supabase.from("rooms").select("id, name, project_id").order("name");
   return data ?? [];
 }
 
@@ -112,6 +114,15 @@ async function loadDesigns(projectId: string) {
       "id, project_id, room_id, room_type, style, width, depth, sqft, layout, original_photo_url, generated_image_url, prompt, created_at"
     )
     .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+async function loadFinishScans(): Promise<{ id: string; storage_url: string; label: string | null; results: IdentifiedFinish[]; created_at: string }[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("finish_scans")
+    .select("id, storage_url, label, results, created_at")
     .order("created_at", { ascending: false });
   return data ?? [];
 }

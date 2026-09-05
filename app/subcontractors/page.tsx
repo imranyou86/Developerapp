@@ -60,6 +60,7 @@ export default async function SubcontractorsPage() {
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
           showConstructionCost={allowedTopLevel.includes("cost")}
+          showLandscape={allowedTopLevel.includes("landscape")}
           showSubcontractors={allowedTopLevel.includes("subcontractors")}
         />
       </header>

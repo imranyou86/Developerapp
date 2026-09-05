@@ -333,7 +333,11 @@ yet; each one only adds what a given feature needed.
     row id to proxy through), while Files still maps its own
     `ProjectFile[]` through the same-origin download proxy.
 - **Interior Design** (top-level, next to Buyers Guide — not a per-project
-  tab) — designs a room, optionally starting from a real photo of it
+  tab) — two sections on one page (`app/interior-design/interior-design-
+  sections.tsx`): "Design a room" (below) and "Finish ID" (universal — see
+  its own bullet further down; it doesn't need a construction picked here
+  to work, unlike "Design a room"). "Design a room" designs a room,
+  optionally starting from a real photo of it
   empty/framed-out. Pick which construction it's for first
   (`app/interior-design/project-picker.tsx`, auto-selected when there's
   only one), then pick a room type and a style (5 quick-fill presets from
@@ -505,6 +509,21 @@ yet; each one only adds what a given feature needed.
   to compare — swapping away from the AI-recommended tier falls back to a
   deterministic sqft × fixed-band calculation rather than a second AI
   call.
+- **Landscape** (top-level, next to Construction Cost — `landscape` tab,
+  same project-picker shape as Interior Design/Construction Cost) — upload a
+  photo of the house's exterior, check off which components to add (Grass /
+  Lawn, Deck, Pool, Concrete / Patio work — each with an optional freeform
+  detail, e.g. "wood deck, 12x16 ft along the back"), pick a style, and
+  OpenAI's image-*edit* endpoint (`editRoomImage`, reused as-is from
+  Interior Design — it only cares about an image + a prompt, not what
+  feature is calling it) redesigns that actual photo's yard in place. Unlike
+  Interior Design there's no from-scratch path — a photo is always required,
+  since the point is redesigning this specific house rather than generating
+  a generic one. `lib/landscapePrompt.ts` builds the prompt the same way
+  `lib/interiorDesignPrompt.ts` does (component list first as an explicit
+  numbered "add exactly these" block, then an instruction to keep the
+  house's architecture/camera angle unchanged). `landscape_designs`
+  (migration `025_landscape.sql`) mirrors `interior_designs`'s shape.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you
@@ -566,10 +585,17 @@ yet; each one only adds what a given feature needed.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
-- **Finish ID tab** — upload any photo/screenshot and Claude (vision) identifies
-  the finishes shown; a "Find real product match" action per item uses
-  Claude's server-side web search tool to ground the guess in a real
-  brand/model/price/link before you add it to a room.
+- **Finish ID** — a universal section (a second tab on the top-level
+  Interior Design page, not scoped to any one construction) — upload any
+  photo/screenshot and Claude (vision) identifies the finishes shown; a
+  "Find real product match" action per item uses Claude's server-side web
+  search tool to ground the guess in a real brand/model/price/link. Once
+  identified, checked items get sent to a specific construction's room via a
+  project → room picker right there, rather than requiring a construction to
+  already be selected before scanning — `finish_scans` (created_by, RLS:
+  any signed-in user can see every scan, only its own creator or a Developer
+  can change/remove it — same shape as the shared `subcontractors`
+  directory) is separate from `finishes`, which is still per-room.
 - **Sharing** — each construction has a "Share" button that issues a random,
   revocable token for a public `/share/[token]` page — a full read-only
   mirror of the project, no account needed. That page is served by a
@@ -772,10 +798,12 @@ yet; each one only adds what a given feature needed.
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
-  which sections each role can see, covering both the 9 per-project tabs
-  (Plan, Rooms, Finish ID, Checklist, Budget, Bids, Payments, Files,
+  which sections each role can see, covering both the 8 per-project tabs
+  (Plan, Rooms, Checklist, Budget, Bids, Payments, Files,
   Certificate of Occupancy) and the top-level tabs (Buyers Guide/`deals`, Interior
-  Design, Construction Cost, Subcontractors); Developer itself always has
+  Design, Construction Cost, Landscape, Subcontractors) — Finish ID no
+  longer has its own row here since it's nested under Interior Design's
+  own permission instead; Developer itself always has
   every tab regardless of that table. Every RLS policy that used to check
   `projects.user_id = auth.uid()` now goes through a
   `has_project_access(project_id)` SQL helper that also allows a

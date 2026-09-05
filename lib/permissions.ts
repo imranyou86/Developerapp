@@ -24,7 +24,6 @@ export interface ProjectTabDef {
 export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "plan", label: "Plan" },
   { slug: "rooms", label: "Rooms & Tasks" },
-  { slug: "finish-id", label: "Finish ID" },
   { slug: "checklist", label: "Checklist" },
   { slug: "budget", label: "Budget" },
   { slug: "bids", label: "Bids" },
@@ -47,6 +46,7 @@ export const TOP_LEVEL_TABS: ProjectTabDef[] = [
   { slug: "deals", label: "Buyers Guide" },
   { slug: "interior-design", label: "Interior Design" },
   { slug: "cost", label: "Construction Cost" },
+  { slug: "landscape", label: "Landscape" },
   { slug: "subcontractors", label: "Subcontractors" },
 ];
 

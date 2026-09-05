@@ -2,14 +2,14 @@ import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { ProjectPicker } from "@/components/ProjectPicker";
-import { CostClient } from "@/app/construction-cost/cost-client";
+import { LandscapeClient } from "@/app/landscape/landscape-client";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
-import type { CostEstimate } from "@/lib/types";
+import type { LandscapeDesign } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function ConstructionCostPage({ searchParams }: { searchParams: { project?: string } }) {
+export default async function LandscapePage({ searchParams }: { searchParams: { project?: string } }) {
   const supabase = createClient();
   const {
     data: { user },
@@ -20,38 +20,21 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
   const { data: projects } = await supabase.from("projects").select("id, name, address").order("name");
   const projectList = projects ?? [];
 
-  // Fall back to the only project when there's just one — otherwise
-  // require an explicit pick, same call as Interior Design: a cost
-  // estimate always belongs to one construction and there's no reasonable
-  // default among several.
+  // Fall back to the only project when there's just one — otherwise require
+  // an explicit pick, same as Interior Design/Construction Cost: a design
+  // always belongs to one construction and there's no reasonable default
+  // among several.
   const requested = searchParams.project;
   const selectedId = requested && projectList.some((p) => p.id === requested) ? requested : projectList.length === 1 ? projectList[0].id : null;
 
-  let projectAddress: string | null = null;
-  let planPages: { id: string; storage_url: string; label: string }[] = [];
-  let roomsSqftHint: number | null = null;
-  let estimates: CostEstimate[] = [];
-  let loadError: string | null = null;
-
+  let designs: LandscapeDesign[] = [];
   if (selectedId) {
-    const [{ data: project }, { data: pages }, { data: rooms }, { data: estimateRows, error }] = await Promise.all([
-      supabase.from("projects").select("address").eq("id", selectedId).single(),
-      supabase
-        .from("plan_pages")
-        .select("id, storage_url, label")
-        .eq("project_id", selectedId)
-        .eq("is_layout", true)
-        .order("sort_order"),
-      supabase.from("rooms").select("width, depth").eq("project_id", selectedId),
-      supabase.from("cost_estimates").select("*").eq("project_id", selectedId).order("created_at", { ascending: false }),
-    ]);
-
-    projectAddress = project?.address ?? null;
-    planPages = pages ?? [];
-    const sqft = (rooms ?? []).reduce((sum, r) => (r.width && r.depth ? sum + Number(r.width) * Number(r.depth) : sum), 0);
-    roomsSqftHint = sqft > 0 ? sqft : null;
-    estimates = (estimateRows ?? []) as CostEstimate[];
-    loadError = error?.message ?? null;
+    const { data } = await supabase
+      .from("landscape_designs")
+      .select("id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, created_at")
+      .eq("project_id", selectedId)
+      .order("created_at", { ascending: false });
+    designs = (data ?? []) as LandscapeDesign[];
   }
 
   return (
@@ -83,36 +66,21 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
 
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-6">
-          <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Construction Cost</h2>
+          <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Landscape</h2>
           <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction to estimate — Claude reads that project&apos;s uploaded plan pages directly.
+            Pick which construction this design is for — upload a photo of the house&apos;s exterior and OpenAI will
+            redesign the actual yard around it.
           </p>
           {projectList.length === 0 ? (
             <p className="text-sm text-blueprint/50">
               No constructions yet — create one under Constructions first, then come back here.
             </p>
           ) : (
-            <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/construction-cost" />
+            <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/landscape" />
           )}
         </div>
 
-        {selectedId && (
-          <>
-            {loadError && (
-              <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-                Could not load cost estimate history: {loadError}
-              </div>
-            )}
-            <CostClient
-              key={selectedId}
-              projectId={selectedId}
-              projectAddress={projectAddress}
-              planPages={planPages}
-              roomsSqftHint={roomsSqftHint}
-              initialEstimates={estimates}
-            />
-          </>
-        )}
+        {selectedId && <LandscapeClient key={selectedId} projectId={selectedId} initialDesigns={designs} />}
       </main>
     </div>
   );

@@ -73,9 +73,16 @@ create table if not exists finishes (
   created_at timestamptz not null default now()
 );
 
+-- Finish ID is a universal section (under Interior Design), not a
+-- per-project tab — a scan doesn't require picking a construction up front,
+-- so project_id is optional; created_by identifies who ran the scan for the
+-- RLS below. Individual identified finishes still get attached to a
+-- specific construction's room only when the user explicitly sends them
+-- there (see addFinish in app/projects/[id]/rooms/actions.ts), unchanged.
 create table if not exists finish_scans (
   id uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects (id) on delete cascade,
+  project_id uuid references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
   storage_url text not null,
   label text,
   results jsonb not null default '[]'::jsonb,
@@ -137,6 +144,24 @@ create table if not exists interior_designs (
   sqft numeric,
   layout jsonb not null default '[]'::jsonb,
   original_photo_url text,
+  generated_image_url text not null,
+  prompt text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Landscape tab (top-level, alongside Construction Cost): a required photo
+-- of the house's exterior, edited in place by OpenAI's image-edit API —
+-- unlike Interior Design there's no from-scratch path, since the whole
+-- point is redesigning THIS house's actual yard. components is the checked
+-- list of landscape elements (array of {id, label, detail}), e.g. grass,
+-- deck, pool, concrete work.
+create table if not exists landscape_designs (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  style text not null,
+  components jsonb not null default '[]'::jsonb,
+  notes text,
+  original_photo_url text not null,
   generated_image_url text not null,
   prompt text not null,
   created_at timestamptz not null default now()
@@ -269,7 +294,7 @@ create table if not exists project_files (
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design')),
+  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
   source_table text,
   source_id uuid,
   notes text,
@@ -296,7 +321,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -407,6 +432,7 @@ create index if not exists idx_cost_estimates_project on cost_estimates (project
 create index if not exists idx_renderings_room on renderings (room_id);
 create index if not exists idx_interior_designs_project on interior_designs (project_id, created_at desc);
 create index if not exists idx_interior_designs_room on interior_designs (room_id);
+create index if not exists idx_landscape_designs_project on landscape_designs (project_id, created_at desc);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
 create index if not exists idx_bids_project on bids (project_id);
@@ -435,9 +461,9 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- Contractor included — inspection/clearance status is field-relevant
 -- info, not a financial tab.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -501,6 +527,7 @@ alter table finish_scans enable row level security;
 alter table cost_estimates enable row level security;
 alter table renderings enable row level security;
 alter table interior_designs enable row level security;
+alter table landscape_designs enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table bids enable row level security;
@@ -571,9 +598,17 @@ create policy "finishes_member" on finishes
   for all using (exists (select 1 from rooms r where r.id = finishes.room_id and has_project_access(r.project_id)))
   with check (exists (select 1 from rooms r where r.id = finishes.room_id and has_project_access(r.project_id)));
 
-create policy "finish_scans_member" on finish_scans
-  for all using (has_project_access(finish_scans.project_id))
-  with check (has_project_access(finish_scans.project_id));
+-- Finish ID is universal (not project-scoped) — same shared-directory shape
+-- as subcontractors below: any signed-in user can see every scan, but only
+-- its own creator (or a Developer) can change or remove it.
+create policy "finish_scans_select" on finish_scans
+  for select using (auth.uid() is not null);
+create policy "finish_scans_insert" on finish_scans
+  for insert with check (auth.uid() = created_by);
+create policy "finish_scans_update" on finish_scans
+  for update using (auth.uid() = created_by or is_developer()) with check (auth.uid() = created_by or is_developer());
+create policy "finish_scans_delete" on finish_scans
+  for delete using (auth.uid() = created_by or is_developer());
 
 create policy "cost_estimates_member" on cost_estimates
   for all using (has_project_access(cost_estimates.project_id))
@@ -586,6 +621,10 @@ create policy "renderings_member" on renderings
 create policy "interior_designs_member" on interior_designs
   for all using (has_project_access(interior_designs.project_id))
   with check (has_project_access(interior_designs.project_id));
+
+create policy "landscape_designs_member" on landscape_designs
+  for all using (has_project_access(landscape_designs.project_id))
+  with check (has_project_access(landscape_designs.project_id));
 
 create policy "checklist_items_member" on checklist_items
   for all using (has_project_access(checklist_items.project_id))
@@ -691,7 +730,8 @@ values
   ('bid-files', 'bid-files', true),
   ('finish-scans', 'finish-scans', true),
   ('project-files', 'project-files', true),
-  ('interior-design-photos', 'interior-design-photos', true)
+  ('interior-design-photos', 'interior-design-photos', true),
+  ('landscape-photos', 'landscape-photos', true)
 on conflict (id) do nothing;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -723,3 +763,7 @@ create policy "project_files_storage_owner" on storage.objects
 create policy "interior_design_photos_storage_owner" on storage.objects
   for all using (bucket_id = 'interior-design-photos' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'interior-design-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "landscape_photos_storage_owner" on storage.objects
+  for all using (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text);

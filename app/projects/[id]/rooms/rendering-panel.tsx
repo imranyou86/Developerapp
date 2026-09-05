@@ -11,7 +11,7 @@ import { STYLE_PALETTES } from "@/lib/styles";
 import type { StylePalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
 import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projects/[id]/rooms/actions";
-import { saveFinishScan } from "@/app/projects/[id]/finish-id/actions";
+import { saveFinishScan } from "@/app/interior-design/finish-id-actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { FINISH_CATEGORIES } from "@/lib/finishes-db";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
@@ -136,7 +136,7 @@ export function RenderingPanel({
         }));
 
         const label = `${room.name} — ${rendering.style}`;
-        const saveRes = await saveFinishScan(projectId, rendering.uploaded_photo_url!, label, results);
+        const saveRes = await saveFinishScan(rendering.uploaded_photo_url!, label, results);
         if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save scan.");
 
         notify(
@@ -145,7 +145,7 @@ export function RenderingPanel({
             ? "Sent to Finish ID — no identifiable finishes found."
             : `Sent to Finish ID — identified ${results.length} finish(es).`
         );
-        router.push(`/projects/${projectId}/finish-id`);
+        router.push(`/interior-design`);
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Could not send to Finish ID.");

@@ -21,6 +21,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
   document: "Document",
   photo: "Photo",
   interior_design: "Interior design",
+  landscape_design: "Landscape design",
 };
 
 const CATEGORY_STYLE: Record<FileCategory, string> = {
@@ -32,13 +33,14 @@ const CATEGORY_STYLE: Record<FileCategory, string> = {
   document: "badge bg-blueprint/10 text-blueprint/60",
   photo: "badge-sage",
   interior_design: "badge bg-blueprint text-white",
+  landscape_design: "badge bg-blueprint text-white",
 };
 
 // Categories offered when uploading directly from this tab — the others
-// (checklist_photo, rendering, finish_scan, interior_design) only make
-// sense attached to their own workflow (a checklist item, a room
-// rendering, a scan, a room design) and are populated automatically from
-// those tabs instead.
+// (checklist_photo, rendering, finish_scan, interior_design,
+// landscape_design) only make sense attached to their own workflow (a
+// checklist item, a room rendering, a scan, a room or landscape design) and
+// are populated automatically from those tabs instead.
 const UPLOAD_CATEGORIES: FileCategory[] = ["plan", "bid", "document", "photo"];
 
 // A multi-page plan PDF (app/projects/[id]/plan/plan-client.tsx) is stored
