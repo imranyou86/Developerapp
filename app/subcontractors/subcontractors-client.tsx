@@ -20,6 +20,11 @@ interface ProjectOption {
   name: string;
 }
 
+// Where the automatic lookup falls back to opening a tab — CSLB's own
+// interactive search page, not the direct-GET detail URL the API route
+// fetches server-side (that one needs a known-good license number already).
+const CSLB_SEARCH_URL = "https://www.cslb.ca.gov/OnlineServices/CheckLicenseII/CheckLicense.aspx";
+
 const EMPTY_INPUT: SubcontractorInput = {
   company_name: "",
   contact_name: "",
@@ -343,6 +348,24 @@ function SubcontractorFormModal({
     setInput((prev) => ({ ...prev, [field]: value }));
   }
 
+  // Fallback for when the automatic lookup can't be completed (CSLB
+  // unreachable/blocking the server, or its page came back in a shape we
+  // couldn't parse) — copies the license number to the clipboard and opens
+  // CSLB's own search page in a new tab so it's a paste-and-go instead of
+  // making the user re-type the number by hand.
+  async function copyLicenseAndOpenCslb(licenseNumber: string) {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(licenseNumber);
+      copied = true;
+    } catch {
+      // Clipboard access can be denied (permissions, insecure context, etc.)
+      // — still open the CSLB tab either way, just without the pre-copy.
+    }
+    window.open(CSLB_SEARCH_URL, "_blank", "noopener,noreferrer");
+    return copied;
+  }
+
   async function handleCheckLicense() {
     const licenseNumber = input.license_number.trim();
     if (!licenseNumber) return;
@@ -354,7 +377,16 @@ function SubcontractorFormModal({
         body: JSON.stringify({ licenseNumber }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "License check failed.");
+      if (!res.ok) {
+        const copied = await copyLicenseAndOpenCslb(licenseNumber);
+        notify(
+          "error",
+          copied
+            ? `Couldn't search CSLB automatically (${json.error ?? "error"}). Opened CSLB's site with ${licenseNumber} copied — just paste it in.`
+            : `Couldn't search CSLB automatically (${json.error ?? "error"}). Opened CSLB's site — search for ${licenseNumber} there.`
+        );
+        return;
+      }
       if (!json.found) {
         notify("error", "CSLB has no record for that license number — double-check it and try again.");
         return;
@@ -368,15 +400,22 @@ function SubcontractorFormModal({
         set("license_status", display);
         notify("success", `CSLB status: ${display}.`);
       } else {
+        const copied = await copyLicenseAndOpenCslb(licenseNumber);
         notify(
           "error",
-          json.context
-            ? `Found the license, but couldn't confidently read its status. Nearby text on the page: "${json.context}" — check cslb.ca.gov directly.`
-            : "Found the license, but couldn't read its status from the page — check it manually at cslb.ca.gov."
+          copied
+            ? `Found the license, but couldn't confidently read its status. Opened CSLB's site with ${licenseNumber} copied — paste it in to check.`
+            : `Found the license, but couldn't read its status from the page — check it manually at cslb.ca.gov.`
         );
       }
     } catch (err) {
-      notify("error", err instanceof Error ? err.message : "License check failed.");
+      const copied = await copyLicenseAndOpenCslb(licenseNumber);
+      notify(
+        "error",
+        copied
+          ? `Couldn't reach CSLB automatically. Opened CSLB's site with ${licenseNumber} copied — just paste it in.`
+          : `Couldn't reach CSLB automatically (${err instanceof Error ? err.message : "error"}). Opened CSLB's site — search for ${licenseNumber} there.`
+      );
     } finally {
       setCheckingLicense(false);
     }
@@ -502,7 +541,8 @@ function SubcontractorFormModal({
           </div>
           <p className="mt-1 text-xs text-blueprint/40">
             Looks this license number up directly against California&apos;s CSLB database and fills in the status
-            above — for an out-of-state license, check with that state&apos;s licensing board instead.
+            above — for an out-of-state license, check with that state&apos;s licensing board instead. If it can&apos;t
+            be searched automatically, this opens CSLB&apos;s site instead with the number already copied to paste in.
           </p>
         </div>
 
