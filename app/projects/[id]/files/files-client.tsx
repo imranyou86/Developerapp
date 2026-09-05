@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { createPortal } from "react-dom";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
@@ -712,7 +713,7 @@ function FileViewerModal({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {image && (
+          {(image || pdf) && (
             <div className="flex items-center gap-1 rounded-md bg-white/10 px-1 py-1">
               <button
                 type="button"
@@ -775,7 +776,7 @@ function FileViewerModal({
             />
           </div>
         ) : pdf ? (
-          <iframe src={file.storage_url} title={file.file_name} className="h-full w-full border-0 bg-white" />
+          <PdfViewer file={file} zoom={zoom} />
         ) : (
           <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white/70">
             This file type can&apos;t be previewed in-app — use Download above instead.
@@ -811,5 +812,106 @@ function FileViewerModal({
       </div>
     </div>,
     document.body
+  );
+}
+
+// Rendered at a fixed multiple of its fit-to-width size up front, then just
+// resized via CSS on zoom — re-rendering the PDF canvas on every zoom click
+// would be needlessly slow for a control meant to feel instant.
+const PDF_RENDER_OVERSAMPLE = 2;
+
+function PdfViewer({ file, zoom }: { file: ProjectFile; zoom: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [pages, setPages] = useState<PDFPageProxy[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [fitWidth, setFitWidth] = useState(600);
+
+  useEffect(() => {
+    function measure() {
+      if (containerRef.current) setFitWidth(Math.max(200, containerRef.current.clientWidth - 32));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let doc: PDFDocumentProxy | null = null;
+    setPages(null);
+    setError(null);
+    (async () => {
+      try {
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        // Fetched through the same-origin download proxy rather than the
+        // public Supabase Storage URL directly — that URL renders fine in an
+        // <img>/<iframe> (no CORS involved in a plain navigation/embed), but
+        // a script-driven fetch() is CORS-checked and this avoids relying on
+        // Storage's CORS config being permissive enough to allow it.
+        const res = await fetch(`/api/projects/${file.project_id}/files/${file.id}/download`);
+        if (!res.ok) throw new Error("Could not download this PDF.");
+        const arrayBuffer = await res.arrayBuffer();
+        if (cancelled) return;
+        doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        if (cancelled) return;
+        const loaded: PDFPageProxy[] = [];
+        for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+          loaded.push(await doc.getPage(pageNum));
+        }
+        if (!cancelled) setPages(loaded);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load this PDF.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      doc?.destroy();
+    };
+  }, [file.project_id, file.id]);
+
+  return (
+    <div ref={containerRef} className="flex min-h-full flex-col items-center gap-3 p-4">
+      {error && <p className="text-sm text-white/70">{error}</p>}
+      {!error && !pages && <p className="text-sm text-white/50">Loading PDF…</p>}
+      {pages?.map((page, i) => <PdfPageCanvas key={i} page={page} fitWidth={fitWidth} zoom={zoom} />)}
+    </div>
+  );
+}
+
+function PdfPageCanvas({ page, fitWidth, zoom }: { page: PDFPageProxy; fitWidth: number; zoom: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [displaySize, setDisplaySize] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (!canvas || !context) return;
+      const naturalWidth = page.getViewport({ scale: 1 }).width;
+      const fitScale = fitWidth / naturalWidth;
+      const renderViewport = page.getViewport({ scale: fitScale * PDF_RENDER_OVERSAMPLE });
+      canvas.width = renderViewport.width;
+      canvas.height = renderViewport.height;
+      await page.render({ canvasContext: context, viewport: renderViewport }).promise;
+      if (!cancelled) {
+        setDisplaySize({ width: renderViewport.width / PDF_RENDER_OVERSAMPLE, height: renderViewport.height / PDF_RENDER_OVERSAMPLE });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // fitWidth only changes on container resize (rare) — re-rendering per
+    // zoom tick is handled by the CSS resize below instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, fitWidth]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="block bg-white shadow-md"
+      style={displaySize ? { width: displaySize.width * zoom, height: displaySize.height * zoom } : undefined}
+    />
   );
 }

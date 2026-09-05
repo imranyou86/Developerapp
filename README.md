@@ -557,11 +557,7 @@ yet; each one only adds what a given feature needed.
     render directly, at up to 85vh, with zoom controls (`+`/`-`/reset
     buttons, `+`/`-` keyboard shortcuts, 50%–400%, resets when you move to
     another page) applied via a CSS `scale()` transform, panning by
-    scrolling the overlay once zoomed past what fits; PDFs (bid files are
-    stored as the original PDF, not page images) render in an `<iframe>`,
-    which browsers display natively rather than downloading when not
-    forced to. Both work unproxied straight from the public Supabase
-    Storage URL — no new download endpoint needed. Opening a plan group
+    scrolling the overlay once zoomed past what fits. Opening a plan group
     opens its viewer already carrying every page (in the same
     already-sorted reading order the "N pages" grouping produces) with
     Prev/Next controls and arrow-key navigation between them. A file type
@@ -569,6 +565,22 @@ yet; each one only adds what a given feature needed.
     use Download" message covers it in case the modal is still reached via
     another path. Download and Close stay available at the top at all
     times.
+    - **PDFs (bid files, stored as the original PDF) render via
+      `pdfjs-dist`, not an `<iframe>`.** An `<iframe src={pdfUrl}>` defers
+      to the browser's own PDF viewer, which on mobile Safari/Chrome shows
+      only page one with no way to reach the rest, and opens at whatever
+      zoom level that viewer defaults to rather than fit-to-width — both
+      reported directly against the first version of this feature. Instead
+      `PdfViewer` fetches the file through the existing same-origin
+      download proxy (a script `fetch()` of the public Supabase Storage
+      URL would be subject to CORS, unlike a plain `<img>`/`<iframe>`
+      embed of it), loads it with the same `pdfjs-dist` library the Plan
+      tab already uses to rasterize PDF pages, and renders every page as
+      its own canvas stacked vertically — all pages visible up front,
+      scrollable, sized to fit the overlay's width at zoom 100% (each
+      canvas is rendered once at 2x that fit width for retina sharpness,
+      then just resized via CSS on every zoom click rather than
+      re-rendering the PDF each time, so zoom stays instant).
 - **Roles & permissions** — every account has a login type: Owner, PM,
   Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
   trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer
