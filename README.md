@@ -96,9 +96,16 @@ yet; each one only adds what a given feature needed.
   actually ships: a "Search LADBS ↗" button (`LADBS_PLR_URL` in
   `certificate-of-occupancy-client.tsx`) that opens
   `https://www.ladbsservices2.lacity.org/OnlineServices/?service=plr` in a
-  new tab, next to a "Copy address" button so the construction's address is
-  one paste away from LADBS's own search box. A "Record findings" modal
-  then lets you save what you found there — status, CO
+  new tab. LADBS's search itself has separate House Number and Street Name
+  fields rather than one address box, so a single "copy the whole address"
+  button wasn't actually usable there either — `splitAddress()` splits the
+  project's address the same way (leading digits, optionally with a
+  trailing letter/fraction like "123B" or "456 1/2", as the number;
+  everything else up to the first comma, dropping city/state/zip, as the
+  street) and each half gets its own copy button, so both LADBS fields are
+  one paste away. Best-effort parsing, not address validation — an unusual
+  format just falls back to putting everything in the street field. A
+  "Record findings" modal then lets you save what you found there — status, CO
   number, issue date, a growing list of open/remaining clearances, a
   growing list of issued permits, and inspector contact info (phone/email
   render as tap-to-call/email `tel:`/`mailto:` links via the shared

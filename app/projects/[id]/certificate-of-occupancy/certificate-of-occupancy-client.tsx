@@ -12,6 +12,21 @@ const LADBS_PLR_URL = "https://www.ladbsservices2.lacity.org/OnlineServices/?ser
 
 const EMPTY_INSPECTOR: COInspector = { name: "", phone: "", email: "", department: "" };
 
+// LADBS's Property Activity Report search has separate "House Number" and
+// "Street Name" fields rather than one address box, so a single "copy the
+// whole address" button isn't actually usable there — split it the same
+// way: leading digits (plus a trailing letter/fraction like "123B" or
+// "123 1/2") as the number, everything else up to the first comma (which
+// drops city/state/zip) as the street name. Best-effort parsing, not
+// address validation — unusual formats just fall back to putting
+// everything in the street field.
+function splitAddress(address: string): { number: string; street: string } {
+  const streetPart = address.split(",")[0]?.trim() ?? "";
+  const match = streetPart.match(/^(\d+(?:\s*\d\/\d|-?[A-Za-z])?)\s+(.*)$/);
+  if (match) return { number: match[1], street: match[2] };
+  return { number: "", street: streetPart };
+}
+
 function statusBadgeClass(status: string | null): string {
   if (!status) return "badge bg-blueprint/10 text-blueprint/60";
   const s = status.toLowerCase();
@@ -37,7 +52,7 @@ export function CertificateOfOccupancyClient({
   const [savingAddress, setSavingAddress] = useState(false);
   const [check, setCheck] = useState<CertificateOfOccupancy | null>(initialCheck);
   const [formOpen, setFormOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState<"number" | "street" | null>(null);
 
   async function handleSaveAddress() {
     const trimmed = addressInput.trim();
@@ -53,12 +68,12 @@ export function CertificateOfOccupancyClient({
     notify("success", "Address saved.");
   }
 
-  async function handleCopyAddress() {
-    if (!address) return;
+  async function handleCopyPart(field: "number" | "street", value: string) {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 2000);
     } catch {
       notify("error", "Could not copy — copy it manually.");
     }
@@ -100,21 +115,51 @@ export function CertificateOfOccupancyClient({
       ) : (
         <>
           <div className="card space-y-3 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-blueprint/60">
-                Address: <span className="font-medium text-blueprint-dark">{address}</span>
-              </p>
-              <button className="btn-outline text-xs" onClick={handleCopyAddress}>
-                {copied ? "Copied!" : "Copy address"}
-              </button>
+            <p className="text-sm text-blueprint/60">
+              Address: <span className="font-medium text-blueprint-dark">{address}</span>
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              {(() => {
+                const { number, street } = splitAddress(address);
+                return (
+                  <>
+                    <div>
+                      <span className="label">House number</span>
+                      <div className="flex items-center gap-1.5">
+                        <code className="rounded bg-concrete px-2 py-1 text-sm text-blueprint-dark">{number || "—"}</code>
+                        <button
+                          className="btn-outline px-2 py-1 text-xs"
+                          onClick={() => handleCopyPart("number", number)}
+                          disabled={!number}
+                        >
+                          {copiedField === "number" ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="label">Street name</span>
+                      <div className="flex items-center gap-1.5">
+                        <code className="rounded bg-concrete px-2 py-1 text-sm text-blueprint-dark">{street || "—"}</code>
+                        <button
+                          className="btn-outline px-2 py-1 text-xs"
+                          onClick={() => handleCopyPart("street", street)}
+                          disabled={!street}
+                        >
+                          {copiedField === "street" ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
             <a href={LADBS_PLR_URL} target="_blank" rel="noopener noreferrer" className="btn-amber w-full sm:w-auto">
               Search LADBS ↗
             </a>
             <p className="text-xs text-blueprint/40">
               Opens LADBS&apos;s Property Activity Report tool in a new tab — LADBS blocks other sites from embedding
-              it directly, so paste the address above into their search there, then come back and record what you
-              find below.
+              it directly. Their search has separate House Number and Street Name fields, so copy each piece above
+              into the matching field there, then come back and record what you find below.
             </p>
           </div>
 
