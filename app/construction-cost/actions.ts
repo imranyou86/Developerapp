@@ -35,14 +35,14 @@ export async function saveCostEstimate(projectId: string, input: SaveCostEstimat
     .single();
 
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/projects/${projectId}/cost`);
+  revalidatePath("/construction-cost");
   return { ok: true, id: data.id };
 }
 
-export async function deleteCostEstimate(projectId: string, estimateId: string): Promise<ActionResult> {
+export async function deleteCostEstimate(estimateId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("cost_estimates").delete().eq("id", estimateId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/projects/${projectId}/cost`);
+  revalidatePath("/construction-cost");
   return { ok: true };
 }

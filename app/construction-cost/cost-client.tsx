@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { deleteCostEstimate, saveCostEstimate } from "@/app/projects/[id]/cost/actions";
+import { deleteCostEstimate, saveCostEstimate } from "@/app/construction-cost/actions";
 import { COST_TIER_BANDS, COST_TIER_LABEL } from "@/lib/costTiers";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { CostBreakdownLine, CostEstimate, CostTier, QualityTier } from "@/lib/types";
@@ -138,7 +138,7 @@ export function CostClient({
         onCancel={() => setDeleting(null)}
         onConfirm={async () => {
           if (!deleting) return;
-          const res = await deleteCostEstimate(projectId, deleting.id);
+          const res = await deleteCostEstimate(deleting.id);
           if (!res.ok) {
             notify("error", res.error ?? "Could not delete estimate.");
           } else {

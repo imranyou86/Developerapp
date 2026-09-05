@@ -356,7 +356,7 @@ yet; each one only adds what a given feature needed.
       doesn't also delete the current selection).
   - **"Example setup from plans"** — with plan pages uploaded on the Plan
     tab, this button (`/api/claude/suggest-room-layout`) sends Claude the
-    same layout-marked plan sheets the Plan/Cost tabs use (vision, low
+    same layout-marked plan sheets the Plan tab/Construction Cost use (vision, low
     thinking effort — same latency lesson as `detect-rooms`) along with the
     room's name/type/size and the exact fixture catalog for that room type,
     asking it to find this room on the plan and place fixtures matching
@@ -415,17 +415,31 @@ yet; each one only adds what a given feature needed.
     (`interior-design`), just reclassified from `PROJECT_TABS` to
     `TOP_LEVEL_TABS` in `lib/permissions.ts`. Requires `OPENAI_API_KEY`
     like the Rooms tab's image generation does.
-- **Construction Cost tab** — Claude reads every plan page marked "Floor
-  plan layout" on the Plan tab and, grounded by a couple of web searches for
-  current regional (or national, if no address) construction cost data, picks
-  a pricing tier (Low $250-300/sqft, Mid $350-400/sqft, High $450+/sqft) and
-  gives both a single "most accurate" predicted total (with a contingency %
-  for what the plan can't show) and the tier's range, plus a category cost
-  breakdown. The $/sqft numbers are clamped server-side to the chosen tier's
-  fixed band rather than trusted verbatim from the model. You can manually
-  swap the displayed tier (Low/Mid/High buttons on each estimate) to compare
-  — swapping away from the AI-recommended tier falls back to a deterministic
-  sqft × fixed-band calculation rather than a second AI call.
+- **Construction Cost** (top-level, next to Interior Design — its own
+  section, not folded into Interior Design's page — gated by the same
+  `tab_permissions` matrix, `cost` tab) — started as a per-project tab, but
+  an estimate is really "pick a construction, then estimate it," the same
+  shape as Interior Design, so it moved to a top-level page with a
+  project-picker (`app/construction-cost/page.tsx`, sharing the same
+  `components/ProjectPicker.tsx` Interior Design uses — worth a shared
+  component once there were two call sites) instead of living inside that
+  project's own tab strip. Moving `cost` from `PROJECT_TABS` to
+  `TOP_LEVEL_TABS` in `lib/permissions.ts` needed no migration —
+  `tab_permissions` is just a (role, tab) matrix agnostic to which array a
+  slug lives in app-side, so a Developer's existing visibility settings for
+  Construction Cost carried over unchanged. Claude reads every plan page
+  marked "Floor plan layout" on the selected construction's Plan tab and,
+  grounded by a couple of web searches for current regional (or national,
+  if no address) construction cost data, picks a pricing tier (Low
+  $250-300/sqft, Mid $350-400/sqft, High $450+/sqft) and gives both a
+  single "most accurate" predicted total (with a contingency % for what
+  the plan can't show) and the tier's range, plus a category cost
+  breakdown. The $/sqft numbers are clamped server-side to the chosen
+  tier's fixed band rather than trusted verbatim from the model. You can
+  manually swap the displayed tier (Low/Mid/High buttons on each estimate)
+  to compare — swapping away from the AI-recommended tier falls back to a
+  deterministic sqft × fixed-band calculation rather than a second AI
+  call.
 - **Payments tab** — bid PDFs are read client-side with pdf.js first; the
   *full* extracted text (not a truncated prefix) is sent to Claude, with the
   section around a detected "Payment Schedule" heading prioritized if the
@@ -584,11 +598,11 @@ yet; each one only adds what a given feature needed.
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
-  which sections each role can see, covering both the 9 per-project tabs
-  (Plan, Rooms, Finish ID, Checklist, Budget, Cost, Payments, Files,
-  Certificate of Occupancy) and the top-level tabs (Buyers Guide/`deals`,
-  Interior Design, Subcontractors); Developer itself always has every tab
-  regardless of that table. Every RLS policy that used to check
+  which sections each role can see, covering both the 8 per-project tabs
+  (Plan, Rooms, Finish ID, Checklist, Budget, Payments, Files, Certificate
+  of Occupancy) and the top-level tabs (Buyers Guide/`deals`, Interior
+  Design, Construction Cost, Subcontractors); Developer itself always has
+  every tab regardless of that table. Every RLS policy that used to check
   `projects.user_id = auth.uid()` now goes through a
   `has_project_access(project_id)` SQL helper that also allows a
   `project_members` row or a Developer account, so an invited PM/Contractor

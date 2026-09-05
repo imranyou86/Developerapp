@@ -41,6 +41,7 @@ export default async function DealsPage() {
           showAdmin={currentUser?.role === "developer"}
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
+          showConstructionCost={allowedTopLevel.includes("cost")}
           showSubcontractors={allowedTopLevel.includes("subcontractors")}
         />
       </header>

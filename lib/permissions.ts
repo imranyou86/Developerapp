@@ -27,18 +27,25 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "finish-id", label: "Finish ID" },
   { slug: "checklist", label: "Checklist" },
   { slug: "budget", label: "Budget" },
-  { slug: "cost", label: "Construction Cost" },
   { slug: "payments", label: "Payments" },
   { slug: "files", label: "Files" },
   { slug: "certificate-of-occupancy", label: "Certificate of Occupancy" },
 ];
 
 // Top-level (not per-project) sections gated the same way as project tabs.
-// Shared with components/TopNav.tsx, app/deals/layout.tsx, and
-// app/interior-design/layout.tsx.
+// Shared with components/TopNav.tsx, app/deals/layout.tsx,
+// app/interior-design/layout.tsx, and app/construction-cost/layout.tsx.
+// "cost" moved here from PROJECT_TABS — Construction Cost picks its own
+// construction via a project-picker (same pattern as Interior Design)
+// rather than living inside that project's own tab strip. The
+// tab_permissions table itself is agnostic to this distinction (it's just
+// a (role, tab) matrix), so moving a slug between these two arrays needs
+// no migration — existing Developer-set visibility for "cost" carries over
+// unchanged.
 export const TOP_LEVEL_TABS: ProjectTabDef[] = [
   { slug: "deals", label: "Buyers Guide" },
   { slug: "interior-design", label: "Interior Design" },
+  { slug: "cost", label: "Construction Cost" },
   { slug: "subcontractors", label: "Subcontractors" },
 ];
 
