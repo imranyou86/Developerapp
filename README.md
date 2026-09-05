@@ -190,23 +190,34 @@ yet; each one only adds what a given feature needed.
     across phone apps regardless of how the number was typed in) and a
     saved email is a `mailto:` link — tapping either on a phone opens the
     dialer or Mail app directly instead of just displaying the text.
-  - **"Check on CSLB"** — next to the license number/state fields, a link
-    (`cslbCheckUrl` in `subcontractors-client.tsx`) opens California's
-    Contractors State License Board check-license page in a new tab,
-    deep-linked by license number (`?LicNum=...`, the same URL format
-    contractors' own "verify my license" badges commonly use); disabled
-    when the license number field is empty, per the same reasoning as
-    Certificate of Occupancy's "no address yet" gating. CSLB has no public
-    API and its lookup tool is an interactive page an AI web search can't
-    drive and that government sites like this commonly block from being
-    iframed (the exact conclusion already reached for LADBS's property
-    lookup — see Certificate of Occupancy below — so it wasn't
-    re-attempted here), so this opens the real, authoritative page rather
-    than trying to parse a result automatically. A **License status**
-    free-text field next to it (`license_status`, migration
-    `023_subcontractor_license_status.sql`) is where you copy in whatever
-    CSLB showed (Active, Expired, Suspended, …) — shown on the card as a
-    color-coded badge (sage for "active", red for
+  - **"Check CSLB"** — next to the license number/state fields, a button
+    (disabled when the license number field is empty) calls
+    `/api/subcontractors/check-license`, which fetches California's CSLB
+    license detail page server-side for that exact license number and
+    fills the **License status** field in-app — no new tab. Unlike LADBS's
+    property lookup (see Certificate of Occupancy below, an interactive
+    ASP.NET form no AI web search or iframe could drive), CSLB's
+    check-license tool serves a direct result for a plain GET request with
+    the license number in the query string
+    (`https://www2.cslb.ca.gov/OnlineServices/CheckLicenseII/LicenseDetail.aspx?LicNum=...`),
+    so the route fetches that HTML directly and parses it: first for CSLB's
+    own summary sentence ("This license is current and active.", etc.),
+    falling back to scanning near a "License Status" label for one of
+    CSLB's known status words (active, inactive, suspended, revoked,
+    expired, cancelled, pending, delinquent, reinstated, deceased). If
+    neither pattern matches, it still returns whatever text it found near
+    the label so the toast shows that instead of nothing, rather than
+    silently failing. This parsing was written from CSLB's publicly
+    documented status vocabulary and search results describing the page's
+    layout, not a page fetch — this sandbox's network policy blocks
+    reaching cslb.ca.gov directly (confirmed via a failed fetch attempt),
+    while the deployed app has normal outbound access — so it's expected
+    to need one round of adjustment against the real page if CSLB's exact
+    markup turns out to differ from what was inferred. `license_status`
+    (migration `023_subcontractor_license_status.sql`) is still a plain
+    editable text field regardless — a manual correction or an out-of-state
+    license (this tool only covers CA) can always be typed in directly.
+    Shown on the card as a color-coded badge (sage for "active", red for
     expired/suspended/revoked/inactive, neutral otherwise, matched by a
     simple substring check against the saved text) alongside a "checked
     &lt;date&gt;" stamp (`license_checked_at`, set server-side whenever a

@@ -12,6 +12,7 @@ import {
   type SubcontractorInput,
 } from "@/app/subcontractors/actions";
 import { telHref } from "@/lib/phone";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { Subcontractor } from "@/lib/types";
 
 interface ProjectOption {
@@ -49,17 +50,6 @@ function toInput(s: Subcontractor): SubcontractorInput {
     cost_tier: s.cost_tier,
     notes: s.notes ?? "",
   };
-}
-
-// CSLB = California's Contractors State License Board — this deep link
-// format (mirrors what many contractors' own "verify my license" links use)
-// pre-fills the license number on CSLB's real check-license page. There's no
-// public API to pull a machine-readable result from directly (an AI web
-// search can't drive that page's form, and government sites like this
-// commonly block iframe embedding), so this opens the authoritative source
-// in a new tab rather than attempting to parse a result automatically.
-function cslbCheckUrl(licenseNumber: string): string {
-  return `https://www.cslb.ca.gov/OnlineServices/CheckLicenseII/CheckLicense.aspx?LicNum=${encodeURIComponent(licenseNumber.trim())}`;
 }
 
 function licenseStatusBadgeClass(status: string): string {
@@ -347,9 +337,49 @@ function SubcontractorFormModal({
   const [input, setInput] = useState<SubcontractorInput>(editing ? toInput(editing) : EMPTY_INPUT);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(initialSelectedProjectIds);
   const [pending, startTransition] = useTransition();
+  const [checkingLicense, setCheckingLicense] = useState(false);
 
   function set<K extends keyof SubcontractorInput>(field: K, value: SubcontractorInput[K]) {
     setInput((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleCheckLicense() {
+    const licenseNumber = input.license_number.trim();
+    if (!licenseNumber) return;
+    setCheckingLicense(true);
+    try {
+      const res = await fetchWithRetry("/api/subcontractors/check-license", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ licenseNumber }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "License check failed.");
+      if (!json.found) {
+        notify("error", "CSLB has no record for that license number — double-check it and try again.");
+        return;
+      }
+      if (json.status) {
+        // CSLB's own wording, capitalized for display (e.g. "current and
+        // active" -> "Current and active") rather than retyped into our own
+        // vocabulary — keeps what's shown exactly traceable back to what
+        // CSLB actually said.
+        const display = json.status.charAt(0).toUpperCase() + json.status.slice(1);
+        set("license_status", display);
+        notify("success", `CSLB status: ${display}.`);
+      } else {
+        notify(
+          "error",
+          json.context
+            ? `Found the license, but couldn't confidently read its status. Nearby text on the page: "${json.context}" — check cslb.ca.gov directly.`
+            : "Found the license, but couldn't read its status from the page — check it manually at cslb.ca.gov."
+        );
+      }
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "License check failed.");
+    } finally {
+      setCheckingLicense(false);
+    }
   }
 
   function toggleProject(id: string) {
@@ -460,25 +490,19 @@ function SubcontractorFormModal({
                 placeholder="e.g. Active, Expired, Suspended…"
               />
             </div>
-            {input.license_number.trim() ? (
-              <a
-                href={cslbCheckUrl(input.license_number)}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-outline whitespace-nowrap text-xs"
-              >
-                Check on CSLB ↗
-              </a>
-            ) : (
-              <span className="btn-outline whitespace-nowrap text-xs cursor-not-allowed opacity-40" title="Enter a license number first">
-                Check on CSLB ↗
-              </span>
-            )}
+            <button
+              type="button"
+              className="btn-outline whitespace-nowrap text-xs"
+              onClick={handleCheckLicense}
+              disabled={!input.license_number.trim() || checkingLicense}
+              title={!input.license_number.trim() ? "Enter a license number first" : undefined}
+            >
+              {checkingLicense ? "Checking…" : "Check CSLB"}
+            </button>
           </div>
           <p className="mt-1 text-xs text-blueprint/40">
-            Opens California&apos;s CSLB license lookup in a new tab for this license number — copy whatever status
-            it shows (Active, Expired, Suspended, etc.) into the field above. For an out-of-state license, check
-            with that state&apos;s licensing board instead.
+            Looks this license number up directly against California&apos;s CSLB database and fills in the status
+            above — for an out-of-state license, check with that state&apos;s licensing board instead.
           </p>
         </div>
 
