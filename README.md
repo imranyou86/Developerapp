@@ -98,16 +98,22 @@ yet; each one only adds what a given feature needed.
   `https://www.ladbsservices2.lacity.org/OnlineServices/?service=plr` in a
   new tab. LADBS's search itself has separate House Number and Street Name
   fields rather than one address box, so a single "copy the whole address"
-  button wasn't actually usable there either — `splitAddress()` splits the
-  project's address the same way (leading digits, optionally with a
-  trailing letter/fraction like "123B" or "456 1/2", as the number;
-  everything else up to the first comma, dropping city/state/zip, as the
-  street) and each half gets its own copy button, so both LADBS fields are
-  one paste away. The street half also gets its USPS-style suffix stripped
-  (`stripStreetSuffix()` — "Main St" → "Main", "Sunset Blvd" → "Sunset")
-  since LADBS's form wants the bare street name only. Best-effort parsing,
-  not address validation — an unusual format just falls back to putting
-  everything in the street field. A
+  button wasn't actually usable there either — `splitAddress()`
+  (`lib/address.ts`) splits the project's address into a house number and a
+  bare street name (no type/suffix, no city/state/zip — "Main", not "Main
+  St" or "Main St, Los Angeles"), and each half gets its own copy button,
+  so both LADBS fields are one paste away. First cut of this was a
+  hand-rolled comma-split regex, which broke on addresses typed without
+  commas ("123 Main St Los Angeles CA 90012") by leaking the city straight
+  into the "street" half — there's no reliable way to know where a
+  multi-word city name ends and truly no comma to split on. Replaced with
+  [`parse-address`](https://www.npmjs.com/package/parse-address) (a small,
+  well-tested JS port of the long-standing Perl `Geo::StreetAddress::US`
+  parser — ambient types for it, since none ship, live in
+  `types/parse-address.d.ts`), which handles directional prefixes and USPS
+  street types properly regardless of comma placement. Still best-effort
+  parsing, not address validation — an address it can't confidently parse
+  just comes back with an empty street/number rather than a wrong guess. A
   "Record findings" modal then lets you save what you found there — status, CO
   number, issue date, a growing list of open/remaining clearances, a
   growing list of issued permits, and inspector contact info (phone/email
