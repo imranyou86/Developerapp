@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 interface ProductMatch {
   brand: string;
@@ -34,10 +34,25 @@ you see in the given photo rather than matching on the text label alone. If a se
 photo clearly doesn't match (wrong color, wrong shape) even though the name sounds right, don't
 return it as an "exact" or "close" match — downgrade it to "similar" or drop it.
 
-Prefer well-known manufacturers and retailers (e.g. Kohler, Delta, Moen, Daltile, Caesarstone,
-Shaw, Behr, Home Depot, Lowe's, Ferguson, Wayfair, Build.com) and prefer an exact make/model
-match when the photo and description are specific enough to identify one. When they aren't,
-return the closest visual equivalent products instead.
+Don't stop at one generic search — a single broad query tends to surface blogs, Pinterest boards,
+and marketplace listings instead of real catalog pages, which is why obviously-real products get
+missed. Run several targeted searches against specific manufacturer and retailer catalogs
+relevant to the category before concluding nothing matches, for example:
+- Faucets/fixtures: Kohler, Delta, Moen, Grohe, American Standard, Signature Hardware, Ferguson
+- Tile: Daltile, MSI Surfaces, Emser Tile, Fireclay Tile, Floor & Decor, The Tile Shop
+- Flooring: Shaw, Mohawk, Bruce, Armstrong Flooring, Floor & Decor
+- Countertops: Caesarstone, Cambria, MSI Surfaces, Silestone
+- Cabinetry/hardware: KraftMaid, Emtek, Schlage, Top Knobs, Baldwin, Rejuvenation
+- Lighting: Visual Comfort, Progress Lighting, Hinkley, Kichler
+- Appliances: GE Profile, Bosch, KitchenAid, Wolf, Sub-Zero, Thermador
+- General retailers worth a search regardless of category: Home Depot, Lowe's, Wayfair,
+  Build.com, Ferguson
+Try a manufacturer-specific search (e.g. "site:kohler.com [description]") as well as a general
+one, and if the first couple of searches don't turn up a confident visual match, try rephrasing
+the query (different terms for the same material/style) before giving up.
+
+Prefer an exact make/model match when the photo and description are specific enough to identify
+one. When they aren't, return the closest visual equivalent products instead.
 
 Return up to 3 matches, ranked best first. For each:
 - brand: manufacturer/brand name
@@ -52,6 +67,13 @@ Return up to 3 matches, ranked best first. For each:
 
 Be honest — if web search turns up nothing credible, or nothing that actually looks like the
 photo, return an empty matches array rather than inventing or force-fitting a product.
+
+Sometimes the request will list products the user has already been shown (under "Already
+shown — find different ones"). Never repeat one of those (same brand+model, or same product
+under a different retailer) — search further for other real, distinct products that still match
+the visual description. It's fine for these to be a bit lower-confidence than a first search;
+they must still be real, currently-sold products, not invented. If you genuinely can't find any
+other distinct real product, return an empty matches array rather than repeating one already shown.
 
 Respond with ONLY a JSON object, no prose, matching this shape exactly:
 { "matches": [ { "brand": string, "model": string | null, "description": string, "price": number | null, "url": string | null, "retailer": string | null, "match_confidence": "exact" | "close" | "similar" } ] }`;
@@ -71,6 +93,7 @@ export async function POST(req: Request) {
     description?: string;
     color?: string | null;
     imageUrl?: string | null;
+    excludeMatches?: { brand: string; model: string | null; retailer: string | null }[];
   };
   if (!body.name) {
     return NextResponse.json({ error: "No item provided." }, { status: 400 });
@@ -88,6 +111,13 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n");
 
+    const excludeList =
+      body.excludeMatches && body.excludeMatches.length > 0
+        ? `\n\nAlready shown — find different ones:\n${body.excludeMatches
+            .map((m) => `- ${m.brand}${m.model ? ` ${m.model}` : ""}${m.retailer ? ` (${m.retailer})` : ""}`)
+            .join("\n")}`
+        : "";
+
     // The source photo (when available) is included alongside the text so Claude can visually
     // cross-check search results against it instead of matching on the text label alone — the
     // text description is Claude's own earlier summary of the photo, so it's lossy on its own.
@@ -101,7 +131,7 @@ export async function POST(req: Request) {
     }
 
     const content: Array<Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam> = [
-      { type: "text", text: `Find real product matches for this finish/fixture:\n\n${query}` },
+      { type: "text", text: `Find real product matches for this finish/fixture:\n\n${query}${excludeList}` },
     ];
     if (imageBlock) {
       content.push({ type: "text", text: "Source photo (the item is somewhere in this photo — this is the ground truth to match against):" });
@@ -119,8 +149,10 @@ export async function POST(req: Request) {
       // dynamic filtering, which in testing took 60-90+ seconds (including
       // retries from Claude's own generated code failing) versus ~10-15s here.
       // That easily exceeds a serverless function's timeout for a feature
-      // that doesn't need dynamic domain filtering anyway.
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
+      // that doesn't need dynamic domain filtering anyway. max_uses raised
+      // from 5 to 8 so the prompt's "try several manufacturer-specific
+      // searches" instruction has room to actually run more than one or two.
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }],
       messages: [{ role: "user", content }],
     });
 

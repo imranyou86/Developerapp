@@ -432,6 +432,12 @@ function IdentifiedItemRow({
 
   async function handleSearch() {
     setSearching(true);
+    // On a repeat search, tell Claude what's already been shown so it looks
+    // for different products instead of re-returning the same ones — and
+    // append rather than replace, so a match the user already liked (picked
+    // via the radio below) stays in the list and selectable instead of
+    // disappearing when new options come in.
+    const previous = matches ?? [];
     try {
       const found = await run(taskKey, `Searching the web for "${item.name}"…`, async () => {
         const res = await fetchWithRetry("/api/claude/find-product", {
@@ -443,20 +449,25 @@ function IdentifiedItemRow({
             description: item.description,
             color: item.color,
             imageUrl,
+            excludeMatches: previous.map((m) => ({ brand: m.brand, model: m.model, retailer: m.retailer })),
           }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Product search failed.");
         return (json.matches ?? []) as ProductMatch[];
       });
-      setMatches(found);
+
+      const seen = new Set(previous.map((m) => `${m.brand}|${m.model}|${m.url}`));
+      const newOnes = found.filter((m) => !seen.has(`${m.brand}|${m.model}|${m.url}`));
+      const combined = [...previous, ...newOnes];
+      setMatches(combined);
       try {
-        sessionStorage.setItem(`finish-search-result:${taskKey}`, JSON.stringify(found));
+        sessionStorage.setItem(`finish-search-result:${taskKey}`, JSON.stringify(combined));
       } catch {
         // ignore — storage unavailable
       }
-      if (found.length === 0) {
-        notify("success", "No confident product match found on the web.");
+      if (newOnes.length === 0) {
+        notify("success", previous.length > 0 ? "No other distinct product found." : "No confident product match found on the web.");
       }
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Product search failed.");
@@ -489,7 +500,12 @@ function IdentifiedItemRow({
         )}
 
         {matches && matches.length === 0 && (
-          <p className="text-xs text-blueprint/50">No confident match found on the web.</p>
+          <div className="space-y-1">
+            <p className="text-xs text-blueprint/50">No confident match found on the web.</p>
+            <button className="btn-ghost text-xs" onClick={handleSearch} disabled={searching}>
+              {searching ? "Searching…" : "Search again"}
+            </button>
+          </div>
         )}
 
         {matches && matches.length > 0 && (

@@ -29,7 +29,14 @@ For each item you identify:
 - Give it a short descriptive name (e.g. "Honed Carrara marble countertop", "Matte black
   gooseneck kitchen faucet", "Wide-plank white oak flooring").
 - Classify it into exactly one of these categories: ${FINISH_CATEGORIES.join(", ")}.
-- Write a one-sentence description covering material, color/finish, and any notable detail.
+- Write a description specific enough that someone could web-search for the exact real product
+  from it — not just material and color, but the details that actually distinguish one real
+  product from another: for a faucet or fixture, its silhouette (e.g. gooseneck, widespread,
+  single-hole, bridge), handle count/style, and any visible logo or model marking; for tile, the
+  size, shape (e.g. subway, hexagon, large-format), and grout line pattern; for countertops, the
+  edge profile and veining pattern; for cabinetry, the door style (shaker, slab, raised-panel) and
+  hardware; for lighting, the fixture shape and number of lights. Skip a detail you genuinely
+  can't make out rather than guessing at it.
 - Give your best guess at the dominant color as a short phrase, or null if not applicable.
 - Rate your confidence as "high", "medium", or "low" — be honest; a low-resolution or partially
   obscured item should be "low", not guessed at with false confidence.
