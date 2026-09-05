@@ -312,9 +312,13 @@ export function HouseBookDocument({ input }: { input: HouseBookInput }) {
             <View key={i} style={styles.subRow}>
               <View>
                 <Text style={styles.subCompany}>{s.company_name}</Text>
-                {(s.trade || s.license_number) && (
+                {(s.trade || s.license_number || s.license_status) && (
                   <Text style={styles.subTrade}>
-                    {[s.trade, s.license_number ? `License ${s.license_number}${s.license_state ? ` (${s.license_state})` : ""}` : null]
+                    {[
+                      s.trade,
+                      s.license_number ? `License ${s.license_number}${s.license_state ? ` (${s.license_state})` : ""}` : null,
+                      s.license_status,
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                   </Text>

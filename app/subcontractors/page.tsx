@@ -20,7 +20,7 @@ export default async function SubcontractorsPage() {
     supabase
       .from("subcontractors")
       .select(
-        "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, reliability, cost_tier, notes, created_at"
+        "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, license_status, license_checked_at, reliability, cost_tier, notes, created_at"
       )
       .order("company_name"),
     // RLS (projects_select -> has_project_access) already scopes this to
