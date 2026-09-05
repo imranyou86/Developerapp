@@ -321,7 +321,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -461,9 +461,9 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- Contractor included — inspection/clearance status is field-relevant
 -- info, not a financial tab.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new

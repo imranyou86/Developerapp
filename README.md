@@ -352,7 +352,10 @@ yet; each one only adds what a given feature needed.
     Kitchen, toilet/shower/tub/vanity for a Bathroom, bed/dresser for a
     Bedroom, etc.). Drag a chip from the palette onto the room to place it
     at that spot; drag a placed item to reposition it; a small toolbar
-    rotates 90° or deletes the selected item. Positions clamp to stay
+    rotates 90°, deletes the selected item, or adds a freeform detail note
+    to it (`PlacedFixture.detail`, e.g. "stainless steel, French door" on a
+    fridge) — folded into that fixture's line in the generated prompt by
+    `describeLayout()` in `lib/interiorDesignPrompt.ts`. Positions clamp to stay
     inside the room, including when you switch rooms mid-edit, and snap to
     a 0.5ft grid once on release (not while dragging — see below).
     Built with pointer events (not the HTML5 Drag and Drop API, which is
@@ -524,6 +527,26 @@ yet; each one only adds what a given feature needed.
   numbered "add exactly these" block, then an instruction to keep the
   house's architecture/camera angle unchanged). `landscape_designs`
   (migration `025_landscape.sql`) mirrors `interior_designs`'s shape.
+- **House Book** (per-project tab, `house-book`, migration
+  `026_house_book_tab.sql` — no new tables, nothing persisted; everything's
+  generated on demand) — a polished, book-style PDF for the homeowner.
+  `app/projects/[id]/house-book/house-book-client.tsx` shows what's
+  available for this construction (layout plan pages, room renderings +
+  Interior Design images, Landscape designs, linked subcontractors) as
+  checkable cards/rows, all selected by default, plus a toggle for an
+  AI-written closing note — the Developer/PM picks what actually goes in
+  before generating, rather than an all-or-nothing dump. "Generate House
+  Book" posts the selected ids to `app/api/projects/[id]/house-book/route.ts`,
+  which re-fetches each one scoped to this project server-side (never
+  trusting the client-sent list as more than an id filter), optionally asks
+  Claude for a short warm closing paragraph grounded only in what was
+  actually selected (room/style/landscape/trade names — never inventing
+  specifics), and renders the whole thing with `@react-pdf/renderer`
+  (`lib/houseBookPdf.tsx`) — a cover page, one page per plan sheet, a
+  grid of room/finish photos, landscape pages, a "Your Team" subcontractor
+  page, and the closing note — then streams the PDF back as a download.
+  Built on the base-14 PDF fonts (Times/Helvetica) rather than a registered
+  font, so there's nothing that can fail to download mid-request.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

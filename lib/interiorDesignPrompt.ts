@@ -35,9 +35,10 @@ function describePosition(item: PlacedFixture, roomWidth: number, roomDepth: num
 // inventing its own.
 export function describeLayout(items: PlacedFixture[], roomWidth: number, roomDepth: number): string {
   if (items.length === 0) return "";
-  const lines = items.map(
-    (it, i) => `${i + 1}. ${it.label}, ${formatFeetInches(it.width)} x ${formatFeetInches(it.depth)}, ${describePosition(it, roomWidth, roomDepth)}`
-  );
+  const lines = items.map((it, i) => {
+    const base = `${i + 1}. ${it.label}, ${formatFeetInches(it.width)} x ${formatFeetInches(it.depth)}, ${describePosition(it, roomWidth, roomDepth)}`;
+    return it.detail?.trim() ? `${base} — ${it.detail.trim()}` : base;
+  });
   return `FIXTURE PLACEMENT — follow this exactly, to scale within the room, and do not add any other furniture or fixtures beyond this list:\n${lines.join("\n")}`;
 }
 

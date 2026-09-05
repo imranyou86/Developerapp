@@ -305,6 +305,11 @@ export function RoomLayoutEditor({
     onChange(items.map((it) => (it.id === selected.id ? { ...it, rotated: !it.rotated, x, y } : it)));
   }
 
+  function handleDetailChange(detail: string) {
+    if (!selected) return;
+    onChange(items.map((it) => (it.id === selected.id ? { ...it, detail } : it)));
+  }
+
   function handleDelete() {
     if (!selected) return;
     onChange(items.filter((it) => it.id !== selected.id));
@@ -475,16 +480,24 @@ export function RoomLayoutEditor({
       </svg>
 
       {selected && (
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-blueprint/60">
-            Selected: {selected.label} ({fmt(footprint(selected).w)} × {fmt(footprint(selected).d)})
-          </span>
-          <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={handleRotate}>
-            Rotate 90°
-          </button>
-          <button type="button" className="text-red-500 hover:underline" onClick={handleDelete}>
-            Delete
-          </button>
+        <div className="mt-2 space-y-1.5 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-blueprint/60">
+              Selected: {selected.label} ({fmt(footprint(selected).w)} × {fmt(footprint(selected).d)})
+            </span>
+            <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={handleRotate}>
+              Rotate 90°
+            </button>
+            <button type="button" className="text-red-500 hover:underline" onClick={handleDelete}>
+              Delete
+            </button>
+          </div>
+          <input
+            className="input text-xs"
+            placeholder={`Optional details for this ${selected.label.toLowerCase()} — e.g. "stainless steel, French door"…`}
+            value={selected.detail ?? ""}
+            onChange={(e) => handleDetailChange(e.target.value)}
+          />
         </div>
       )}
     </>

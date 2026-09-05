@@ -183,6 +183,8 @@ export interface PlacedFixture {
   width: number;
   depth: number;
   rotated: boolean;
+  /** Optional freeform note, e.g. "stainless steel, French door" — folded into the generated image prompt. */
+  detail?: string;
 }
 
 export interface InteriorDesign {
