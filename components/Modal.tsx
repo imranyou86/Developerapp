@@ -27,8 +27,15 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-blueprint-dark/40 p-4 animate-fade-in">
-      <div className="w-full max-w-md rounded-xl bg-white shadow-elevated animate-scale-in">
-        <div className="flex items-center justify-between border-b border-blueprint/10 px-5 py-4">
+      {/* flex-col + max-h-[90vh], with the header/footer pinned (shrink-0)
+          and only the body scrolling (overflow-y-auto) — without this, a
+          tall form (lots of fields, or a small/rotated screen) grows the
+          whole card past the viewport with no way to reach the footer's
+          Save/Cancel buttons, since the outer wrapper itself doesn't
+          scroll. This keeps the footer visible and reachable no matter how
+          long the content or how short the screen. */}
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-elevated animate-scale-in">
+        <div className="flex shrink-0 items-center justify-between border-b border-blueprint/10 px-5 py-4">
           <h2 className="text-base font-semibold text-blueprint-dark">{title}</h2>
           <button
             type="button"
@@ -39,8 +46,8 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
             ✕
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-blueprint/10 px-5 py-4">{footer}</div>}
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <div className="flex shrink-0 justify-end gap-2 border-t border-blueprint/10 px-5 py-4">{footer}</div>}
       </div>
     </div>,
     document.body

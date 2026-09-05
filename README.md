@@ -103,8 +103,11 @@ yet; each one only adds what a given feature needed.
   trailing letter/fraction like "123B" or "456 1/2", as the number;
   everything else up to the first comma, dropping city/state/zip, as the
   street) and each half gets its own copy button, so both LADBS fields are
-  one paste away. Best-effort parsing, not address validation — an unusual
-  format just falls back to putting everything in the street field. A
+  one paste away. The street half also gets its USPS-style suffix stripped
+  (`stripStreetSuffix()` — "Main St" → "Main", "Sunset Blvd" → "Sunset")
+  since LADBS's form wants the bare street name only. Best-effort parsing,
+  not address validation — an unusual format just falls back to putting
+  everything in the street field. A
   "Record findings" modal then lets you save what you found there — status, CO
   number, issue date, a growing list of open/remaining clearances, a
   growing list of issued permits, and inspector contact info (phone/email
@@ -193,6 +196,17 @@ yet; each one only adds what a given feature needed.
     `animate-scale-in` panel) instead of popping in instantly; `Toast`
     messages slide in from the right (`animate-slide-in-right`) with a
     ✓/⚠ glyph per kind.
+  - **`Modal`'s footer used to be unreachable on a long form** — the outer
+    card had no height cap, so a form with enough fields (Certificate of
+    Occupancy's "Record findings" being the one that surfaced it, with its
+    growing clearance/permit lists) could grow taller than the viewport
+    with no way to scroll down to the Save/Cancel buttons, especially on a
+    short or rotated screen. Fixed once, in the shared component, for
+    every modal in the app: the card is now `flex flex-col`, capped at
+    `max-h-[90vh]`, with the header and footer `shrink-0` (pinned in
+    place) and only the body `overflow-y-auto` (scrolls internally) — the
+    footer stays visible and reachable regardless of content length or
+    screen size.
   - The **login page** (`app/login/page.tsx`) — the first thing anyone sees
     — got the most direct attention: a soft radial glow plus a faint
     blueprint-grid background (pure CSS, `aria-hidden`/`pointer-events-none`

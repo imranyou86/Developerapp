@@ -12,19 +12,38 @@ const LADBS_PLR_URL = "https://www.ladbsservices2.lacity.org/OnlineServices/?ser
 
 const EMPTY_INSPECTOR: COInspector = { name: "", phone: "", email: "", department: "" };
 
+// USPS-style street suffixes — stripped from the end of the street name
+// since LADBS's form wants the bare name only (their own suffix, if any,
+// is a separate field). Not exhaustive, just the common ones likely to
+// show up in LA addresses.
+const STREET_SUFFIXES = new Set([
+  "st", "street", "ave", "avenue", "blvd", "boulevard", "dr", "drive", "ln", "lane", "rd", "road",
+  "ct", "court", "pl", "place", "way", "ter", "terrace", "cir", "circle", "pkwy", "parkway",
+  "hwy", "highway", "sq", "square", "trl", "trail", "aly", "alley", "walk", "loop", "path",
+  "row", "xing", "crossing", "cres", "crescent",
+]);
+
+function stripStreetSuffix(street: string): string {
+  const words = street.trim().split(/\s+/);
+  if (words.length < 2) return street;
+  const last = words[words.length - 1].toLowerCase().replace(/\.$/, "");
+  return STREET_SUFFIXES.has(last) ? words.slice(0, -1).join(" ") : street;
+}
+
 // LADBS's Property Activity Report search has separate "House Number" and
 // "Street Name" fields rather than one address box, so a single "copy the
 // whole address" button isn't actually usable there — split it the same
 // way: leading digits (plus a trailing letter/fraction like "123B" or
-// "123 1/2") as the number, everything else up to the first comma (which
-// drops city/state/zip) as the street name. Best-effort parsing, not
-// address validation — unusual formats just fall back to putting
-// everything in the street field.
+// "123 1/2") as the number; everything else up to the first comma (which
+// drops city/state/zip), then with the trailing suffix (Ave/St/Blvd/etc.)
+// stripped, as the bare street name. Best-effort parsing, not address
+// validation — unusual formats just fall back to putting everything in
+// the street field.
 function splitAddress(address: string): { number: string; street: string } {
   const streetPart = address.split(",")[0]?.trim() ?? "";
   const match = streetPart.match(/^(\d+(?:\s*\d\/\d|-?[A-Za-z])?)\s+(.*)$/);
-  if (match) return { number: match[1], street: match[2] };
-  return { number: "", street: streetPart };
+  if (match) return { number: match[1], street: stripStreetSuffix(match[2]) };
+  return { number: "", street: stripStreetSuffix(streetPart) };
 }
 
 function statusBadgeClass(status: string | null): string {
