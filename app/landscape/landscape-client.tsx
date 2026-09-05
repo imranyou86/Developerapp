@@ -11,10 +11,10 @@ import { LANDSCAPE_COMPONENTS, LANDSCAPE_STYLES, buildLandscapePrompt } from "@/
 import { saveLandscapeDesign, deleteLandscapeDesign } from "@/app/landscape/actions";
 import type { LandscapeComponentSelection, LandscapeDesign } from "@/lib/types";
 
-export function LandscapeClient({ projectId, initialDesigns }: { projectId: string; initialDesigns: LandscapeDesign[] }) {
+export function LandscapeClient({ projectId, initialDesigns }: { projectId: string | null; initialDesigns: LandscapeDesign[] }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
-  const taskKey = `landscape:${projectId}`;
+  const taskKey = `landscape:${projectId ?? "standalone"}`;
 
   const [designs, setDesigns] = useState<LandscapeDesign[]>(initialDesigns);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Not signed in.");
 
-    const path = `${user.id}/${projectId}/${Date.now()}-${suffix}.${ext}`;
+    const path = projectId ? `${user.id}/${projectId}/${Date.now()}-${suffix}.${ext}` : `${user.id}/standalone/${Date.now()}-${suffix}.${ext}`;
     const { error } = await supabase.storage.from("landscape-photos").upload(path, blob, {
       contentType: blob.type,
     });

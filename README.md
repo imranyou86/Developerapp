@@ -527,6 +527,16 @@ yet; each one only adds what a given feature needed.
   numbered "add exactly these" block, then an instruction to keep the
   house's architecture/camera angle unchanged). `landscape_designs`
   (migration `025_landscape.sql`) mirrors `interior_designs`'s shape.
+  - **Standalone Photos** (`landscape-sections.tsx`, migration
+    `027_landscape_standalone.sql`) — a second tab alongside "By
+    Construction" for a photo that isn't tied to any tracked construction at
+    all (a listing you're scouting, a reference photo). `project_id` is
+    nullable; a standalone row instead carries `created_by` and uses the
+    same shared-directory RLS shape as `finish_scans`/`subcontractors` — any
+    signed-in user can see every standalone design, only its creator (or a
+    Developer) can delete one. Since there's no project to file it under,
+    a standalone save skips the File Library `recordProjectFile` calls the
+    per-construction path makes.
 - **House Book** (per-project tab, `house-book`, migration
   `026_house_book_tab.sql` — no new tables, nothing persisted; everything's
   generated on demand) — a polished, book-style PDF for the homeowner.

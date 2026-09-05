@@ -211,7 +211,7 @@ export interface LandscapeComponentSelection {
 
 export interface LandscapeDesign {
   id: string;
-  project_id: string;
+  project_id: string | null;
   style: string;
   components: LandscapeComponentSelection[];
   notes: string | null;

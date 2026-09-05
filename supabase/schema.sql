@@ -154,10 +154,14 @@ create table if not exists interior_designs (
 -- unlike Interior Design there's no from-scratch path, since the whole
 -- point is redesigning THIS house's actual yard. components is the checked
 -- list of landscape elements (array of {id, label, detail}), e.g. grass,
--- deck, pool, concrete work.
+-- deck, pool, concrete work. project_id is optional — a "Standalone
+-- Photos" mode lets a design not tied to any tracked construction (a
+-- random exterior photo, someone else's listing, etc.); created_by backs
+-- the RLS for that case (see below), same shape as finish_scans.
 create table if not exists landscape_designs (
   id uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects (id) on delete cascade,
+  project_id uuid references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
   style text not null,
   components jsonb not null default '[]'::jsonb,
   notes text,
@@ -622,9 +626,34 @@ create policy "interior_designs_member" on interior_designs
   for all using (has_project_access(interior_designs.project_id))
   with check (has_project_access(interior_designs.project_id));
 
-create policy "landscape_designs_member" on landscape_designs
-  for all using (has_project_access(landscape_designs.project_id))
-  with check (has_project_access(landscape_designs.project_id));
+-- Project-tied rows stay gated by project membership; a "Standalone
+-- Photos" row (project_id null) is a shared-directory row instead — any
+-- signed-in user can see it, only its creator (or a Developer) can change
+-- or remove it — same shape as the shared finish_scans/subcontractors
+-- directories.
+create policy "landscape_designs_select" on landscape_designs
+  for select using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and auth.uid() is not null)
+  );
+create policy "landscape_designs_insert" on landscape_designs
+  for insert with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and auth.uid() = created_by)
+  );
+create policy "landscape_designs_update" on landscape_designs
+  for update using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  ) with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
+create policy "landscape_designs_delete" on landscape_designs
+  for delete using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
 
 create policy "checklist_items_member" on checklist_items
   for all using (has_project_access(checklist_items.project_id))

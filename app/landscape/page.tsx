@@ -1,11 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
-import { ProjectPicker } from "@/components/ProjectPicker";
-import { LandscapeClient } from "@/app/landscape/landscape-client";
+import { LandscapeSections } from "@/app/landscape/landscape-sections";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 import type { LandscapeDesign } from "@/lib/types";
+
+const LANDSCAPE_DESIGN_COLUMNS = "id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, created_at";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +32,18 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
   if (selectedId) {
     const { data } = await supabase
       .from("landscape_designs")
-      .select("id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, created_at")
+      .select(LANDSCAPE_DESIGN_COLUMNS)
       .eq("project_id", selectedId)
       .order("created_at", { ascending: false });
     designs = (data ?? []) as LandscapeDesign[];
   }
+
+  const { data: standaloneData } = await supabase
+    .from("landscape_designs")
+    .select(LANDSCAPE_DESIGN_COLUMNS)
+    .is("project_id", null)
+    .order("created_at", { ascending: false });
+  const standaloneDesigns = (standaloneData ?? []) as LandscapeDesign[];
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -65,22 +73,8 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-6">
-          <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Landscape</h2>
-          <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction this design is for — upload a photo of the house&apos;s exterior and OpenAI will
-            redesign the actual yard around it.
-          </p>
-          {projectList.length === 0 ? (
-            <p className="text-sm text-blueprint/50">
-              No constructions yet — create one under Constructions first, then come back here.
-            </p>
-          ) : (
-            <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/landscape" />
-          )}
-        </div>
-
-        {selectedId && <LandscapeClient key={selectedId} projectId={selectedId} initialDesigns={designs} />}
+        <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Landscape</h2>
+        <LandscapeSections projectList={projectList} selectedId={selectedId} designs={designs} standaloneDesigns={standaloneDesigns} />
       </main>
     </div>
   );
