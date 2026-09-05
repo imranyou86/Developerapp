@@ -8,6 +8,7 @@ import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteBid, markPaymentPaid, saveBid, type SaveBidInput } from "@/app/projects/[id]/payments/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { stripLeadingZero } from "@/lib/numberInput";
 
 interface PaymentLine {
   id: string;
@@ -423,7 +424,14 @@ function ReviewBidModal({
           </div>
           <div>
             <label className="label">Total contract amount</label>
-            <input className="input" type="number" step="0.01" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={totalAmount}
+              onChange={(e) => setTotalAmount(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
           </div>
         </div>
 
@@ -452,6 +460,7 @@ function ReviewBidModal({
                   step="0.01"
                   value={line.amount}
                   onChange={(e) => updateLine(i, { amount: Number(e.target.value) })}
+                  onFocus={(e) => e.target.select()}
                 />
                 <button
                   className="text-xs text-red-500 hover:underline"

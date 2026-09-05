@@ -13,6 +13,7 @@ import { buildInteriorDesignPrompt, describeLayout } from "@/lib/interiorDesignP
 import { RoomLayoutEditor, clampItemsToRoom } from "@/app/interior-design/room-layout-editor";
 import { FeetInchesInput } from "@/components/FeetInchesInput";
 import { formatFeetInches } from "@/lib/feetInches";
+import { stripLeadingZero } from "@/lib/numberInput";
 import { getFixturesForRoomType } from "@/lib/fixtureCatalog";
 import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
 import type { InteriorDesign, PlacedFixture } from "@/lib/types";
@@ -403,7 +404,8 @@ export function InteriorDesignClient({
                   className="input"
                   placeholder="Sqft"
                   value={sqft}
-                  onChange={(e) => setSqft(e.target.value)}
+                  onChange={(e) => setSqft(stripLeadingZero(e.target.value))}
+                  onFocus={(e) => e.target.select()}
                 />
               </div>
             )}

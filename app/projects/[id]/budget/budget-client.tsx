@@ -5,6 +5,7 @@ import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { addBudgetItem, deleteBudgetItem, updateBudgetItem } from "@/app/projects/[id]/budget/actions";
+import { stripLeadingZero } from "@/lib/numberInput";
 
 interface BudgetItemRow {
   id: string;
@@ -293,11 +294,25 @@ function AddBudgetItemModal({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Budgeted</label>
-            <input className="input" type="number" step="0.01" value={budgeted} onChange={(e) => setBudgeted(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={budgeted}
+              onChange={(e) => setBudgeted(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
           </div>
           <div>
             <label className="label">Actual</label>
-            <input className="input" type="number" step="0.01" value={actual} onChange={(e) => setActual(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={actual}
+              onChange={(e) => setActual(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
           </div>
         </div>
       </div>
@@ -345,11 +360,26 @@ function EditBudgetItemModal({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="label">Budgeted</label>
-          <input className="input" type="number" step="0.01" value={budgeted} onChange={(e) => setBudgeted(e.target.value)} autoFocus />
+          <input
+            className="input"
+            type="number"
+            step="0.01"
+            value={budgeted}
+            onChange={(e) => setBudgeted(stripLeadingZero(e.target.value))}
+            onFocus={(e) => e.target.select()}
+            autoFocus
+          />
         </div>
         <div>
           <label className="label">Actual</label>
-          <input className="input" type="number" step="0.01" value={actual} onChange={(e) => setActual(e.target.value)} />
+          <input
+            className="input"
+            type="number"
+            step="0.01"
+            value={actual}
+            onChange={(e) => setActual(stripLeadingZero(e.target.value))}
+            onFocus={(e) => e.target.select()}
+          />
         </div>
       </div>
     </Modal>

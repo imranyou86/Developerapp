@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { FeetInchesInput } from "@/components/FeetInchesInput";
 import { FileViewerModal } from "@/components/FileViewer";
+import { stripLeadingZero } from "@/lib/numberInput";
 import { addRoom, deleteRoom } from "@/app/projects/[id]/rooms/actions";
 import { RoomCard } from "@/app/projects/[id]/rooms/room-card";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
@@ -234,7 +235,13 @@ function AddRoomModal({
           </div>
           <div>
             <label className="label">Floor</label>
-            <input className="input" type="number" value={floor} onChange={(e) => setFloor(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              value={floor}
+              onChange={(e) => setFloor(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
           </div>
         </div>
       </div>

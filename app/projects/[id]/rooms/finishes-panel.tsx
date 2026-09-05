@@ -6,6 +6,7 @@ import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FINISH_CATEGORIES, productsByCategory } from "@/lib/finishes-db";
 import { addFinish, deleteFinish } from "@/app/projects/[id]/rooms/actions";
+import { stripLeadingZero } from "@/lib/numberInput";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 import type { FinishCategory } from "@/lib/types";
 
@@ -217,7 +218,14 @@ function AddFinishModal({
           </div>
           <div>
             <label className="label">Price</label>
-            <input className="input" type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
           </div>
         </div>
       </div>

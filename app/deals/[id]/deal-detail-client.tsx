@@ -490,6 +490,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                     type="number"
                     value={buildableSqft}
                     onChange={(e) => handleBuildableSqftChange(Number(e.target.value) || 0)}
+                    onFocus={(e) => e.target.select()}
                   />
                   <p className="mt-1 text-xs text-blueprint/50">
                     A rebuild isn&apos;t limited to the existing home&apos;s {listingDetails.sqft ? `${listingDetails.sqft.toLocaleString()} sqft` : "footprint"} — what
@@ -506,7 +507,13 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="mb-1 block text-[11px] text-blueprint/50">Lot size (sqft)</label>
-                      <input className="input" type="number" value={lotSize} onChange={(e) => setLotSize(e.target.value === "" ? "" : Number(e.target.value))} />
+                      <input
+                        className="input"
+                        type="number"
+                        value={lotSize}
+                        onChange={(e) => setLotSize(e.target.value === "" ? "" : Number(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                      />
                     </div>
                     <div>
                       <label className="mb-1 block text-[11px] text-blueprint/50">Zone</label>
@@ -560,6 +567,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                         type="number"
                         value={lotCoveragePct}
                         onChange={(e) => setLotCoveragePct(e.target.value === "" ? "" : Number(e.target.value))}
+                        onFocus={(e) => e.target.select()}
                       />
                       <button
                         type="button"
@@ -604,11 +612,18 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                   type="number"
                   value={costPerSqft}
                   onChange={(e) => handleCostPerSqftChange(Number(e.target.value) || 0)}
+                  onFocus={(e) => e.target.select()}
                 />
               </div>
               <div>
                 <label className="label">Construction budget</label>
-                <input className="input" type="number" value={budget} onChange={(e) => handleBudgetChange(Number(e.target.value) || 0)} />
+                <input
+                  className="input"
+                  type="number"
+                  value={budget}
+                  onChange={(e) => handleBudgetChange(Number(e.target.value) || 0)}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
             </div>
             <p className="text-xs text-blueprint/50">

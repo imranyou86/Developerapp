@@ -8,6 +8,7 @@ import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteDeal, saveDeal, saveManualDeal } from "@/app/deals/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { stripLeadingZero } from "@/lib/numberInput";
 import type { RentcastListing } from "@/lib/rentcast";
 import type { DealStatus } from "@/lib/types";
 
@@ -296,27 +297,63 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div>
                 <label className="label">List price</label>
-                <input className="input" type="number" value={manual.list_price} onChange={(e) => setManual((m) => ({ ...m, list_price: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.list_price}
+                  onChange={(e) => setManual((m) => ({ ...m, list_price: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
               <div>
                 <label className="label">Beds</label>
-                <input className="input" type="number" value={manual.beds} onChange={(e) => setManual((m) => ({ ...m, beds: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.beds}
+                  onChange={(e) => setManual((m) => ({ ...m, beds: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
               <div>
                 <label className="label">Baths</label>
-                <input className="input" type="number" value={manual.baths} onChange={(e) => setManual((m) => ({ ...m, baths: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.baths}
+                  onChange={(e) => setManual((m) => ({ ...m, baths: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
               <div>
                 <label className="label">Home sqft</label>
-                <input className="input" type="number" value={manual.sqft} onChange={(e) => setManual((m) => ({ ...m, sqft: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.sqft}
+                  onChange={(e) => setManual((m) => ({ ...m, sqft: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
               <div>
                 <label className="label">Lot size (sqft)</label>
-                <input className="input" type="number" value={manual.lot_size} onChange={(e) => setManual((m) => ({ ...m, lot_size: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.lot_size}
+                  onChange={(e) => setManual((m) => ({ ...m, lot_size: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
               <div>
                 <label className="label">Year built</label>
-                <input className="input" type="number" value={manual.year_built} onChange={(e) => setManual((m) => ({ ...m, year_built: e.target.value }))} />
+                <input
+                  className="input"
+                  type="number"
+                  value={manual.year_built}
+                  onChange={(e) => setManual((m) => ({ ...m, year_built: stripLeadingZero(e.target.value) }))}
+                  onFocus={(e) => e.target.select()}
+                />
               </div>
             </div>
             <button type="submit" className="btn-amber w-full" disabled={savingManual}>

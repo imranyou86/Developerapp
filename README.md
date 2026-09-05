@@ -755,3 +755,24 @@ yet; each one only adds what a given feature needed.
   for it (`budgeted` = found price, `actual` = 0, linked via
   `budget_items.finish_id`), marked with a "finish" badge on the Budget tab;
   deleting that finish removes the budget line it created.
+- **Numeric text fields no longer stick a leading zero when you type over a
+  0.** Several `type="number"` fields keep their value as a plain string
+  rather than a parsed number — deliberately, so an empty field can mean
+  "no value" instead of being coerced to 0, and so typing a trailing decimal
+  point mid-entry doesn't get stripped. That's most editable dollar/measure
+  fields seeded from an existing 0 (a budget item's "Actual" before any
+  money's spent, a bid review's total when extraction found nothing, a
+  finish price, beds/baths/etc. on a manually-entered deal): the field
+  displays "0", and typing a digit after it without first clearing it
+  produces "05" at the DOM level — since the state was a raw un-reparsed
+  string, nothing ever cleaned that back up, so it stuck permanently
+  instead of being a one-frame glitch. Fixed with a shared
+  `stripLeadingZero` helper (`lib/numberInput.ts`) run on every keystroke
+  in the affected fields' `onChange` — strips a redundant leading zero
+  before another digit while leaving a deliberate one before a decimal
+  point ("0.5") alone — plus `onFocus={(e) => e.target.select()}` added to
+  every numeric input in the app (including the ones already storing a
+  parsed `Number`, which weren't actually sticking but benefit from the
+  same "typing replaces the old value" UX) so clicking into a prefilled
+  number field selects it for overwriting instead of inserting at a cursor
+  position next to existing digits.
