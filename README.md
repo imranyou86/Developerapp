@@ -549,6 +549,26 @@ yet; each one only adds what a given feature needed.
     files. A single-page PDF's label never gets the `"— Page N"` suffix in
     the first place, so it already showed as one row before this and is
     unaffected.
+  - **In-app viewer for plans, bids, and photos.** Every row (and plan
+    group) with an image or PDF now shows a **View** button/clickable
+    thumbnail that opens `FileViewerModal` — a full-screen overlay, not the
+    shared `Modal` component (its card chrome doesn't fit a full-bleed
+    viewer) — instead of forcing a download just to look at a file. Images
+    render directly, at up to 85vh, with zoom controls (`+`/`-`/reset
+    buttons, `+`/`-` keyboard shortcuts, 50%–400%, resets when you move to
+    another page) applied via a CSS `scale()` transform, panning by
+    scrolling the overlay once zoomed past what fits; PDFs (bid files are
+    stored as the original PDF, not page images) render in an `<iframe>`,
+    which browsers display natively rather than downloading when not
+    forced to. Both work unproxied straight from the public Supabase
+    Storage URL — no new download endpoint needed. Opening a plan group
+    opens its viewer already carrying every page (in the same
+    already-sorted reading order the "N pages" grouping produces) with
+    Prev/Next controls and arrow-key navigation between them. A file type
+    that isn't an image or a PDF has no View button — a "can't preview,
+    use Download" message covers it in case the modal is still reached via
+    another path. Download and Close stay available at the top at all
+    times.
 - **Roles & permissions** — every account has a login type: Owner, PM,
   Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
   trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer

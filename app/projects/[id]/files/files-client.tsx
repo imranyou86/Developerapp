@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
@@ -44,13 +45,17 @@ function isImage(url: string): boolean {
   return /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(url);
 }
 
+function isPdf(url: string): boolean {
+  return /\.pdf(\?|$)/i.test(url);
+}
+
 // A multi-page plan PDF (app/projects/[id]/plan/plan-client.tsx) is stored
 // as one rendered-page image per sheet, each labeled "<original file name>
 // — Page N" — necessary there (per-page room detection, per-page layout
 // flags), but browsing them as N separate rows here is exactly the
 // "each page individually" clutter this groups away. A single-page PDF's
 // label has no "— Page N" suffix (already just one row, nothing to do).
-const PLAN_PAGE_LABEL_RE = /^(.*) — Page \d+$/;
+const PLAN_PAGE_LABEL_RE = /^(.*) — Page (\d+)$/;
 
 interface FileGroup {
   key: string;
@@ -71,6 +76,7 @@ function isFileGroup(item: ProjectFile | FileGroup): item is FileGroup {
 // a real "this came from the same upload" batch id.
 function groupPlanPages(files: ProjectFile[]): (ProjectFile | FileGroup)[] {
   const groups = new Map<string, FileGroup>();
+  const pageNumbers = new Map<string, number>();
   const items: (ProjectFile | FileGroup)[] = [];
   for (const f of files) {
     const match = f.category === "plan" ? f.file_name.match(PLAN_PAGE_LABEL_RE) : null;
@@ -86,6 +92,13 @@ function groupPlanPages(files: ProjectFile[]): (ProjectFile | FileGroup)[] {
       items.push(group);
     }
     group.files.push(f);
+    pageNumbers.set(f.id, Number(match[2]));
+  }
+  // The incoming list is newest-first, so a group's pages arrive in
+  // reverse — sort back into reading order for the "N pages" viewer's
+  // prev/next and the zip download.
+  for (const group of groups.values()) {
+    group.files.sort((a, b) => (pageNumbers.get(a.id) ?? 0) - (pageNumbers.get(b.id) ?? 0));
   }
   return items;
 }
@@ -104,6 +117,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   const [deleting, setDeleting] = useState<ProjectFile | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [viewing, setViewing] = useState<{ files: ProjectFile[]; startIndex: number } | null>(null);
   // Files mirrored in from another tab (a Plan page, a Rendering, a
   // Checklist photo, …) can't be deleted here — deleting them belongs in
   // the tab they actually live in, so they don't desync. Hidden by default
@@ -432,6 +446,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
                     selected={item.files.every((f) => selected.has(f.id))}
                     onToggleSelect={() => toggleSelectGroup(item)}
                     onDownload={() => handleDownloadZip(item.files.map((f) => f.id))}
+                    onView={() => setViewing({ files: item.files, startIndex: 0 })}
                     downloading={downloading || isRunning(`files-zip:${projectId}`)}
                   />
                 ) : (
@@ -443,6 +458,11 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
                     savingNotes={savingNotesFor === item.id}
                     onNotesBlur={(notes) => handleNotesBlur(item.id, notes)}
                     onDelete={item.source_table == null ? () => setDeleting(item) : undefined}
+                    onView={
+                      isImage(item.storage_url) || isPdf(item.storage_url)
+                        ? () => setViewing({ files: [item], startIndex: 0 })
+                        : undefined
+                    }
                   />
                 )
               )}
@@ -486,6 +506,14 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
         onCancel={() => setDeletingSelected(false)}
         onConfirm={handleDeleteSelected}
       />
+
+      {viewing && (
+        <FileViewerModal
+          files={viewing.files}
+          startIndex={viewing.startIndex}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -495,12 +523,14 @@ function FileGroupRow({
   selected,
   onToggleSelect,
   onDownload,
+  onView,
   downloading,
 }: {
   group: FileGroup;
   selected: boolean;
   onToggleSelect: () => void;
   onDownload: () => void;
+  onView: () => void;
   downloading: boolean;
 }) {
   const cover = group.files[0];
@@ -509,13 +539,18 @@ function FileGroupRow({
     <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="mt-1 shrink-0 sm:mt-0" />
 
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-concrete">
+      <button
+        type="button"
+        onClick={onView}
+        className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-concrete"
+        title="View pages"
+      >
         {cover && isImage(cover.storage_url) ? (
           <Image src={cover.storage_url} alt={group.label} fill className="object-cover" unoptimized />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-blueprint/40">FILE</div>
         )}
-      </div>
+      </button>
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -531,6 +566,9 @@ function FileGroupRow({
       </div>
 
       <div className="flex shrink-0 gap-2">
+        <button className="btn-outline text-xs" onClick={onView}>
+          View
+        </button>
         <button className="btn-ghost text-xs" onClick={onDownload} disabled={downloading}>
           {downloading ? "Preparing…" : "Download all pages"}
         </button>
@@ -546,6 +584,7 @@ function FileRow({
   savingNotes,
   onNotesBlur,
   onDelete,
+  onView,
 }: {
   file: ProjectFile;
   selected: boolean;
@@ -553,6 +592,7 @@ function FileRow({
   savingNotes: boolean;
   onNotesBlur: (notes: string) => void;
   onDelete?: () => void;
+  onView?: () => void;
 }) {
   const [notes, setNotes] = useState(file.notes ?? "");
 
@@ -560,13 +600,19 @@ function FileRow({
     <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="mt-1 shrink-0 sm:mt-0" />
 
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-concrete">
+      <button
+        type="button"
+        onClick={onView}
+        disabled={!onView}
+        className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-concrete disabled:cursor-default"
+        title={onView ? "View" : undefined}
+      >
         {isImage(file.storage_url) ? (
           <Image src={file.storage_url} alt={file.file_name} fill className="object-cover" unoptimized />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-blueprint/40">FILE</div>
         )}
-      </div>
+      </button>
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -588,6 +634,11 @@ function FileRow({
       </div>
 
       <div className="flex shrink-0 gap-2">
+        {onView && (
+          <button className="btn-outline text-xs" onClick={onView}>
+            View
+          </button>
+        )}
         <a href={`/api/projects/${file.project_id}/files/${file.id}/download`} className="btn-ghost text-xs">
           Download
         </a>
@@ -598,5 +649,167 @@ function FileRow({
         )}
       </div>
     </div>
+  );
+}
+
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
+
+// A separate full-bleed overlay rather than the shared Modal — Modal's card
+// chrome (max-w-md, padded body) doesn't fit a full-size image/PDF viewer.
+function FileViewerModal({
+  files,
+  startIndex,
+  onClose,
+}: {
+  files: ProjectFile[];
+  startIndex: number;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(startIndex);
+  const [zoom, setZoom] = useState(1);
+  const file = files[index];
+  const canGoPrev = index > 0;
+  const canGoNext = index < files.length - 1;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+      else if (e.key === "ArrowRight") setIndex((i) => Math.min(files.length - 1, i + 1));
+      else if (e.key === "+" || e.key === "=") setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
+      else if (e.key === "-") setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP));
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [files.length, onClose]);
+
+  // Reset zoom when moving to a different file, so it doesn't carry over.
+  useEffect(() => {
+    setZoom(1);
+  }, [index]);
+
+  if (!file || typeof document === "undefined") return null;
+
+  const image = isImage(file.storage_url);
+  const pdf = isPdf(file.storage_url);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex flex-col bg-blueprint-dark/95 animate-fade-in" onClick={onClose}>
+      <div
+        className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-4 py-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-white" title={file.file_name}>
+            {file.file_name}
+          </p>
+          {files.length > 1 && (
+            <p className="text-xs text-white/50">
+              Page {index + 1} of {files.length}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {image && (
+            <div className="flex items-center gap-1 rounded-md bg-white/10 px-1 py-1">
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-sm text-white hover:bg-white/10 disabled:opacity-30"
+                onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP))}
+                disabled={zoom <= ZOOM_MIN}
+                aria-label="Zoom out"
+              >
+                −
+              </button>
+              <span className="w-11 text-center text-xs text-white/70">{Math.round(zoom * 100)}%</span>
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-sm text-white hover:bg-white/10 disabled:opacity-30"
+                onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP))}
+                disabled={zoom >= ZOOM_MAX}
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              {zoom !== 1 && (
+                <button
+                  type="button"
+                  className="rounded px-2 py-1 text-xs text-white/70 hover:bg-white/10"
+                  onClick={() => setZoom(1)}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
+          <a
+            href={`/api/projects/${file.project_id}/files/${file.id}/download`}
+            className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+          >
+            Download
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      <div className="relative min-h-0 flex-1 overflow-auto" onClick={(e) => e.stopPropagation()}>
+        {image ? (
+          <div className="flex min-h-full items-center justify-center p-4">
+            {/* eslint-disable-next-line @next/next/no-img-element -- needs
+                unconstrained natural sizing under a CSS zoom transform, which
+                next/image's layout modes don't support cleanly. */}
+            <img
+              src={file.storage_url}
+              alt={file.file_name}
+              className="max-h-[85vh] max-w-full select-none object-contain transition-transform duration-150"
+              style={{ transform: `scale(${zoom})` }}
+              draggable={false}
+            />
+          </div>
+        ) : pdf ? (
+          <iframe src={file.storage_url} title={file.file_name} className="h-full w-full border-0 bg-white" />
+        ) : (
+          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white/70">
+            This file type can&apos;t be previewed in-app — use Download above instead.
+          </div>
+        )}
+
+        {canGoPrev && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => Math.max(0, i - 1));
+            }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-lg text-white hover:bg-white/20"
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+        )}
+        {canGoNext && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => Math.min(files.length - 1, i + 1));
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-3 py-2 text-lg text-white hover:bg-white/20"
+            aria-label="Next page"
+          >
+            ›
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
