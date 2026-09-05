@@ -18,11 +18,15 @@ import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 export function RoomCard({
   projectId,
   room,
+  hasPlanPages,
+  onViewPlans,
   onDeleteRequested,
   onRoomUpdated,
 }: {
   projectId: string;
   room: RoomWithRelations;
+  hasPlanPages: boolean;
+  onViewPlans: () => void;
   onDeleteRequested: () => void;
   onRoomUpdated: (room: RoomWithRelations) => void;
 }) {
@@ -119,10 +123,24 @@ export function RoomCard({
             <button className="btn-outline" onClick={saveDims} disabled={savingDims}>
               {savingDims ? "Saving…" : "Save dimensions"}
             </button>
+            <button
+              className="btn-ghost text-sm"
+              onClick={onViewPlans}
+              disabled={!hasPlanPages}
+              title={hasPlanPages ? "Check this against the plan" : "Upload plan pages on the Plan tab first"}
+            >
+              View plans
+            </button>
             <button className="btn-ghost ml-auto text-red-600 hover:bg-red-50" onClick={onDeleteRequested}>
               Delete room
             </button>
           </div>
+          {room.estimated && (
+            <p className="-mt-4 text-xs text-blueprint/50">
+              These dimensions were AI-estimated from the plan — worth double-checking against it above if
+              anything looks off.
+            </p>
+          )}
 
           <div>
             <h4 className="mb-2 text-sm font-semibold text-blueprint-dark">Tasks</h4>

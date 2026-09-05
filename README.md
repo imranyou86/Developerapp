@@ -267,6 +267,26 @@ yet; each one only adds what a given feature needed.
     builds on the previous one's result rather than the stale `room` prop,
     which would otherwise make each subsequent queued generation overwrite
     the ones before it in local state).
+  - **"View plans" link, next to the dimensions fields.** Room
+    width/depth are sometimes hand-entered or AI-estimated from the plan
+    and occasionally come out wrong — rather than switching to the Plan
+    tab to double-check, `RoomsClient`/`RoomCard` now load that
+    construction's layout plan pages (`plan_pages` where `is_layout =
+    true`, the same source Interior Design already reads room sizing
+    from) and open them in the same `FileViewerModal` used by the Files
+    tab (zoom, Prev/Next across pages) right from a "View plans" button —
+    one next to "+ Add room" in the header for browsing all pages, and
+    one per room next to "Save dimensions" for checking a specific room's
+    numbers against the plan without losing your place. An
+    AI-estimated room also gets a one-line note under its dimension
+    fields suggesting exactly this check. Disabled (with an explanatory
+    title) when the project has no plan pages yet.
+    `FileViewerModal`/`isImage`/`isPdf` were pulled out of the Files tab
+    into a shared `components/FileViewer.tsx` for this — Rooms passes
+    plan pages in directly (`downloadUrl` = the public Storage URL, since
+    they're always images, never PDFs, and there's no per-project-file
+    row id to proxy through), while Files still maps its own
+    `ProjectFile[]` through the same-origin download proxy.
 - **Interior Design** (top-level, next to Buyers Guide — not a per-project
   tab) — designs a room, optionally starting from a real photo of it
   empty/framed-out. Pick which construction it's for first

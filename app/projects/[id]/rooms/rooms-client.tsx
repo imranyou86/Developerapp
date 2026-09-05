@@ -5,9 +5,15 @@ import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { FeetInchesInput } from "@/components/FeetInchesInput";
+import { FileViewerModal } from "@/components/FileViewer";
 import { addRoom, deleteRoom } from "@/app/projects/[id]/rooms/actions";
 import { RoomCard } from "@/app/projects/[id]/rooms/room-card";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
+
+export interface PlanPageOption {
+  label: string;
+  storage_url: string;
+}
 
 const ROOM_TYPES = [
   "Bedroom",
@@ -27,23 +33,36 @@ const ROOM_TYPES = [
 export function RoomsClient({
   projectId,
   initialRooms,
+  planPages,
 }: {
   projectId: string;
   initialRooms: RoomWithRelations[];
+  planPages: PlanPageOption[];
 }) {
   const { notify } = useToast();
   const [rooms, setRooms] = useState<RoomWithRelations[]>(initialRooms);
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<RoomWithRelations | null>(null);
+  const [viewingPlans, setViewingPlans] = useState(false);
   const [pending, startTransition] = useTransition();
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-blueprint-dark">Rooms &amp; tasks</h2>
-        <button className="btn-amber" onClick={() => setAddOpen(true)}>
-          + Add room
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-outline text-sm"
+            onClick={() => setViewingPlans(true)}
+            disabled={planPages.length === 0}
+            title={planPages.length === 0 ? "Upload plan pages on the Plan tab first" : undefined}
+          >
+            View plans{planPages.length > 0 ? ` (${planPages.length})` : ""}
+          </button>
+          <button className="btn-amber" onClick={() => setAddOpen(true)}>
+            + Add room
+          </button>
+        </div>
       </div>
 
       {rooms.length === 0 ? (
@@ -57,6 +76,8 @@ export function RoomsClient({
               key={room.id}
               projectId={projectId}
               room={room}
+              hasPlanPages={planPages.length > 0}
+              onViewPlans={() => setViewingPlans(true)}
               onDeleteRequested={() => setDeleting(room)}
               onRoomUpdated={(updated) =>
                 setRooms((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
@@ -64,6 +85,14 @@ export function RoomsClient({
             />
           ))}
         </div>
+      )}
+
+      {viewingPlans && planPages.length > 0 && (
+        <FileViewerModal
+          files={planPages.map((p) => ({ file_name: p.label, storage_url: p.storage_url, downloadUrl: p.storage_url }))}
+          startIndex={0}
+          onClose={() => setViewingPlans(false)}
+        />
       )}
 
       <AddRoomModal
