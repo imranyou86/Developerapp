@@ -57,6 +57,22 @@ export async function updateUserStatus(
   return { ok: true };
 }
 
+export async function resetUserPassword(userId: string, newPassword: string): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (newPassword.length < 6) return { ok: false, error: "Password must be at least 6 characters." };
+
+  // Sets the password directly via the admin API — no email/current-password
+  // needed, unlike the self-service /set-password flow, since a Developer
+  // resetting someone else's password can't authenticate as them. The new
+  // password is only ever known to the Developer who set it here; make sure
+  // to relay it to the account owner out of band.
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function deleteUser(userId: string): Promise<ActionResult> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };

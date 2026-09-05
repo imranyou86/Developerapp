@@ -696,7 +696,18 @@ yet; each one only adds what a given feature needed.
   up front if the account owns any constructions, since deleting a
   project's owner cascades to permanently delete everything they own too
   (`projects.user_id references auth.users(id) on delete cascade`), not
-  just their profile.
+  just their profile. A **Reset password** button per user
+  (`app/admin/actions.ts`'s `resetUserPassword`, `ResetPasswordModal` in
+  `app/admin/admin-client.tsx`) sets a new password directly via
+  `admin.auth.admin.updateUserById` — no email, current password, or
+  action from the account owner required, unlike the self-service
+  `/set-password` flow (which needs an authenticated session as *that*
+  user, which a Developer resetting someone else's password doesn't
+  have). The modal has a "Generate a random password" button (avoids
+  visually-ambiguous characters — no 0/O or 1/l/I) and a copy button on
+  the result, since the new password is shown back only once — the
+  Developer has to relay it to the account owner themselves; there's no
+  server-side record of it afterward beyond the hash Supabase stores.
 - **Preview as another role** — a "Preview as another role" picker on the
   **Admin** page (`app/admin/admin-client.tsx`'s `PreviewRoleSection`),
   visible only to a real Developer account, lets you browse the rest of

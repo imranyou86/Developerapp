@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
-import { updateTabPermission, updateUserRole, updateUserStatus, deleteUser } from "@/app/admin/actions";
+import { Modal } from "@/components/Modal";
+import { updateTabPermission, updateUserRole, updateUserStatus, deleteUser, resetUserPassword } from "@/app/admin/actions";
 import { setPreviewRole } from "@/app/admin/preview-actions";
 import {
   sendProjectInvite,
@@ -265,6 +266,7 @@ function UsersSection({
 }) {
   const { notify } = useToast();
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
+  const [resettingPasswordFor, setResettingPasswordFor] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function handleChange(userId: string, role: UserRole) {
@@ -301,7 +303,8 @@ function UsersSection({
       <p className="mb-3 text-xs text-blueprint/50">
         Change anyone&apos;s account-level login type, including granting Developer access. Access controls whether
         they can use the app at all — set it back to Pending or Declined to revoke access from someone already
-        approved.
+        approved. &quot;Reset password&quot; sets a new password directly, for when someone&apos;s locked out and
+        can&apos;t use email-based recovery themselves.
       </p>
       <div className="space-y-2">
         {rows.map((u) => (
@@ -335,6 +338,9 @@ function UsersSection({
                 ))}
               </select>
             )}
+            <button className="btn-ghost text-xs" onClick={() => setResettingPasswordFor(u)}>
+              Reset password
+            </button>
             {u.id !== currentUserId && (
               <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(u)}>
                 Delete
@@ -343,6 +349,8 @@ function UsersSection({
           </div>
         ))}
       </div>
+
+      <ResetPasswordModal user={resettingPasswordFor} onClose={() => setResettingPasswordFor(null)} />
 
       <ConfirmDialog
         open={!!deleting}
@@ -379,6 +387,133 @@ function UsersSection({
         }}
       />
     </section>
+  );
+}
+
+// Avoids visually-ambiguous characters (0/O, 1/l/I) since a Developer will
+// be reading this back to someone or pasting it somewhere they can't
+// immediately verify.
+function generatePassword(length = 14): string {
+  const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+  const bytes = new Uint32Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => charset[b % charset.length]).join("");
+}
+
+function ResetPasswordModal({ user, onClose }: { user: AdminUser | null; onClose: () => void }) {
+  const { notify } = useToast();
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Re-arm for the next user this modal opens for, since it stays mounted
+  // (Modal itself unmounts its content, but this component's state
+  // wouldn't otherwise reset between two different "Reset password" clicks).
+  useEffect(() => {
+    if (user) {
+      setPassword("");
+      setShow(false);
+      setSaved(false);
+    }
+  }, [user]);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(password);
+      notify("success", "Password copied.");
+    } catch {
+      notify("error", "Could not copy — copy it manually.");
+    }
+  }
+
+  async function handleSave() {
+    if (!user || password.length < 6) return;
+    setSaving(true);
+    const res = await resetUserPassword(user.id, password);
+    setSaving(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not reset password.");
+      return;
+    }
+    setSaved(true);
+  }
+
+  return (
+    <Modal
+      open={!!user}
+      onClose={onClose}
+      title={user ? `Reset password — ${user.email}` : "Reset password"}
+      footer={
+        saved ? (
+          <button className="btn-primary" onClick={onClose}>
+            Done
+          </button>
+        ) : (
+          <>
+            <button className="btn-outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn-primary" onClick={handleSave} disabled={saving || password.length < 6}>
+              {saving ? "Saving…" : "Set password"}
+            </button>
+          </>
+        )
+      }
+    >
+      {saved ? (
+        <div className="space-y-3">
+          <p className="text-sm text-blueprint/70">
+            Password reset. Share it with {user?.email} yourself — it won&apos;t be shown again once you close this.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              className="input flex-1 font-mono"
+              readOnly
+              value={password}
+              onFocus={(e) => e.target.select()}
+            />
+            <button className="btn-ghost text-xs" onClick={handleCopy}>
+              Copy
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-blueprint/60">
+            Sets this account&apos;s password directly — they don&apos;t need to click a link or know their old
+            one first. Make sure to send them the new password yourself afterward.
+          </p>
+          <div>
+            <label className="label">New password</label>
+            <div className="flex items-center gap-2">
+              <input
+                type={show ? "text" : "password"}
+                className="input flex-1"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                minLength={6}
+                autoFocus
+              />
+              <button type="button" className="btn-ghost text-xs" onClick={() => setShow((s) => !s)}>
+                {show ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-outline text-xs"
+            onClick={() => {
+              setPassword(generatePassword());
+              setShow(true);
+            }}
+          >
+            Generate a random password
+          </button>
+        </div>
+      )}
+    </Modal>
   );
 }
 
