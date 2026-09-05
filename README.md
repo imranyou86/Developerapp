@@ -556,7 +556,16 @@ yet; each one only adds what a given feature needed.
   grid of room/finish photos, landscape pages, a "Your Team" subcontractor
   page, and the closing note — then streams the PDF back as a download.
   Built on the base-14 PDF fonts (Times/Helvetica) rather than a registered
-  font, so there's nothing that can fail to download mid-request.
+  font, so there's nothing that can fail to download mid-request. Every
+  photo is re-encoded to a JPEG data URI via `sharp` before being handed to
+  `@react-pdf/renderer` — its `<Image src="https://...">` fetches the URL
+  itself and sniffs the actual bytes for a JPEG/PNG/SVG signature (not the
+  file extension), throwing "Not valid image extension" and failing the
+  *entire* PDF over one photo that's actually HEIC (the iPhone camera
+  default), WEBP, or otherwise unsupported — normalizing every image up
+  front sidesteps that, and a photo that still can't be fetched/decoded
+  (dead URL, corrupt file) is logged and skipped rather than failing the
+  whole House Book.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

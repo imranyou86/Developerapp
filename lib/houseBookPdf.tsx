@@ -1,5 +1,6 @@
 /* eslint-disable jsx-a11y/alt-text -- this is @react-pdf/renderer's PDF-only <Image>, not an HTML <img>; it has no alt prop */
 import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
+import sharp from "sharp";
 
 // Server-only — generates the House Book PDF (app/api/projects/[id]/house-book/route.ts).
 // Uses the built-in base-14 PDF fonts only (Times/Helvetica) rather than
@@ -314,6 +315,51 @@ export function HouseBookDocument({ input }: { input: HouseBookInput }) {
   );
 }
 
+// @react-pdf/renderer's <Image src="https://...">  fetches the URL itself
+// and sniffs the actual bytes for a JPEG/PNG/SVG signature — it does NOT
+// go by file extension, and throws "Not valid image extension" for
+// anything else (HEIC/HEIC from an iPhone camera, WEBP, GIF, ...), which
+// crashes the whole PDF over one photo. Every source here (a directly
+// uploaded plan sheet, a room photo from a phone) can realistically be in
+// one of those unsupported formats, so every image is re-encoded to a JPEG
+// data URI up front instead of ever handing react-pdf a remote URL to
+// fetch and sniff on its own.
+const MAX_EMBED_DIMENSION = 2000;
+
+async function toEmbeddablePhoto(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const jpeg = await sharp(buffer)
+      .rotate()
+      .resize({ width: MAX_EMBED_DIMENSION, height: MAX_EMBED_DIMENSION, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  } catch (err) {
+    // One bad photo (an unsupported format, a dead URL) skips that image
+    // rather than failing the whole House Book — see the comment above.
+    console.warn(`house-book: could not embed image, skipping (${url}):`, err);
+    return null;
+  }
+}
+
+async function prepareImages(items: HouseBookImage[]): Promise<HouseBookImage[]> {
+  const prepared = await Promise.all(
+    items.map(async (item) => {
+      const embeddable = await toEmbeddablePhoto(item.url);
+      return embeddable ? { url: embeddable, caption: item.caption } : null;
+    })
+  );
+  return prepared.filter((item): item is HouseBookImage => item !== null);
+}
+
 export async function renderHouseBookPdf(input: HouseBookInput): Promise<Buffer> {
-  return renderToBuffer(<HouseBookDocument input={input} />);
+  const [planPages, images, landscape] = await Promise.all([
+    prepareImages(input.planPages),
+    prepareImages(input.images),
+    prepareImages(input.landscape),
+  ]);
+  return renderToBuffer(<HouseBookDocument input={{ ...input, planPages, images, landscape }} />);
 }
