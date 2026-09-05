@@ -28,6 +28,7 @@ const EMPTY_INPUT: SubcontractorInput = {
   address: "",
   license_number: "",
   license_state: "",
+  license_status: "",
   reliability: null,
   cost_tier: null,
   notes: "",
@@ -43,10 +44,31 @@ function toInput(s: Subcontractor): SubcontractorInput {
     address: s.address ?? "",
     license_number: s.license_number ?? "",
     license_state: s.license_state ?? "",
+    license_status: s.license_status ?? "",
     reliability: s.reliability,
     cost_tier: s.cost_tier,
     notes: s.notes ?? "",
   };
+}
+
+// CSLB = California's Contractors State License Board — this deep link
+// format (mirrors what many contractors' own "verify my license" links use)
+// pre-fills the license number on CSLB's real check-license page. There's no
+// public API to pull a machine-readable result from directly (an AI web
+// search can't drive that page's form, and government sites like this
+// commonly block iframe embedding), so this opens the authoritative source
+// in a new tab rather than attempting to parse a result automatically.
+function cslbCheckUrl(licenseNumber: string): string {
+  return `https://www.cslb.ca.gov/OnlineServices/CheckLicenseII/CheckLicense.aspx?LicNum=${encodeURIComponent(licenseNumber.trim())}`;
+}
+
+function licenseStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes("active")) return "badge-sage";
+  if (s.includes("expired") || s.includes("suspend") || s.includes("revoke") || s.includes("inactive")) {
+    return "badge bg-red-100 text-red-700";
+  }
+  return "badge bg-blueprint/10 text-blueprint/60";
 }
 
 function Stars({ value }: { value: number | null }) {
@@ -200,10 +222,20 @@ export function SubcontractorsClient({
                   </div>
                 )}
                 {(s.license_number || s.license_state) && (
-                  <div className="sm:col-span-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:col-span-2">
                     <span className="text-blueprint/40">License: </span>
                     {s.license_number ?? "—"}
                     {s.license_state && ` (${s.license_state})`}
+                    {s.license_status && (
+                      <>
+                        <span className={licenseStatusBadgeClass(s.license_status)}>{s.license_status}</span>
+                        {s.license_checked_at && (
+                          <span className="text-xs text-blueprint/40">
+                            checked {new Date(s.license_checked_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -401,21 +433,53 @@ function SubcontractorFormModal({
           <input className="input" value={input.address} onChange={(e) => set("address", e.target.value)} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">License number</label>
-            <input className="input" value={input.license_number} onChange={(e) => set("license_number", e.target.value)} />
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">License number</label>
+              <input className="input" value={input.license_number} onChange={(e) => set("license_number", e.target.value)} />
+            </div>
+            <div>
+              <label className="label">License state</label>
+              <input
+                className="input"
+                maxLength={2}
+                value={input.license_state}
+                onChange={(e) => set("license_state", e.target.value.toUpperCase())}
+                placeholder="CA"
+              />
+            </div>
           </div>
-          <div>
-            <label className="label">License state</label>
-            <input
-              className="input"
-              maxLength={2}
-              value={input.license_state}
-              onChange={(e) => set("license_state", e.target.value.toUpperCase())}
-              placeholder="CA"
-            />
+          <div className="mt-2 flex items-end gap-2">
+            <div className="flex-1">
+              <label className="label">License status</label>
+              <input
+                className="input"
+                value={input.license_status}
+                onChange={(e) => set("license_status", e.target.value)}
+                placeholder="e.g. Active, Expired, Suspended…"
+              />
+            </div>
+            {input.license_number.trim() ? (
+              <a
+                href={cslbCheckUrl(input.license_number)}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-outline whitespace-nowrap text-xs"
+              >
+                Check on CSLB ↗
+              </a>
+            ) : (
+              <span className="btn-outline whitespace-nowrap text-xs cursor-not-allowed opacity-40" title="Enter a license number first">
+                Check on CSLB ↗
+              </span>
+            )}
           </div>
+          <p className="mt-1 text-xs text-blueprint/40">
+            Opens California&apos;s CSLB license lookup in a new tab for this license number — copy whatever status
+            it shows (Active, Expired, Suspended, etc.) into the field above. For an out-of-state license, check
+            with that state&apos;s licensing board instead.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

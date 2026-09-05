@@ -6,7 +6,7 @@ import type { ActionResult } from "@/app/projects/actions";
 import type { Subcontractor } from "@/lib/types";
 
 const SELECT_COLUMNS =
-  "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, reliability, cost_tier, notes, created_at";
+  "id, created_by, company_name, contact_name, trade, phone, email, address, license_number, license_state, license_status, license_checked_at, reliability, cost_tier, notes, created_at";
 
 export interface SubcontractorInput {
   company_name: string;
@@ -17,12 +17,14 @@ export interface SubcontractorInput {
   address: string;
   license_number: string;
   license_state: string;
+  license_status: string;
   reliability: number | null;
   cost_tier: number | null;
   notes: string;
 }
 
 function toRow(input: SubcontractorInput) {
+  const licenseStatus = input.license_status.trim() || null;
   return {
     company_name: input.company_name.trim(),
     contact_name: input.contact_name.trim() || null,
@@ -32,6 +34,13 @@ function toRow(input: SubcontractorInput) {
     address: input.address.trim() || null,
     license_number: input.license_number.trim() || null,
     license_state: input.license_state.trim() || null,
+    license_status: licenseStatus,
+    // Stamped whenever a non-empty status is (re)saved — simplest honest
+    // signal of "recorded as of roughly this save," even though re-saving
+    // the exact same status text again (e.g. editing an unrelated field)
+    // also refreshes it rather than only stamping on an actual status
+    // change. Cleared back to null if the status is cleared.
+    license_checked_at: licenseStatus ? new Date().toISOString() : null,
     reliability: input.reliability,
     cost_tier: input.cost_tier,
     notes: input.notes.trim() || null,

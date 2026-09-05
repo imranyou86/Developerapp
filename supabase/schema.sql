@@ -345,6 +345,13 @@ create table if not exists subcontractors (
   address text,
   license_number text,
   license_state text,
+  -- Set manually after checking the license on CSLB (see the "Check on
+  -- CSLB" link next to the license fields) — no public API to pull this
+  -- automatically, same reasoning as Certificate of Occupancy's manual
+  -- findings entry. license_checked_at is stamped whenever license_status
+  -- is (re)saved non-empty.
+  license_status text,
+  license_checked_at timestamptz,
   -- 1-5 stars ("how much do we trust this sub"); 1-4 "$" tier ("how
   -- expensive are they relative to other subs"). Both optional — not every
   -- sub has been used enough to rate yet.

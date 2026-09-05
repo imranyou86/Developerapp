@@ -347,6 +347,8 @@ export interface Subcontractor {
   address: string | null;
   license_number: string | null;
   license_state: string | null;
+  license_status: string | null;
+  license_checked_at: string | null;
   reliability: number | null;
   cost_tier: number | null;
   notes: string | null;

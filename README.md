@@ -190,6 +190,27 @@ yet; each one only adds what a given feature needed.
     across phone apps regardless of how the number was typed in) and a
     saved email is a `mailto:` link — tapping either on a phone opens the
     dialer or Mail app directly instead of just displaying the text.
+  - **"Check on CSLB"** — next to the license number/state fields, a link
+    (`cslbCheckUrl` in `subcontractors-client.tsx`) opens California's
+    Contractors State License Board check-license page in a new tab,
+    deep-linked by license number (`?LicNum=...`, the same URL format
+    contractors' own "verify my license" badges commonly use); disabled
+    when the license number field is empty, per the same reasoning as
+    Certificate of Occupancy's "no address yet" gating. CSLB has no public
+    API and its lookup tool is an interactive page an AI web search can't
+    drive and that government sites like this commonly block from being
+    iframed (the exact conclusion already reached for LADBS's property
+    lookup — see Certificate of Occupancy below — so it wasn't
+    re-attempted here), so this opens the real, authoritative page rather
+    than trying to parse a result automatically. A **License status**
+    free-text field next to it (`license_status`, migration
+    `023_subcontractor_license_status.sql`) is where you copy in whatever
+    CSLB showed (Active, Expired, Suspended, …) — shown on the card as a
+    color-coded badge (sage for "active", red for
+    expired/suspended/revoked/inactive, neutral otherwise, matched by a
+    simple substring check against the saved text) alongside a "checked
+    &lt;date&gt;" stamp (`license_checked_at`, set server-side whenever a
+    non-empty status is saved).
 - **Design system / motion pass** — the app leaned "industrial and clunky"
   (flat colors, hard edges, everything appearing/disappearing instantly), so
   this pass is a set of small, centralized changes that cascade everywhere
