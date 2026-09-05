@@ -73,7 +73,7 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
           </form>
         </div>
         <TopNav
-          showAdmin={currentUser?.role === "developer"}
+          showAdmin={currentUser?.isDeveloper}
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
           showConstructionCost={allowedTopLevel.includes("cost")}

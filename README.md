@@ -718,6 +718,25 @@ yet; each one only adds what a given feature needed.
   of the one page that can turn it back off. Clears itself when the
   browser session ends, or by picking "Not previewing" in the same
   section.
+  - **Fixed: the nav's own Admin link used to disappear while previewing,**
+    even though the page itself was always reachable by URL. Every other
+    page passed `showAdmin={currentUser?.role === "developer"}` to
+    `TopNav` — reading the *effective* (possibly previewed) role, not
+    `isDeveloper` like the Admin page's own guard does — so as soon as a
+    Developer previewed as Owner/PM/Contractor, the Admin link vanished
+    from every page's nav except Admin itself. A Developer who navigated
+    away after starting a preview (or landed on any other page first) had
+    no visible way back to turn it off, only the fix of knowing to type
+    `/admin` directly. All five call sites (`app/projects/page.tsx`,
+    `app/deals/page.tsx`, `app/interior-design/page.tsx`,
+    `app/construction-cost/page.tsx`, `app/subcontractors/page.tsx`) now
+    pass `showAdmin={currentUser?.isDeveloper}` instead, matching what the
+    Admin page's own guard already did — so the one page that can exit a
+    preview is reachable from the nav on every page, always, regardless of
+    what's being previewed. The Admin page's header was also missing a
+    Sign out button entirely (every other top-level page has one) — added
+    to match, so getting stuck previewing on that page specifically no
+    longer also meant being unable to sign out from it.
 - **Access requests** — signing up at `/login` no longer grants access by
   itself. `profiles.status` (`pending` / `approved` / `rejected`, migration
   `016_access_requests.sql`) gates the whole app: `handle_new_user()`

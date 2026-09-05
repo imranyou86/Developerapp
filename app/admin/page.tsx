@@ -58,6 +58,11 @@ export default async function AdminPage() {
               <p className="text-xs text-blueprint/50">{user.email}</p>
             </div>
           </div>
+          <form action="/auth/signout" method="post">
+            <button type="submit" className="btn-ghost">
+              Sign out
+            </button>
+          </form>
         </div>
         <TopNav showAdmin showDeals showInteriorDesign showConstructionCost showSubcontractors />
       </header>
