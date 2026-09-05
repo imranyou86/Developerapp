@@ -505,6 +505,19 @@ yet; each one only adds what a given feature needed.
   skipped, so it's never a surprise. Selection is the same persisted set
   used elsewhere (`usePersistedSelection`), so it survives the category
   filter and tab switches.
+  - **Auto-mirrored files are hidden by default, not just non-deletable.**
+    Every file mirrored in from another tab was always shown alongside
+    directly-uploaded ones, with delete silently skipping the ones it
+    couldn't touch — in practice this read as "delete isn't working" when
+    a selection was mostly (or entirely) auto-mirrored files. Now they're
+    hidden by default (`showAutoMirrored` in `files-client.tsx`, off by
+    default) so what's on screen — and what "Check all"/"Delete selected"
+    act on — is always exactly what can actually be deleted from here. A
+    checkbox ("Also show N files from other tabs (view-only)") brings them
+    back for browsing everything in one place, this tab's original
+    purpose — genuinely view-only there, no delete button shown for them
+    even when visible, so there's no ambiguity about what a given checked
+    box will do.
   - **A multi-page plan shows as one row, not one per page.** The Plan tab
     stores a multi-page PDF as one rendered image per sheet (needed there —
     per-page room detection, per-page layout flags), each labeled

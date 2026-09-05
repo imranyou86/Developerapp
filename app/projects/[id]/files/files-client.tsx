@@ -104,11 +104,25 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
   const [deleting, setDeleting] = useState<ProjectFile | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Files mirrored in from another tab (a Plan page, a Rendering, a
+  // Checklist photo, …) can't be deleted here — deleting them belongs in
+  // the tab they actually live in, so they don't desync. Hidden by default
+  // so what's on screen is always exactly what "Delete selected" can act
+  // on, with a toggle to bring them back for browsing everything in one
+  // place (this tab's original purpose) without the delete-button
+  // confusion of mixing in files that can't be removed from here.
+  const [showAutoMirrored, setShowAutoMirrored] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const autoMirroredCount = useMemo(() => files.filter((f) => f.source_table != null).length, [files]);
+  const visibleFiles = useMemo(
+    () => (showAutoMirrored ? files : files.filter((f) => f.source_table == null)),
+    [files, showAutoMirrored]
+  );
+
   const filtered = useMemo(
-    () => (categoryFilter === "all" ? files : files.filter((f) => f.category === categoryFilter)),
-    [files, categoryFilter]
+    () => (categoryFilter === "all" ? visibleFiles : visibleFiles.filter((f) => f.category === categoryFilter)),
+    [visibleFiles, categoryFilter]
   );
 
   const displayItems = useMemo(() => groupPlanPages(filtered), [filtered]);
@@ -360,22 +374,40 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {categories.map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategoryFilter(c)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                  categoryFilter === c
-                    ? "border-amber-dark bg-amber-dark text-white"
-                    : "border-blueprint/15 text-blueprint/60 hover:border-blueprint/30"
-                }`}
-              >
-                {c === "all" ? "All" : CATEGORY_LABEL[c]}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {categories.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCategoryFilter(c)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    categoryFilter === c
+                      ? "border-amber-dark bg-amber-dark text-white"
+                      : "border-blueprint/15 text-blueprint/60 hover:border-blueprint/30"
+                  }`}
+                >
+                  {c === "all" ? "All" : CATEGORY_LABEL[c]}
+                </button>
+              ))}
+            </div>
+            {autoMirroredCount > 0 && (
+              <label className="flex items-center gap-1.5 text-xs text-blueprint/50">
+                <input
+                  type="checkbox"
+                  checked={showAutoMirrored}
+                  onChange={(e) => setShowAutoMirrored(e.target.checked)}
+                />
+                Also show {autoMirroredCount} file{autoMirroredCount === 1 ? "" : "s"} from other tabs (view-only)
+              </label>
+            )}
           </div>
 
+          {visibleFiles.length === 0 ? (
+            <div className="card p-10 text-center text-sm text-blueprint/60">
+              Every file here so far came from another tab — check &quot;Also show files from other tabs&quot; above
+              to browse them, or use &quot;Upload file&quot; to add one you can manage directly here.
+            </div>
+          ) : (
           <div className="card overflow-hidden">
             <div className="flex items-center gap-3 border-b border-blueprint/10 bg-concrete/60 px-4 py-2 text-xs text-blueprint/60">
               <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAll} />
@@ -416,6 +448,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
               )}
             </div>
           </div>
+          )}
         </>
       )}
 
