@@ -207,13 +207,21 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
       notify("error", "Select a zone first.");
       return;
     }
+    // Sliding-scale (RFA/BMO) zones can't be looked up correctly without a
+    // lot size — the route will say so via lot_size_dependent, but catching
+    // it here avoids burning a web-search round-trip on a doomed request
+    // when we already know the lot size box is empty.
+    if (!lotSize) {
+      notify("error", "Enter the lot size above first — some zones' buildable % depends on it.");
+      return;
+    }
     setLookingUpCoverage(true);
     try {
       await run(coverageLookupTaskKey, `Looking up max lot coverage for ${zone}…`, async () => {
         const res = await fetchWithRetry("/api/claude/lookup-zoning-coverage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ zone: zone.trim(), address: deal.address, city: deal.city, state: deal.state }),
+          body: JSON.stringify({ zone: zone.trim(), address: deal.address, city: deal.city, state: deal.state, lot_size: Number(lotSize) }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Lookup failed.");
@@ -222,7 +230,10 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
           return;
         }
         setLotCoveragePct(json.buildable_pct);
-        notify("success", `${json.buildable_pct}% (${json.confidence} confidence). ${json.notes}`);
+        notify(
+          "success",
+          `${json.buildable_pct}% (${json.confidence} confidence)${json.lot_size_dependent ? ` for a ${Number(lotSize).toLocaleString()} sqft lot` : ""}. ${json.notes}`
+        );
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Lookup failed.");
@@ -554,20 +565,23 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
                         type="button"
                         className="mt-1 text-[11px] text-amber-dark hover:underline"
                         onClick={handleLookupCoverage}
-                        disabled={lookingUpCoverage || isRunning(coverageLookupTaskKey) || !zone.trim()}
+                        disabled={lookingUpCoverage || isRunning(coverageLookupTaskKey) || !zone.trim() || !lotSize}
+                        title={!lotSize ? "Enter lot size first — needed to look up the correct % for lot-size-dependent zones" : undefined}
                       >
                         {lookingUpCoverage || isRunning(coverageLookupTaskKey) ? "Looking up…" : "Look up % ↗"}
                       </button>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-blueprint/50">
-                    &quot;Look up %&quot; grounds a starting-point figure in a web search for this zone. LA single-family
-                    zones (R1 and variants) use a sliding-scale Residential Floor Area formula rather than a flat %, so a
-                    figure directly reported on{" "}
+                    &quot;Look up %&quot; grounds a figure in a web search for this zone and lot size. LA single-family
+                    zones (R1 and variants, RS, RE9-RE40, RW1, RZ) use a sliding-scale Residential Floor Area formula
+                    keyed to lot size rather than a flat % — the lookup finds that zone&apos;s current sliding-scale
+                    table and computes the percentage for the lot size entered above (assuming a standard, non-hillside
+                    lot), rather than handing back one generic number for the whole zone. A figure directly reported on{" "}
                     <a href="https://zimas.lacity.org/" target="_blank" rel="noreferrer" className="text-amber-dark hover:underline">
                       ZIMAS
                     </a>{" "}
-                    for this specific parcel is more accurate there than either — this is a starting point, not an
+                    for this specific parcel is still more accurate than either — this is a grounded estimate, not an
                     authoritative figure.
                   </p>
                   <div className="mt-2 flex gap-2">

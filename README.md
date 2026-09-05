@@ -500,13 +500,37 @@ yet; each one only adds what a given feature needed.
   function's timeout.
 - **Buyers Guide ground-up rebuild calculator** — the zone field is a
   dropdown of LA (LAMC) residential zones (`lib/laZoning.ts`), with an
-  "Other" fallback for anything not listed. "Look up %" grounds a starting
+  "Other" fallback for anything not listed. "Look up %" grounds a
   max-lot-coverage-percentage estimate for the selected zone in a web
-  search (`/api/claude/lookup-zoning-coverage`) — verified against the real
-  API: R1 correctly comes back medium-confidence with the Baseline
-  Hillside/RFA sliding-scale caveat spelled out, while a flat-coverage zone
-  like RD1.5 comes back high-confidence. Remodel and ground-up scopes each
-  keep their own manually-entered $/sqft and construction budget
+  search (`/api/claude/lookup-zoning-coverage`).
+  - **Lot-size-dependent zones now actually use the lot size.** R1 and its
+    variants (RS, RE9-RE40, RW1, RZ) aren't a flat percentage — LAMC
+    12.21.1-A,10's Residential Floor Area sliding scale sets max buildable
+    floor area from a table keyed to lot square footage, so the same zone
+    can correctly return very different percentages for a 5,000 sqft lot
+    vs. a 15,000 sqft one. The lookup used to ignore lot size entirely
+    (never sent it to the route at all) and hand back one generic
+    "medium confidence" number regardless of lot size — technically
+    labeled as an estimate, but silently wrong for any lot whose actual
+    tier differed from whatever the model defaulted to. Now the route
+    takes `lot_size` in the request (the client sends whatever's in the
+    Lot size field) and the system prompt requires it: for a
+    lot-size-dependent zone, it searches for the real sliding-scale table
+    and computes the percentage for that specific lot size (assuming a
+    standard, non-hillside lot, with a note to confirm on ZIMAS if the
+    parcel might be hillside — hillside status isn't derivable from an
+    address); a zone that isn't lot-size-dependent (R2, RD1.5-RD6, R3, R4,
+    RAS3/4, R5) is unaffected and still gets its normal flat percentage.
+    The route also now returns `lot_size_dependent: boolean` so the UI can
+    tell the user up front — the "Look up %" button is disabled until a
+    lot size is entered, rather than silently producing a number that
+    can't be correct for a sliding-scale zone without one. Verified
+    against the real API: R1 with a lot size now comes back with a
+    lot-size-specific percentage and high/medium confidence depending on
+    how directly the sliding-scale table was sourced, while RD1.5 (flat
+    coverage, not lot-size-dependent) is unaffected either way.
+
+  Remodel and ground-up scopes each keep their own manually-entered $/sqft and construction budget
   (`costPerSqftByScope`/`budgetByScope`), so switching scope to compare
   them doesn't overwrite whichever number you'd already typed for the
   other one — analysis always runs against whichever scope is currently
