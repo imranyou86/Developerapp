@@ -44,6 +44,52 @@ function isImage(url: string): boolean {
   return /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(url);
 }
 
+// A multi-page plan PDF (app/projects/[id]/plan/plan-client.tsx) is stored
+// as one rendered-page image per sheet, each labeled "<original file name>
+// — Page N" — necessary there (per-page room detection, per-page layout
+// flags), but browsing them as N separate rows here is exactly the
+// "each page individually" clutter this groups away. A single-page PDF's
+// label has no "— Page N" suffix (already just one row, nothing to do).
+const PLAN_PAGE_LABEL_RE = /^(.*) — Page \d+$/;
+
+interface FileGroup {
+  key: string;
+  label: string;
+  category: FileCategory;
+  files: ProjectFile[];
+}
+
+function isFileGroup(item: ProjectFile | FileGroup): item is FileGroup {
+  return "files" in item;
+}
+
+// Purely a display grouping — plan_pages/project_files underneath are
+// unchanged, so Plan tab functionality (per-page room detection, deleting
+// one sheet, etc.) isn't affected. Only groups by matching label prefix,
+// so re-uploading a same-named PDF later would merge into the same visual
+// group; harmless in practice and avoids needing a schema change to track
+// a real "this came from the same upload" batch id.
+function groupPlanPages(files: ProjectFile[]): (ProjectFile | FileGroup)[] {
+  const groups = new Map<string, FileGroup>();
+  const items: (ProjectFile | FileGroup)[] = [];
+  for (const f of files) {
+    const match = f.category === "plan" ? f.file_name.match(PLAN_PAGE_LABEL_RE) : null;
+    if (!match) {
+      items.push(f);
+      continue;
+    }
+    const key = `plan:${match[1]}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label: match[1], category: "plan", files: [] };
+      groups.set(key, group);
+      items.push(group);
+    }
+    group.files.push(f);
+  }
+  return items;
+}
+
 export function FilesClient({ projectId, initialFiles }: { projectId: string; initialFiles: ProjectFile[] }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
@@ -64,6 +110,18 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
     () => (categoryFilter === "all" ? files : files.filter((f) => f.category === categoryFilter)),
     [files, categoryFilter]
   );
+
+  const displayItems = useMemo(() => groupPlanPages(filtered), [filtered]);
+
+  function toggleSelectGroup(group: FileGroup) {
+    const ids = group.files.map((f) => f.id);
+    const allSelected = ids.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }
 
   // Selection persists across the category filter and even across tabs, so
   // it can include files not currently shown — read it off the full list,
@@ -236,7 +294,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
           <div>
             <h2 className="font-semibold text-blueprint-dark">File library</h2>
             <p className="text-sm text-blueprint/60">
-              Every plan page, bid, checklist photo, rendering, and finish scan uploaded to this construction, in
+              Every plan, bid, checklist photo, rendering, and finish scan uploaded to this construction, in
               one place — plus anything you upload directly here (contracts, permits, warranties, extra photos).
               Add notes, then download individually or in bulk.
             </p>
@@ -334,17 +392,28 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
               </span>
             </div>
             <div className="divide-y divide-blueprint/10">
-              {filtered.map((f) => (
-                <FileRow
-                  key={f.id}
-                  file={f}
-                  selected={selected.has(f.id)}
-                  onToggleSelect={() => toggleSelect(f.id)}
-                  savingNotes={savingNotesFor === f.id}
-                  onNotesBlur={(notes) => handleNotesBlur(f.id, notes)}
-                  onDelete={f.source_table == null ? () => setDeleting(f) : undefined}
-                />
-              ))}
+              {displayItems.map((item) =>
+                isFileGroup(item) ? (
+                  <FileGroupRow
+                    key={item.key}
+                    group={item}
+                    selected={item.files.every((f) => selected.has(f.id))}
+                    onToggleSelect={() => toggleSelectGroup(item)}
+                    onDownload={() => handleDownloadZip(item.files.map((f) => f.id))}
+                    downloading={downloading || isRunning(`files-zip:${projectId}`)}
+                  />
+                ) : (
+                  <FileRow
+                    key={item.id}
+                    file={item}
+                    selected={selected.has(item.id)}
+                    onToggleSelect={() => toggleSelect(item.id)}
+                    savingNotes={savingNotesFor === item.id}
+                    onNotesBlur={(notes) => handleNotesBlur(item.id, notes)}
+                    onDelete={item.source_table == null ? () => setDeleting(item) : undefined}
+                  />
+                )
+              )}
             </div>
           </div>
         </>
@@ -384,6 +453,55 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
         onCancel={() => setDeletingSelected(false)}
         onConfirm={handleDeleteSelected}
       />
+    </div>
+  );
+}
+
+function FileGroupRow({
+  group,
+  selected,
+  onToggleSelect,
+  onDownload,
+  downloading,
+}: {
+  group: FileGroup;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onDownload: () => void;
+  downloading: boolean;
+}) {
+  const cover = group.files[0];
+
+  return (
+    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+      <input type="checkbox" checked={selected} onChange={onToggleSelect} className="mt-1 shrink-0 sm:mt-0" />
+
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-concrete">
+        {cover && isImage(cover.storage_url) ? (
+          <Image src={cover.storage_url} alt={group.label} fill className="object-cover" unoptimized />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-xs text-blueprint/40">FILE</div>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-medium text-blueprint-dark" title={group.label}>
+            {group.label}
+          </span>
+          <span className={CATEGORY_STYLE[group.category]}>{CATEGORY_LABEL[group.category]}</span>
+          <span className="badge bg-blueprint/10 text-blueprint/60">
+            {group.files.length} page{group.files.length === 1 ? "" : "s"}
+          </span>
+          {cover && <span className="text-xs text-blueprint/40">{new Date(cover.created_at).toLocaleDateString()}</span>}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 gap-2">
+        <button className="btn-ghost text-xs" onClick={onDownload} disabled={downloading}>
+          {downloading ? "Preparing…" : "Download all pages"}
+        </button>
+      </div>
     </div>
   );
 }

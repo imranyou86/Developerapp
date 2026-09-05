@@ -505,6 +505,23 @@ yet; each one only adds what a given feature needed.
   skipped, so it's never a surprise. Selection is the same persisted set
   used elsewhere (`usePersistedSelection`), so it survives the category
   filter and tab switches.
+  - **A multi-page plan shows as one row, not one per page.** The Plan tab
+    stores a multi-page PDF as one rendered image per sheet (needed there —
+    per-page room detection, per-page layout flags), each labeled
+    `"<file name> — Page N"`, and each mirrors into `project_files`
+    individually like any other upload. Browsing 12 separate rows for a
+    single 12-page plan in the Files tab was exactly the clutter this fixes
+    — purely a display grouping (`groupPlanPages` in `files-client.tsx`),
+    nothing about the underlying storage/Plan-tab behavior changes: rows
+    whose label matches that `"— Page N"` pattern collapse into one card
+    (cover thumbnail from the first page, a "N pages" badge, one "Download
+    all pages" button that zips just that group's page images via the
+    existing bulk-zip endpoint). Checking a group's checkbox selects all of
+    its underlying pages for the regular bulk download/delete actions — the
+    grouping is display-only, so those still operate on real per-page
+    files. A single-page PDF's label never gets the `"— Page N"` suffix in
+    the first place, so it already showed as one row before this and is
+    unaffected.
 - **Roles & permissions** — every account has a login type: Owner, PM,
   Contractor, or Developer (`profiles.role`, set at sign-up and stored via a
   trigger on `auth.users`; `imranyousuf86@gmail.com` is seeded as Developer
