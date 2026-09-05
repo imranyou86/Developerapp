@@ -11,6 +11,7 @@ import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import {
   addDetectedRooms,
   addPlanPage,
+  deleteNonLayoutPages,
   deletePlanPage,
   setPlanPageLayout,
   type DetectedRoomInput,
@@ -53,6 +54,8 @@ export function PlanClient({
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [detecting, setDetecting] = useState(false);
   const [deletingPage, setDeletingPage] = useState<PlanPageRow | null>(null);
+  const [confirmingValidate, setConfirmingValidate] = useState(false);
+  const [validating, setValidating] = useState(false);
 
   const [detected, setDetected] = useState<{
     rooms: DetectedRoom[];
@@ -111,9 +114,15 @@ export function PlanClient({
     const res = await addPlanPage(projectId, pub.publicUrl, file.name, sortOrder);
     if (!res.ok) throw new Error(res.error ?? "Could not save plan page.");
 
+    // Use the real inserted row's id (res.id), not a locally-generated one —
+    // the "Floor plan layout" checkbox calls setPlanPageLayout(id, ...),
+    // which silently updates zero rows against an id the database has never
+    // seen, so a mismatched id here made toggling a freshly-uploaded page's
+    // checkbox look like it worked (optimistic local state) while never
+    // actually persisting.
     setPages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), storage_url: pub.publicUrl, label: file.name, sort_order: sortOrder, is_layout: true },
+      { id: res.id!, storage_url: pub.publicUrl, label: file.name, sort_order: sortOrder, is_layout: true },
     ]);
     notify("success", `Added "${file.name}".`);
   }
@@ -162,7 +171,7 @@ export function PlanClient({
 
       setPages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), storage_url: pub.publicUrl, label, sort_order: sortOrder, is_layout: true },
+        { id: res.id!, storage_url: pub.publicUrl, label, sort_order: sortOrder, is_layout: true },
       ]);
     }
     notify("success", `Added ${pdf.numPages} page(s) from "${file.name}".`);
@@ -178,6 +187,22 @@ export function PlanClient({
   }
 
   const layoutPages = pages.filter((p) => p.is_layout);
+  const nonLayoutPages = pages.filter((p) => !p.is_layout);
+
+  async function handleValidate() {
+    setValidating(true);
+    try {
+      const res = await deleteNonLayoutPages(projectId);
+      if (!res.ok) throw new Error(res.error ?? "Could not remove the other pages.");
+      setPages((prev) => prev.filter((p) => p.is_layout));
+      notify("success", `Removed ${res.deletedCount ?? nonLayoutPages.length} non-layout page(s) — only the floor plan remains.`);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not remove the other pages.");
+    } finally {
+      setValidating(false);
+      setConfirmingValidate(false);
+    }
+  }
 
   async function handleDetect() {
     if (layoutPages.length === 0) {
@@ -267,6 +292,16 @@ export function PlanClient({
                 ? "Analyzing plan…"
                 : `Detect rooms from plan (${layoutPages.length} page${layoutPages.length === 1 ? "" : "s"})`}
             </button>
+            {nonLayoutPages.length > 0 && (
+              <button
+                className="btn-outline text-red-600"
+                onClick={() => setConfirmingValidate(true)}
+                disabled={validating}
+                title="Permanently removes every page left unchecked below, keeping only the floor plan"
+              >
+                {validating ? "Removing…" : `Validate — keep only floor plan (${nonLayoutPages.length} to remove)`}
+              </button>
+            )}
           </div>
           <input
             ref={fileInputRef}
@@ -330,6 +365,16 @@ export function PlanClient({
           }
           setDeletingPage(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={confirmingValidate}
+        title="Keep only the floor plan?"
+        message={`This permanently removes the ${nonLayoutPages.length} page(s) currently unchecked below (elevations, sections, cover sheets, etc.) — only the ${layoutPages.length} checked floor plan page(s) will remain. This can't be undone.`}
+        confirmLabel="Remove other pages"
+        danger
+        onCancel={() => setConfirmingValidate(false)}
+        onConfirm={handleValidate}
       />
 
       <Modal

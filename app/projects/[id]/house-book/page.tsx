@@ -28,7 +28,11 @@ export default async function HouseBookPage({ params }: { params: { id: string }
         .select("id, style, generated_image_url")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false }),
-      supabase.from("project_subcontractors").select("subcontractors(*)").eq("project_id", projectId),
+      // Plain columns + a manual join below, not a nested `subcontractors(*)`
+      // embed — the same pattern app/subcontractors/page.tsx already uses for
+      // this exact relationship, since a PostgREST embed keeps needing the
+      // schema cache to have the relationship pre-registered a certain way.
+      supabase.from("project_subcontractors").select("subcontractor_id").eq("project_id", projectId),
     ]);
 
   const roomList = rooms ?? [];
@@ -52,12 +56,12 @@ export default async function HouseBookPage({ params }: { params: { id: string }
     }));
   }
 
-  // project_subcontractors rows point at a subcontractor that may since have
-  // been deleted (on delete cascade removes the link too, but a null guard
-  // here costs nothing and Supabase's typed join return is nullable anyway).
-  const subcontractors = (links ?? [])
-    .map((l) => l.subcontractors as unknown as Subcontractor | null)
-    .filter((s): s is Subcontractor => s != null);
+  const subcontractorIds = (links ?? []).map((l) => l.subcontractor_id);
+  let subcontractors: Subcontractor[] = [];
+  if (subcontractorIds.length > 0) {
+    const { data } = await supabase.from("subcontractors").select("*").in("id", subcontractorIds);
+    subcontractors = (data ?? []) as Subcontractor[];
+  }
 
   return (
     <HouseBookClient

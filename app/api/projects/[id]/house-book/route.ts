@@ -93,9 +93,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       landscapeIds.length > 0
         ? supabase.from("landscape_designs").select("style, generated_image_url").eq("project_id", projectId).in("id", landscapeIds)
         : Promise.resolve({ data: [] as { style: string; generated_image_url: string }[] }),
+      // Plain columns + a manual join below, not a nested `subcontractors(*)`
+      // embed — same reasoning as house-book/page.tsx's identical query.
       subcontractorIds.length > 0
-        ? supabase.from("project_subcontractors").select("subcontractors(*)").eq("project_id", projectId)
-        : Promise.resolve({ data: [] as { subcontractors: HouseBookSubcontractor | null }[] }),
+        ? supabase.from("project_subcontractors").select("subcontractor_id").eq("project_id", projectId)
+        : Promise.resolve({ data: [] as { subcontractor_id: string }[] }),
     ]);
 
     const roomIds = new Set((rooms ?? []).map((r) => r.id));
@@ -110,9 +112,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       roomImages = (renderings ?? []).filter((r) => roomIds.has(r.room_id)) as typeof roomImages;
     }
 
-    const allowedSubIds = new Set(
-      (links ?? []).map((l) => (l.subcontractors as unknown as { id: string } | null)?.id).filter((id): id is string => !!id)
-    );
+    const allowedSubIds = new Set((links ?? []).map((l) => l.subcontractor_id));
     let subcontractors: HouseBookSubcontractor[] = [];
     if (subcontractorIds.length > 0) {
       const wanted = subcontractorIds.filter((id) => allowedSubIds.has(id));
