@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
+import { BrandMark } from "@/components/BrandMark";
 import { AdminClient, type AdminProject, type AdminUser } from "@/app/admin/admin-client";
 import { ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
 import { getCurrentUser } from "@/lib/permissions-server";
@@ -50,9 +51,7 @@ export default async function AdminPage() {
       <header className="border-b border-blueprint/10 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blueprint text-sm font-bold text-white">
-              TD
-            </div>
+            <BrandMark />
             <div>
               <h1 className="text-lg font-semibold text-blueprint-dark">Admin</h1>
               <p className="text-xs text-blueprint/50">{user.email}</p>

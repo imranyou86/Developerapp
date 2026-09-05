@@ -1,4 +1,4 @@
-# The Developer
+# Alaia Homes Dev
 
 A construction project management app for a home developer managing multiple
 builds. Organizes each construction around its architect's plan: rooms,
@@ -80,6 +80,19 @@ yet; each one only adds what a given feature needed.
 
 ## Feature notes
 
+- **Branding: Alaia Homes Dev** — renamed from the original "The Developer"
+  placeholder name. The mark shown throughout the app (`components/BrandMark.tsx`)
+  is `public/logo.png`, trimmed and resized via `sharp` from the original
+  export (`public/AHLOGO.png`, kept around as the full-resolution source in
+  case it needs regenerating at a different size). It's shown directly
+  against the white header bars rather than inside a colored badge chip
+  like the old "TD" text badge was — the mark is black on transparent, so a
+  dark chip behind it would kill contrast without recoloring the artwork.
+  `app/icon.png`/`app/apple-icon.png` (same source, generated the same way —
+  the apple one composited onto a solid white square since iOS renders
+  transparency in touch icons poorly) are picked up automatically by
+  Next.js's App Router file-based favicon convention, no manual `<link>`
+  tags or `metadata.icons` needed.
 - **Certificate of Occupancy** (the last per-project tab, `PROJECT_TABS` in
   `lib/permissions.ts`, `certificate-of-occupancy` slug — defaults visible
   to every role including Contractor, since inspection/clearance status is

@@ -4,7 +4,7 @@ import { ToastProvider } from "@/components/Toast";
 import { BackgroundTasksProvider } from "@/components/BackgroundTasks";
 
 export const metadata: Metadata = {
-  title: "The Developer",
+  title: "Alaia Homes Dev",
   description: "Construction project management for home developers.",
 };
 

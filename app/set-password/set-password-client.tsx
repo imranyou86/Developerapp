@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { BrandMark } from "@/components/BrandMark";
 
 export function SetPasswordClient({ email, next }: { email: string; next: string }) {
   const router = useRouter();
@@ -35,9 +36,7 @@ export function SetPasswordClient({ email, next }: { email: string; next: string
     <div className="flex min-h-screen items-center justify-center bg-concrete px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white">
-            TD
-          </div>
+          <BrandMark size="lg" className="mx-auto mb-3" />
           <h1 className="text-xl font-semibold text-blueprint-dark">Set a password</h1>
           <p className="mt-1 text-sm text-blueprint/60">
             You&apos;re signed in as {email}. Set a password so you can sign back in directly next time — or skip

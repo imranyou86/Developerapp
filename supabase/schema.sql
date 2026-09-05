@@ -1,4 +1,4 @@
--- The Developer — schema + RLS
+-- Alaia Homes Dev — schema + RLS
 -- Run this in the Supabase SQL editor (or via `supabase db push`) on a fresh project.
 
 create extension if not exists "pgcrypto";

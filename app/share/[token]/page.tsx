@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { BrandMark } from "@/components/BrandMark";
 import {
   BudgetSection,
   ChecklistSection,
@@ -13,9 +14,7 @@ function InvalidLink({ reason }: { reason: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-concrete px-4">
       <div className="card max-w-sm p-8 text-center">
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white">
-          TD
-        </div>
+        <BrandMark size="lg" className="mx-auto mb-3" />
         <h1 className="text-lg font-semibold text-blueprint-dark">Link not available</h1>
         <p className="mt-2 text-sm text-blueprint/60">{reason}</p>
       </div>
@@ -99,7 +98,7 @@ export default async function SharePage({ params }: { params: { token: string } 
       </main>
 
       <footer className="border-t border-blueprint/10 py-6 text-center text-xs text-blueprint/40">
-        Shared via The Developer — view only.
+        Shared via Alaia Homes Dev — view only.
       </footer>
     </div>
   );

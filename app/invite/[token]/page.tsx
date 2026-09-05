@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { HashSessionBridge } from "@/app/invite/[token]/hash-session-bridge";
+import { BrandMark } from "@/components/BrandMark";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,7 @@ function InviteMessage({ title, body, showSignOut }: { title: string; body: stri
   return (
     <div className="flex min-h-screen items-center justify-center bg-concrete px-4">
       <div className="card max-w-sm space-y-3 p-8 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white">
-          TD
-        </div>
+        <BrandMark size="lg" className="mx-auto" />
         <h1 className="text-lg font-semibold text-blueprint-dark">{title}</h1>
         <p className="text-sm text-blueprint/60">{body}</p>
         {showSignOut && (

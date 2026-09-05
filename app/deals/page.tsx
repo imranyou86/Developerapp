@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { DealsClient } from "@/app/deals/deals-client";
 import { TopNav } from "@/components/TopNav";
+import { BrandMark } from "@/components/BrandMark";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
@@ -23,11 +24,9 @@ export default async function DealsPage() {
       <header className="border-b border-blueprint/10 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blueprint text-sm font-bold text-white">
-              TD
-            </div>
+            <BrandMark />
             <div>
-              <h1 className="text-lg font-semibold text-blueprint-dark">The Developer</h1>
+              <h1 className="text-lg font-semibold text-blueprint-dark">Alaia Homes Dev</h1>
               <p className="text-xs text-blueprint/50">{user?.email}</p>
             </div>
           </div>

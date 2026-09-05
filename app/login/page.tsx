@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { BrandMark } from "@/components/BrandMark";
 
 type Mode = "password" | "magic-link" | "sign-up";
 
@@ -91,10 +92,8 @@ function LoginForm() {
 
       <div className="relative w-full max-w-sm animate-fade-in-up">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 animate-scale-in items-center justify-center rounded-xl bg-blueprint text-lg font-bold text-white shadow-elevated">
-            TD
-          </div>
-          <h1 className="text-xl font-semibold text-blueprint-dark">The Developer</h1>
+          <BrandMark size="lg" className="mx-auto mb-3 animate-scale-in" />
+          <h1 className="text-xl font-semibold text-blueprint-dark">Alaia Homes Dev</h1>
           <p className="mt-1 text-sm text-blueprint/60">Construction project management</p>
         </div>
 
