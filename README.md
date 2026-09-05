@@ -465,6 +465,25 @@ yet; each one only adds what a given feature needed.
   section around a detected "Payment Schedule" heading prioritized if the
   document is very long. Scanned/image-only PDFs fall back to sending
   rendered page images instead of text.
+  - **A saved bid's payment schedule stays editable afterward** — a hover-
+    revealed "Edit"/"Remove" per line plus a "+ Add item" button
+    (`PaymentLineModal` in `payments-client.tsx`), for change orders and
+    overages discovered after the bid was first uploaded, not just typos
+    caught during the initial extraction review. Adding or editing a line
+    adjusts the bid's `total_amount` by the same delta server-side
+    (`addPaymentLine`/`updatePaymentLine`/`deletePaymentLine` in
+    `app/projects/[id]/payments/actions.ts`) rather than recomputing it as
+    a flat sum of every line — `total_amount` can legitimately differ from
+    the extracted lines' sum from the start (the review step already warns
+    about this without forcing them to match, since the contract's stated
+    total is authoritative even when the schedule didn't extract perfectly
+    cleanly), so a delta preserves whatever that original gap was instead
+    of silently erasing it the moment someone adds one overage line. Each
+    action re-reads the bid's current total and writes back total ± delta
+    (no DB transaction — consistent with the rest of this app's server
+    actions, and fine for a single-admin-editing-at-a-time tool) and
+    returns the new total so the client can update its local `bids` state
+    immediately rather than waiting on `revalidatePath`.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
