@@ -83,20 +83,22 @@ yet; each one only adds what a given feature needed.
 - **Certificate of Occupancy** (the last per-project tab, `PROJECT_TABS` in
   `lib/permissions.ts`, `certificate-of-occupancy` slug — defaults visible
   to every role including Contractor, since inspection/clearance status is
-  field-relevant, not a financial tab). First pass at this embedded LADBS's
-  "Property Activity Report" search behind a Claude web-search call, the
-  same pattern as the Buyers Guide's zoning/property-detail lookups — but
-  that tool is an interactive form (type an address, click search, results
-  load dynamically), not something search-engine-indexed or reachable by a
-  simple fetch, so a generic web search came back empty every time in
-  practice. Replaced with something that actually works: the tab embeds
-  LADBS's real Property Activity Report tool
-  (`https://www.ladbsservices2.lacity.org/OnlineServices/?service=plr`) in
-  an `<iframe>` — you search the construction's address yourself, directly
-  against LADBS's live tool, with a "Copy address" button and an "Open in
-  new tab" fallback alongside it in case LADBS blocks being framed (common
-  for city sites; nothing to do about that client-side if it happens). A
-  "Record findings" modal then lets you save what you found — status, CO
+  field-relevant, not a financial tab). Went through two false starts before
+  landing here, both worth knowing about since they explain why the tab
+  works the way it does: (1) a Claude web-search call against LADBS's
+  "Property Activity Report" tool, same pattern as the Buyers Guide's
+  zoning/property-detail lookups — but that tool is an interactive form
+  (type an address, click search, results load dynamically), not something
+  search-engine-indexed or reachable by a simple fetch, so it came back
+  empty every time; (2) embedding that tool directly in an `<iframe>` — but
+  LADBS sends headers blocking other sites from framing their page (common
+  for city/government sites), so the embed just rendered a blank box. What
+  actually ships: a "Search LADBS ↗" button (`LADBS_PLR_URL` in
+  `certificate-of-occupancy-client.tsx`) that opens
+  `https://www.ladbsservices2.lacity.org/OnlineServices/?service=plr` in a
+  new tab, next to a "Copy address" button so the construction's address is
+  one paste away from LADBS's own search box. A "Record findings" modal
+  then lets you save what you found there — status, CO
   number, issue date, a growing list of open/remaining clearances, a
   growing list of issued permits, and inspector contact info (phone/email
   render as tap-to-call/email `tel:`/`mailto:` links via the shared

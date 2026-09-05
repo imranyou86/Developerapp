@@ -104,26 +104,17 @@ export function CertificateOfOccupancyClient({
               <p className="text-sm text-blueprint/60">
                 Address: <span className="font-medium text-blueprint-dark">{address}</span>
               </p>
-              <div className="flex flex-wrap gap-2">
-                <button className="btn-outline text-xs" onClick={handleCopyAddress}>
-                  {copied ? "Copied!" : "Copy address"}
-                </button>
-                <a href={LADBS_PLR_URL} target="_blank" rel="noopener noreferrer" className="btn-outline text-xs">
-                  Open in new tab ↗
-                </a>
-              </div>
+              <button className="btn-outline text-xs" onClick={handleCopyAddress}>
+                {copied ? "Copied!" : "Copy address"}
+              </button>
             </div>
-            <div className="overflow-hidden rounded-lg border border-blueprint/10">
-              <iframe
-                src={LADBS_PLR_URL}
-                title="LADBS Property Activity Report"
-                className="h-[700px] w-full"
-                referrerPolicy="no-referrer"
-              />
-            </div>
+            <a href={LADBS_PLR_URL} target="_blank" rel="noopener noreferrer" className="btn-amber w-full sm:w-auto">
+              Search LADBS ↗
+            </a>
             <p className="text-xs text-blueprint/40">
-              If the window above stays blank, LADBS is likely blocking embedding — use &quot;Open in new tab&quot;
-              instead.
+              Opens LADBS&apos;s Property Activity Report tool in a new tab — LADBS blocks other sites from embedding
+              it directly, so paste the address above into their search there, then come back and record what you
+              find below.
             </p>
           </div>
 
