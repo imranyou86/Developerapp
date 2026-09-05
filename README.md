@@ -565,7 +565,26 @@ yet; each one only adds what a given feature needed.
   default), WEBP, or otherwise unsupported — normalizing every image up
   front sidesteps that, and a photo that still can't be fetched/decoded
   (dead URL, corrupt file) is logged and skipped rather than failing the
-  whole House Book.
+  whole House Book. Deploying this to Vercel surfaced its own gotcha:
+  pdfkit (which `@react-pdf/renderer` uses internally) loads its base-14
+  standard fonts via a *computed* require
+  (`pdfkit/standard-fonts/<name>`), which Vercel's static file-tracing
+  can't follow — it only sees the literal template string, not which font
+  a given run actually needs — so those files never made it into the
+  deployed function and requiring one threw "Cannot find module
+  .../standard-fonts/Helvetica.cjs" in production only (never locally,
+  where the full `node_modules` tree is already on disk). `next.config.js`
+  marks `@react-pdf/renderer` as a `serverComponentsExternalPackages`
+  entry and force-includes pdfkit's/`@react-pdf`'s file trees via
+  `outputFileTracingIncludes` as belt-and-suspenders, but the fix that
+  actually closes the gap is in `lib/houseBookPdf.tsx` itself: a literal,
+  otherwise-unused import of the exact 4 pdfkit standard-font subpaths
+  this app's styles use (Helvetica, TimesRoman, TimesBold, TimesItalic).
+  Since that file (unlike `@react-pdf/renderer`) isn't external, webpack
+  bundles their content directly into the route's own compiled output —
+  confirmed by grepping the built `route.js` for `glyphWidths` — so
+  nothing needs to be traced or resolved against pdfkit's own files at
+  request time at all.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

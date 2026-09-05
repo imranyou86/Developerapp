@@ -1,11 +1,36 @@
 /* eslint-disable jsx-a11y/alt-text -- this is @react-pdf/renderer's PDF-only <Image>, not an HTML <img>; it has no alt prop */
 import { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import sharp from "sharp";
+// @ts-expect-error - no type declarations for pdfkit's per-font subpath exports
+import PdfkitHelvetica from "pdfkit/standard-fonts/Helvetica";
+// @ts-expect-error - no type declarations for pdfkit's per-font subpath exports
+import PdfkitTimesRoman from "pdfkit/standard-fonts/TimesRoman";
+// @ts-expect-error - no type declarations for pdfkit's per-font subpath exports
+import PdfkitTimesBold from "pdfkit/standard-fonts/TimesBold";
+// @ts-expect-error - no type declarations for pdfkit's per-font subpath exports
+import PdfkitTimesItalic from "pdfkit/standard-fonts/TimesItalic";
 
 // Server-only — generates the House Book PDF (app/api/projects/[id]/house-book/route.ts).
 // Uses the built-in base-14 PDF fonts only (Times/Helvetica) rather than
 // registering a downloaded font — one less thing that can fail mid-request,
 // and Times-Roman headings already give it a "book" feel without one.
+//
+// The 4 imports above are otherwise unused — they exist purely to force
+// these exact pdfkit standard-font modules into THIS file's own compiled
+// output. pdfkit itself only ever reaches them via a computed require
+// (`pdfkit/standard-fonts/<name>`) deep inside its own font-loading code,
+// which (a) Vercel's static file-tracing can't follow — even after
+// forcing every route's trace to carry pdfkit's whole file tree via
+// next.config.js's outputFileTracingIncludes, "Cannot find module
+// .../standard-fonts/Helvetica.cjs" still happened in production — and
+// (b) is invisible to webpack in the first place since @react-pdf/renderer
+// is registered as a server-external package (next.config.js), so webpack
+// never even looks inside it to begin with. A literal import of the exact
+// subpath from this file — which is NOT external — sidesteps both: these
+// four modules get bundled directly into this route's own output, so
+// nothing needs to be traced or resolved against pdfkit at request time
+// at all.
+void [PdfkitHelvetica, PdfkitTimesRoman, PdfkitTimesBold, PdfkitTimesItalic];
 
 export interface HouseBookImage {
   url: string;
