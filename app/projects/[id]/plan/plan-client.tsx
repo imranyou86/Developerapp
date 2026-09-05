@@ -292,14 +292,22 @@ export function PlanClient({
                 ? "Analyzing plan…"
                 : `Detect rooms from plan (${layoutPages.length} page${layoutPages.length === 1 ? "" : "s"})`}
             </button>
-            {nonLayoutPages.length > 0 && (
+            {pages.length > 0 && (
               <button
-                className="btn-outline text-red-600"
+                className="btn-outline text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => setConfirmingValidate(true)}
-                disabled={validating}
-                title="Permanently removes every page left unchecked below, keeping only the floor plan"
+                disabled={validating || nonLayoutPages.length === 0}
+                title={
+                  nonLayoutPages.length === 0
+                    ? "Nothing to remove — every page below is currently checked as floor plan layout"
+                    : "Permanently removes every page left unchecked below, keeping only the floor plan"
+                }
               >
-                {validating ? "Removing…" : `Validate — keep only floor plan (${nonLayoutPages.length} to remove)`}
+                {validating
+                  ? "Removing…"
+                  : nonLayoutPages.length === 0
+                    ? "Validate — keep only floor plan"
+                    : `Validate — keep only floor plan (${nonLayoutPages.length} to remove)`}
               </button>
             )}
           </div>
