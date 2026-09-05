@@ -1,0 +1,25 @@
+-- Not every uploaded bid ends up being the one you go with — you often get
+-- several competing bids for the same scope and only accept one. Previously
+-- every uploaded bid immediately counted as a real contract (in the
+-- "Contracts total"/"Remaining" summary and the payment-tracking list),
+-- which was wrong the moment more than one bid existed for the same work.
+--
+-- bids.status splits "under review" from "the one you accepted": new bids
+-- land as 'pending' in a new "Incoming bids" review section instead of the
+-- payment-tracking list; accepting one flips it to 'accepted', which is the
+-- only status that counts toward totals or shows a payment schedule.
+-- Declining keeps the record (for comparison/reference) but hides it from
+-- both active lists.
+--
+-- Run this once in the Supabase SQL editor against an EXISTING project that
+-- already has migration 019_certificate_of_occupancy.sql applied.
+
+-- Default 'accepted' (not 'pending') so every bid already in the database
+-- is backfilled straight into that status by the ALTER itself — they were
+-- already being tracked/paid against under the old all-bids-count model, so
+-- this grandfathers them in rather than dropping them out of the totals/
+-- payment list they were already part of. New bids from the upload flow
+-- explicitly pass 'pending' going forward (see saveBid in
+-- app/projects/[id]/payments/actions.ts) — this default only matters for
+-- rows that predate this column.
+alter table bids add column if not exists status text not null default 'accepted' check (status in ('pending', 'accepted', 'declined'));

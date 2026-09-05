@@ -66,10 +66,13 @@ export default async function SharePage({ params }: { params: { token: string } 
       .select("id, phase, title, done, comment, sort_order, checklist_photos ( id, storage_url )")
       .eq("project_id", projectId)
       .order("sort_order"),
+    // Only accepted bids — bids still under review (or declined) are shown
+    // in the app's own Bids tab, not on a link shared outside the team.
     supabase
       .from("bids")
       .select("id, contractor, total_amount, file_name, file_url, uploaded_at, payment_schedule_items ( id, label, amount, paid )")
       .eq("project_id", projectId)
+      .eq("status", "accepted")
       .order("uploaded_at", { ascending: false }),
   ]);
 

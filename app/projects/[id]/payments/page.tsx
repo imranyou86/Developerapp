@@ -6,10 +6,13 @@ export const dynamic = "force-dynamic";
 export default async function PaymentsPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
 
+  // Only accepted bids show up here — bids awaiting a decision, or declined
+  // ones, live on the Bids tab instead.
   const { data: bids, error } = await supabase
     .from("bids")
     .select("id, contractor, total_amount, file_name, file_url, uploaded_at, payment_schedule_items ( id, label, amount, paid )")
     .eq("project_id", params.id)
+    .eq("status", "accepted")
     .order("uploaded_at", { ascending: false });
 
   return (

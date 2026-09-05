@@ -460,17 +460,51 @@ yet; each one only adds what a given feature needed.
   to compare — swapping away from the AI-recommended tier falls back to a
   deterministic sqft × fixed-band calculation rather than a second AI
   call.
-- **Payments tab** — bid PDFs are read client-side with pdf.js first; the
-  *full* extracted text (not a truncated prefix) is sent to Claude, with the
-  section around a detected "Payment Schedule" heading prioritized if the
-  document is very long. Scanned/image-only PDFs fall back to sending
-  rendered page images instead of text.
-  - **A saved bid's payment schedule stays editable afterward** — a hover-
-    revealed "Edit"/"Remove" per line plus a "+ Add item" button
+- **Bids tab, separate from Payments** — uploading, reviewing, and deciding
+  on a bid is its own tab now; Payments only shows what you've already
+  accepted. This split exists because not every uploaded bid is the one you
+  go with — several competing bids often come in for the same scope, and
+  only Payments' totals/tracking should reflect the one actually happening.
+  `bids.status` (`pending` | `accepted` | `declined`, migration
+  `022_bids_tab.sql`) drives it: `saveBid` (now in
+  `app/projects/[id]/bids/actions.ts`) always inserts a new upload as
+  `pending`; the Bids tab's page query excludes `accepted` (`.neq("status",
+  "accepted")`) so an accepted bid disappears from Bids the moment it's
+  accepted, while the Payments tab's query is the mirror image (`.eq("status",
+  "accepted")`) — a bid only ever shows up on exactly one of the two tabs at
+  a time. Bid PDFs are still read client-side with pdf.js first (upload
+  happens on the Bids tab now); the *full* extracted text (not a truncated
+  prefix) is sent to Claude, with the section around a detected "Payment
+  Schedule" heading prioritized if the document is very long. Scanned/
+  image-only PDFs fall back to sending rendered page images instead of text.
+  - **Incoming bids** section lists every `pending` bid with Accept/
+    Decline/Delete. Accepting calls `setBidStatus(..., "accepted")` and
+    removes it from local state immediately (it now belongs on Payments);
+    declining keeps the record in a collapsed "Declined bids" section
+    (`<details>`) with Reconsider (back to `pending`) and Delete, rather
+    than deleting it outright — useful for remembering which contractors
+    you passed on and why. The public `/share/[token]` mirror was updated
+    to the same `.eq("status", "accepted")` filter the Payments tab uses,
+    so a link shared outside the team never surfaces bids still under
+    internal review.
+  - **"Evaluate bid"** (`/api/claude/evaluate-bid`) grounds a bid's price
+    against typical market cost with a web search — the contractor, total,
+    and line items (which are sometimes just payment draw stages like "50%
+    deposit" with no real scope detail, in which case the prompt is told to
+    infer scope from the contractor/trade instead and cap confidence
+    accordingly) plus the project's address for regional cost calibration.
+    Returns a verdict (`good_price`/`fair_price`/`high_price`), a
+    confidence level, a typical cost range, and a short analysis — cached
+    on the bid itself (`evaluation_*` columns, migration
+    `021_bid_evaluation.sql`) via `saveBidEvaluation` so it doesn't need
+    re-running every time the page reloads; "Re-evaluate" reruns it
+    on demand.
+  - **A saved (now accepted) bid's payment schedule stays editable** — a
+    hover-revealed "Edit"/"Remove" per line plus a "+ Add item" button
     (`PaymentLineModal` in `payments-client.tsx`), for change orders and
-    overages discovered after the bid was first uploaded, not just typos
-    caught during the initial extraction review. Adding or editing a line
-    adjusts the bid's `total_amount` by the same delta server-side
+    overages discovered after acceptance, not just typos caught during the
+    original extraction review. Adding or editing a line adjusts the bid's
+    `total_amount` by the same delta server-side
     (`addPaymentLine`/`updatePaymentLine`/`deletePaymentLine` in
     `app/projects/[id]/payments/actions.ts`) rather than recomputing it as
     a flat sum of every line — `total_amount` can legitimately differ from
@@ -693,9 +727,9 @@ yet; each one only adds what a given feature needed.
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
-  which sections each role can see, covering both the 8 per-project tabs
-  (Plan, Rooms, Finish ID, Checklist, Budget, Payments, Files, Certificate
-  of Occupancy) and the top-level tabs (Buyers Guide/`deals`, Interior
+  which sections each role can see, covering both the 9 per-project tabs
+  (Plan, Rooms, Finish ID, Checklist, Budget, Bids, Payments, Files,
+  Certificate of Occupancy) and the top-level tabs (Buyers Guide/`deals`, Interior
   Design, Construction Cost, Subcontractors); Developer itself always has
   every tab regardless of that table. Every RLS policy that used to check
   `projects.user_id = auth.uid()` now goes through a

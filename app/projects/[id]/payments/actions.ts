@@ -3,68 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
-import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/payments`);
-}
-
-export interface SaveBidInput {
-  contractor: string;
-  total_amount: number;
-  file_name: string | null;
-  file_url: string | null;
-  payment_schedule: { label: string; amount: number }[];
-}
-
-export async function saveBid(projectId: string, input: SaveBidInput): Promise<ActionResult> {
-  const supabase = createClient();
-  if (!input.contractor.trim()) return { ok: false, error: "Contractor name is required." };
-
-  const { data: bid, error } = await supabase
-    .from("bids")
-    .insert({
-      project_id: projectId,
-      contractor: input.contractor.trim(),
-      total_amount: input.total_amount,
-      file_name: input.file_name,
-      file_url: input.file_url,
-    })
-    .select("id")
-    .single();
-  if (error) return { ok: false, error: error.message };
-
-  if (input.file_url) {
-    await recordProjectFile(supabase, {
-      projectId,
-      storageUrl: input.file_url,
-      fileName: input.file_name ?? `${input.contractor} bid`,
-      category: "bid",
-      sourceTable: "bids",
-      sourceId: bid.id,
-    });
-  }
-
-  if (input.payment_schedule.length > 0) {
-    const { error: scheduleError } = await supabase.from("payment_schedule_items").insert(
-      input.payment_schedule.map((line) => ({ bid_id: bid.id, label: line.label, amount: line.amount }))
-    );
-    if (scheduleError) {
-      return { ok: false, error: `Bid saved, but payment schedule failed: ${scheduleError.message}` };
-    }
-  }
-
-  revalidate(projectId);
-  return { ok: true, id: bid.id };
-}
-
-export async function deleteBid(projectId: string, bidId: string): Promise<ActionResult> {
-  const supabase = createClient();
-  const { error } = await supabase.from("bids").delete().eq("id", bidId);
-  if (error) return { ok: false, error: error.message };
-  await removeProjectFile(supabase, "bids", bidId);
-  revalidate(projectId);
-  return { ok: true };
 }
 
 export async function markPaymentPaid(projectId: string, lineId: string, paid: boolean): Promise<ActionResult> {
@@ -75,15 +16,15 @@ export async function markPaymentPaid(projectId: string, lineId: string, paid: b
   return { ok: true };
 }
 
-// Adding/editing/removing a line on an already-saved bid keeps the bid's
+// Adding/editing/removing a line on an already-accepted bid keeps the bid's
 // total_amount in sync by the same delta rather than recomputing it as
 // sum(lines) outright — total_amount can legitimately differ from the sum
-// of extracted lines from the start (see ReviewBidModal's mismatch
-// warning), and this preserves whatever that original gap was instead of
-// silently erasing it the first time someone adds an overage or fixes a
-// typo'd amount. No transaction here (consistent with the rest of this
-// app's server actions) — acceptable for a single-admin-editing-at-a-time
-// tool like this, not a high-concurrency ledger.
+// of extracted lines from the start (see the Bids tab's review-step
+// mismatch warning), and this preserves whatever that original gap was
+// instead of silently erasing it the first time someone adds an overage or
+// fixes a typo'd amount. No transaction here (consistent with the rest of
+// this app's server actions) — acceptable for a single-admin-editing-at-a-
+// time tool like this, not a high-concurrency ledger.
 async function adjustBidTotal(
   supabase: ReturnType<typeof createClient>,
   bidId: string,

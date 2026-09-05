@@ -167,7 +167,20 @@ create table if not exists bids (
   total_amount numeric not null default 0,
   file_name text,
   file_url text,
-  uploaded_at timestamptz not null default now()
+  uploaded_at timestamptz not null default now(),
+  -- New bids land 'pending' in the Incoming bids review section — only
+  -- 'accepted' counts toward payment totals/tracking. 'declined' keeps the
+  -- record (for comparison) but hides it from both active lists.
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  -- Cached result of "Evaluate bid" (a web-search-grounded market-price
+  -- check) — a bid only ever needs its latest evaluation, so plain columns
+  -- are enough; re-evaluating overwrites these rather than keeping history.
+  evaluation_verdict text check (evaluation_verdict in ('good_price', 'fair_price', 'high_price')),
+  evaluation_confidence text check (evaluation_confidence in ('high', 'medium', 'low')),
+  evaluation_market_low numeric,
+  evaluation_market_high numeric,
+  evaluation_analysis text,
+  evaluated_at timestamptz
 );
 
 create table if not exists payment_schedule_items (
@@ -283,7 +296,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'finish-id', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -415,9 +428,9 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- Contractor included — inspection/clearance status is field-relevant
 -- info, not a financial tab.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'payments', 'deals', 'subcontractors') then false else true end
+select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'finish-id', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('finish-id'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
