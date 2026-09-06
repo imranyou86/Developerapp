@@ -606,6 +606,27 @@ yet; each one only adds what a given feature needed.
   a guarded `do $$ ... if not exists ...` block so re-running it is safe) —
   without that step the table exists and works for sending/reading, but
   nothing streams live.
+- **Warranty Request** (per-project tab, `warranty-request`, migration
+  `029_warranty_request.sql`) plus a new **Warranty** account role, for a
+  homeowner given access once their construction is complete. They log
+  issues one at a time — each becomes a row in the same `checklist_items`/
+  `checklist_photos` tables the Checklist tab uses (`phase = 'warranty'`
+  instead of `'rough'`/`'finish'`), so it gets the same title/done/comment/
+  photo shape and RLS for free; `checklist-client.tsx`'s phase filter simply
+  never matches `'warranty'`, so these items don't leak into the Checklist
+  tab's rough/finish columns (or the public `/share/[token]` page, whose
+  section component is hardcoded to those same two phases). Warranty is
+  account-wide like every other role here — not scoped to one construction —
+  so tab_permissions gives it the opposite shape from Contractor's few
+  exclusions: everything is `false` except `warranty-request`, meaning that
+  account sees nothing else, on any project it can reach. Set it either by
+  changing an existing member's role in Admin's Users list, or by inviting
+  someone fresh at the "Warranty" role (Admin's per-project invite panel or
+  the project page's own Invite button) — both surfaces warn that the
+  choice is account-wide before it's sent. Owner/PM/Contractor/Developer all
+  see Warranty Request by default (same "field-relevant, not financial"
+  reasoning as Chat/Certificate of Occupancy) so the team can act on what
+  gets filed there.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

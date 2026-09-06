@@ -5,13 +5,14 @@ import type { UserRole } from "@/lib/types";
 // lib/permissions-server.ts so client components can still import the
 // shared constants below without pulling in next/headers.
 
-export const ROLE_VALUES: UserRole[] = ["owner", "pm", "contractor", "developer"];
+export const ROLE_VALUES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   owner: "Owner",
   pm: "PM",
   contractor: "Contractor",
   developer: "Developer",
+  warranty: "Warranty",
 };
 
 export interface ProjectTabDef {
@@ -32,6 +33,7 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "certificate-of-occupancy", label: "Certificate of Occupancy" },
   { slug: "house-book", label: "House Book" },
   { slug: "chat", label: "Chat" },
+  { slug: "warranty-request", label: "Warranty Request" },
 ];
 
 // Top-level (not per-project) sections gated the same way as project tabs.

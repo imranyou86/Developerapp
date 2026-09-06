@@ -174,7 +174,10 @@ create table if not exists landscape_designs (
 create table if not exists checklist_items (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
-  phase text not null check (phase in ('rough', 'finish')),
+  -- 'warranty' items are filed by a Warranty-role homeowner post-completion
+  -- (app/projects/[id]/warranty-request/) rather than seeded QA steps —
+  -- same shape (title/done/comment/photos), just rendered on their own tab.
+  phase text not null check (phase in ('rough', 'finish', 'warranty')),
   title text not null,
   done boolean not null default false,
   comment text,
@@ -310,7 +313,11 @@ create table if not exists project_files (
 create table if not exists profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null,
-  role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer')),
+  -- 'warranty' is a homeowner given access once their construction is
+  -- complete — account-wide (like every other role here), tab_permissions
+  -- restricts it to seeing only the 'warranty-request' tab (see the seed
+  -- insert below).
+  role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
   -- Gates access to the whole app (enforced in middleware.ts): new signups
   -- land here as 'pending' until a Developer approves them from Admin's
   -- "Access requests" section, so creating an account alone never grants
@@ -324,8 +331,8 @@ create table if not exists profiles (
 -- page; Developer itself always has full access regardless of these rows
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -336,7 +343,7 @@ create table if not exists project_members (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
   invited_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
   unique (project_id, user_id)
@@ -349,7 +356,7 @@ create table if not exists project_invites (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   email text not null,
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
   invited_by uuid not null references auth.users (id) on delete cascade,
   token text not null unique,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
@@ -483,11 +490,18 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- no sub cost/reliability info) — all Developer-editable afterwards from
 -- the Admin page. Certificate of Occupancy and Chat default visible to
 -- everyone, Contractor included — clearance status and team communication
--- are both field-relevant, not financial tabs.
+-- are both field-relevant, not financial tabs. Warranty is the exception
+-- shape: rather than losing a few tabs like Contractor, it loses every tab
+-- EXCEPT warranty-request — that account is meant to see nothing else, on
+-- any construction it can reach.
 insert into tab_permissions (role, tab, allowed)
-select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false else true end
-from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat')) as t(tab)
+select r.role, t.tab, case
+  when r.role = 'warranty' and t.tab <> 'warranty-request' then false
+  when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false
+  else true
+end
+from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty')) as r(role)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new

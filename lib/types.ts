@@ -10,7 +10,12 @@ export type FinishCategory =
   | "Appliance"
   | "Other";
 
-export type ChecklistPhase = "rough" | "finish";
+// "warranty" items live in the same checklist_items/checklist_photos tables
+// as the rough-in/finish QA checklist (same shape: title/done/comment/
+// photos), but render on their own tab (app/projects/[id]/warranty-request/)
+// rather than in the Checklist tab's rough/finish columns — see
+// ChecklistClient's phase filter, which simply never matches "warranty".
+export type ChecklistPhase = "rough" | "finish" | "warranty";
 
 // Used to be a fixed 5-value union (one fixed preset design style) — the
 // Rooms tab now lets someone type/search any style name and pick their own
@@ -299,7 +304,12 @@ export interface CostBreakdownLine {
   description: string;
 }
 
-export type UserRole = "owner" | "pm" | "contractor" | "developer";
+// "warranty" is for a homeowner given access after their construction is
+// complete — an account-level role like the others, so it's simplest for
+// the (typically) single-project person it's meant for, even though it
+// means it can't be scoped to just one of several projects the same
+// account belongs to (see lib/permissions.ts's PROJECT_TABS comment).
+export type UserRole = "owner" | "pm" | "contractor" | "developer" | "warranty";
 
 export interface Profile {
   id: string;

@@ -18,8 +18,9 @@ import type { UserRole } from "@/lib/types";
 // Inviting someone as "Developer" is a special case, handled on accept
 // (see app/invite/[token]/page.tsx) — it promotes their account role to
 // developer (full admin access everywhere), not just membership on this
-// one project.
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer"];
+// one project. "Warranty" is for the homeowner once this construction is
+// done — their account then only ever sees the Warranty Request tab.
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
 
 export function InviteButton({ projectId }: { projectId: string }) {
   const { notify } = useToast();
@@ -139,6 +140,12 @@ export function InviteButton({ projectId }: { projectId: string }) {
             <p className="-mt-3 text-xs text-amber-700">
               Developer is an admin role — accepting this invite grants full access to every construction and
               the Admin page, not just this one.
+            </p>
+          )}
+          {role === "warranty" && (
+            <p className="-mt-3 text-xs text-amber-700">
+              Warranty is account-wide — once accepted, this person will only ever see the Warranty Request tab,
+              on every construction their account has access to.
             </p>
           )}
 

@@ -18,14 +18,16 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ROLE_LABELS, ROLE_VALUES } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
-const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor"];
+const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "warranty"];
 
 // Inviting someone as "Developer" is a special case, handled on accept
 // (see app/invite/[token]/page.tsx) — it promotes their account role to
 // developer (full admin access everywhere), not just membership on this
 // one project. A user's role can also be changed directly in the Users
-// section above without going through an invite at all.
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer"];
+// section above without going through an invite at all. "Warranty" is
+// typically set this way (change an existing member's role) once their
+// construction is complete, rather than through a fresh invite.
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
 
 export type AccountStatus = "pending" | "approved" | "rejected";
 
@@ -631,6 +633,12 @@ function ProjectInvitePanel({ project }: { project: AdminProject }) {
         <p className="-mt-3 text-xs text-amber-700">
           Developer is an admin role — accepting this invite grants full access to every construction and the
           Admin page, not just this one.
+        </p>
+      )}
+      {role === "warranty" && (
+        <p className="-mt-3 text-xs text-amber-700">
+          Warranty is account-wide — once accepted, this person will only ever see the Warranty Request tab, on
+          every construction their account has access to.
         </p>
       )}
 
