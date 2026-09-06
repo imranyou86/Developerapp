@@ -585,6 +585,27 @@ yet; each one only adds what a given feature needed.
   confirmed by grepping the built `route.js` for `glyphWidths` — so
   nothing needs to be traced or resolved against pdfkit's own files at
   request time at all.
+- **Chat** (per-project tab, `chat`, migration `028_project_chat.sql`) — one
+  running message thread per construction, live for everyone with access to
+  that project via Supabase Realtime's `postgres_changes`, which enforces
+  RLS on its own: a subscribed client only ever receives INSERT/DELETE
+  events for rows `project_messages_select` would let it read anyway, so no
+  separate authorization check is needed client-side. `sender_email` is
+  denormalized onto each row at write time (read from
+  `supabase.auth.getUser()`, not resolved via a `profiles` join) because
+  `profiles_select` only lets a user read their own profile row — a join
+  would come back empty for every other member's name. `chat-client.tsx`
+  generates the message `id` client-side (`crypto.randomUUID()`) before
+  inserting and appends it to local state immediately for an instant-feeling
+  send; the Realtime INSERT event for that same id arrives moments later and
+  is deduped away (`prev.some(m => m.id === row.id) ? prev : [...]`) instead
+  of rendering twice. A failed send/delete rolls the optimistic change back
+  and surfaces a toast. Deleting is limited to your own messages (or a
+  Developer, per RLS). Enabling this feature requires the migration to also
+  add `project_messages` to the `supabase_realtime` publication (wrapped in
+  a guarded `do $$ ... if not exists ...` block so re-running it is safe) —
+  without that step the table exists and works for sending/reading, but
+  nothing streams live.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

@@ -221,6 +221,15 @@ export interface LandscapeDesign {
   created_at: string;
 }
 
+export interface ProjectMessage {
+  id: string;
+  project_id: string;
+  user_id: string;
+  sender_email: string;
+  body: string;
+  created_at: string;
+}
+
 export type DealStatus = "researching" | "pursuing" | "passed" | "converted";
 
 export interface Deal {

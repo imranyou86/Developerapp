@@ -325,7 +325,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -355,6 +355,25 @@ create table if not exists project_invites (
   status text not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
   created_at timestamptz not null default now(),
   accepted_at timestamptz
+);
+
+-- Chat tab: one running thread per construction, visible to everyone with
+-- access to that project (owner, invited project_members, Developer) —
+-- same has_project_access() gate as every other per-project table. Kept
+-- deliberately simple for a first pass: no threads/channels, no edit, no
+-- attachments — just messages, in order, with a way to remove your own.
+-- sender_email is denormalized at write time (from auth.getUser(), not a
+-- join) deliberately — profiles_select only lets a user read their own
+-- profile row, so a co-member's email couldn't be resolved for display via
+-- a profiles join without loosening that policy app-wide. Storing it on
+-- the message avoids needing to at all.
+create table if not exists project_messages (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  sender_email text not null,
+  body text not null,
+  created_at timestamptz not null default now()
 );
 
 -- Shared subcontractor directory — not scoped to a single project, so
@@ -451,6 +470,7 @@ create index if not exists idx_project_members_project on project_members (proje
 create index if not exists idx_project_members_user on project_members (user_id);
 create index if not exists idx_project_invites_project on project_invites (project_id, created_at desc);
 create index if not exists idx_project_invites_token on project_invites (token);
+create index if not exists idx_project_messages_project on project_messages (project_id, created_at);
 create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
 create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
 create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
@@ -461,13 +481,13 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
 -- defaults to the field-facing tabs only (no financials/deal analysis, and
 -- no sub cost/reliability info) — all Developer-editable afterwards from
--- the Admin page. Certificate of Occupancy defaults visible to everyone,
--- Contractor included — inspection/clearance status is field-relevant
--- info, not a financial tab.
+-- the Admin page. Certificate of Occupancy and Chat default visible to
+-- everyone, Contractor included — clearance status and team communication
+-- are both field-relevant, not financial tabs.
 insert into tab_permissions (role, tab, allowed)
 select r.role, t.tab, case when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false else true end
 from (values ('owner'), ('pm'), ('contractor'), ('developer')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -544,6 +564,7 @@ alter table profiles enable row level security;
 alter table tab_permissions enable row level security;
 alter table project_members enable row level security;
 alter table project_invites enable row level security;
+alter table project_messages enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
@@ -746,6 +767,16 @@ create policy "project_members_delete" on project_members
 create policy "project_invites_all" on project_invites
   for all using (is_developer()) with check (is_developer());
 
+-- Chat: any project member can read and post; only the sender (or a
+-- Developer) can delete a message. No update policy — messages aren't
+-- editable in this first pass.
+create policy "project_messages_select" on project_messages
+  for select using (has_project_access(project_id));
+create policy "project_messages_insert" on project_messages
+  for insert with check (has_project_access(project_id) and auth.uid() = user_id);
+create policy "project_messages_delete" on project_messages
+  for delete using (auth.uid() = user_id or is_developer());
+
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,
 -- finish-scan photos
@@ -796,3 +827,21 @@ create policy "interior_design_photos_storage_owner" on storage.objects
 create policy "landscape_photos_storage_owner" on storage.objects
   for all using (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ---------------------------------------------------------------------------
+-- Realtime — Chat streams new messages via Supabase Realtime's
+-- postgres_changes, which respects RLS: a client only receives INSERT
+-- events for rows its own project_messages_select policy would let it
+-- read anyway. Guarded (not a bare ALTER PUBLICATION) so re-running this
+-- file against a project that already has it added doesn't error.
+-- ---------------------------------------------------------------------------
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'project_messages'
+  ) then
+    alter publication supabase_realtime add table project_messages;
+  end if;
+end $$;
