@@ -229,6 +229,18 @@ export interface LandscapeDesign {
   created_at: string;
 }
 
+// Warranty Request tab uploads (app/projects/[id]/warranty-request/) — any
+// file type, stored in the 'project-files' bucket. checklist_item_id is
+// null until attached to a specific warranty item.
+export interface InspectionReport {
+  id: string;
+  project_id: string;
+  checklist_item_id: string | null;
+  file_name: string;
+  storage_url: string;
+  created_at: string;
+}
+
 export interface ProjectMessage {
   id: string;
   project_id: string;

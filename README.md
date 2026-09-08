@@ -643,6 +643,21 @@ yet; each one only adds what a given feature needed.
   these projects "Warranty Tracker" and swaps their card's Rooms/Tasks/
   Budget stats (always zero — nothing ever populates them) for a plain
   one-line description instead.
+- **Inspection reports on the Warranty Request tab** (`inspection_reports`,
+  migration `031_inspection_reports.sql`) — upload any file (a PDF from an
+  inspector, a photo, a scan) and separately attach it to the warranty item
+  it applies to, rather than the file being locked to whatever item it was
+  uploaded under. `checklist_item_id` is nullable and starts null; the
+  report shows as "Not attached" until picked from a dropdown of the
+  project's warranty items, and can be moved to a different item or
+  detached again later — `attachInspectionReport` just updates that one
+  column. Uses the same `project-files` storage bucket the Files tab
+  already uploads to (no new bucket/policy needed) and is also recorded
+  into `project_files` (`category: 'document'`) so it surfaces there too on
+  a full construction. Deleting the warranty item it's attached to detaches
+  the report rather than deleting it (`on delete set null`), mirrored in
+  the client so local state doesn't show a report "attached" to an item
+  that no longer exists.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

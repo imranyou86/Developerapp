@@ -7,8 +7,11 @@ import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
+  addInspectionReport,
   addWarrantyItem,
   addWarrantyPhoto,
+  attachInspectionReport,
+  deleteInspectionReport,
   deleteWarrantyItem,
   deleteWarrantyPhoto,
   toggleWarrantyItem,
@@ -29,15 +32,27 @@ interface WarrantyItemRow {
   checklist_photos: WarrantyPhoto[];
 }
 
+interface InspectionReportRow {
+  id: string;
+  project_id: string;
+  checklist_item_id: string | null;
+  file_name: string;
+  storage_url: string;
+  created_at: string;
+}
+
 export function WarrantyRequestClient({
   projectId,
   initialItems,
+  initialReports,
 }: {
   projectId: string;
   initialItems: WarrantyItemRow[];
+  initialReports: InspectionReportRow[];
 }) {
   const { notify } = useToast();
   const [items, setItems] = useState<WarrantyItemRow[]>(initialItems);
+  const [reports, setReports] = useState<InspectionReportRow[]>(initialReports);
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const fixed = items.filter((i) => i.done).length;
@@ -47,6 +62,15 @@ export function WarrantyRequestClient({
   }
   function removeItem(id: string) {
     setItems((prev) => prev.filter((i) => i.id !== id));
+    // Mirrors the DB's "on delete set null" on inspection_reports.checklist_item_id —
+    // a report attached to a deleted item goes back to unattached, not orphaned.
+    setReports((prev) => prev.map((r) => (r.checklist_item_id === id ? { ...r, checklist_item_id: null } : r)));
+  }
+  function updateReport(id: string, patch: Partial<InspectionReportRow>) {
+    setReports((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+  function removeReport(id: string) {
+    setReports((prev) => prev.filter((r) => r.id !== id));
   }
 
   async function handleAdd() {
@@ -65,8 +89,20 @@ export function WarrantyRequestClient({
     setAdding(false);
   }
 
+  async function handleAttach(reportId: string, checklistItemId: string | null) {
+    const previous = reports.find((r) => r.id === reportId)?.checklist_item_id ?? null;
+    updateReport(reportId, { checklist_item_id: checklistItemId });
+    const res = await attachInspectionReport(projectId, reportId, checklistItemId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update attachment.");
+      updateReport(reportId, { checklist_item_id: previous });
+    }
+  }
+
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl space-y-6">
+      <InspectionReportsSection projectId={projectId} reports={reports} items={items} onAdd={(r) => setReports((prev) => [r, ...prev])} onAttach={handleAttach} onRemove={removeReport} />
+
       <div className="card p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="font-semibold text-blueprint-dark">Warranty Request</h2>
@@ -89,7 +125,15 @@ export function WarrantyRequestClient({
         <div className="mt-4 space-y-2">
           {items.length === 0 && <p className="text-sm text-blueprint/40">No warranty items yet.</p>}
           {items.map((item) => (
-            <WarrantyItem key={item.id} projectId={projectId} item={item} onUpdate={updateItem} onRemove={removeItem} />
+            <WarrantyItem
+              key={item.id}
+              projectId={projectId}
+              item={item}
+              reports={reports.filter((r) => r.checklist_item_id === item.id)}
+              onUpdate={updateItem}
+              onRemove={removeItem}
+              onDetachReport={(reportId) => handleAttach(reportId, null)}
+            />
           ))}
         </div>
 
@@ -110,16 +154,156 @@ export function WarrantyRequestClient({
   );
 }
 
-function WarrantyItem({
+function InspectionReportsSection({
   projectId,
-  item,
-  onUpdate,
+  reports,
+  items,
+  onAdd,
+  onAttach,
   onRemove,
 }: {
   projectId: string;
+  reports: InspectionReportRow[];
+  items: WarrantyItemRow[];
+  onAdd: (report: InspectionReportRow) => void;
+  onAttach: (reportId: string, checklistItemId: string | null) => void;
+  onRemove: (id: string) => void;
+}) {
+  const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const uploadTaskKey = "inspection-report-upload";
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState<InspectionReportRow | null>(null);
+
+  async function handleUpload(file: File) {
+    setUploading(true);
+    try {
+      await run(uploadTaskKey, `Uploading "${file.name}"…`, async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
+
+        const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
+          contentType: file.type || "application/octet-stream",
+        });
+        if (uploadError) throw new Error(uploadError.message);
+
+        const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
+        const res = await addInspectionReport(projectId, file.name, pub.publicUrl);
+        if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save report.");
+
+        onAdd({
+          id: res.id,
+          project_id: projectId,
+          checklist_item_id: null,
+          file_name: file.name,
+          storage_url: pub.publicUrl,
+          created_at: new Date().toISOString(),
+        });
+        notify("success", `Uploaded "${file.name}".`);
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="font-semibold text-blueprint-dark">Inspection Reports</h2>
+        <label className="btn-outline cursor-pointer text-xs">
+          {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Upload report"}
+          <input
+            type="file"
+            accept="application/pdf,image/*,.doc,.docx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleUpload(file);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
+      <p className="mb-3 text-sm text-blueprint/60">
+        Upload an inspector&apos;s report, then attach it to the warranty item it applies to.
+      </p>
+
+      {reports.length === 0 ? (
+        <p className="text-sm text-blueprint/40">No inspection reports uploaded yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {reports.map((report) => (
+            <div key={report.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-blueprint/10 p-2 text-sm">
+              <a
+                href={report.storage_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 truncate text-blueprint-dark hover:text-amber hover:underline"
+              >
+                📄 {report.file_name}
+              </a>
+              <select
+                className="input w-auto text-xs"
+                value={report.checklist_item_id ?? ""}
+                onChange={(e) => onAttach(report.id, e.target.value || null)}
+              >
+                <option value="">Not attached</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+              <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(report)}>
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete inspection report?"
+        message={deleting ? `"${deleting.file_name}" will be permanently removed.` : ""}
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setDeleting(null)}
+        onConfirm={async () => {
+          if (!deleting) return;
+          const res = await deleteInspectionReport(projectId, deleting.id);
+          if (!res.ok) {
+            notify("error", res.error ?? "Could not delete report.");
+          } else {
+            onRemove(deleting.id);
+          }
+          setDeleting(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function WarrantyItem({
+  projectId,
+  item,
+  reports,
+  onUpdate,
+  onRemove,
+  onDetachReport,
+}: {
+  projectId: string;
   item: WarrantyItemRow;
+  reports: InspectionReportRow[];
   onUpdate: (id: string, patch: Partial<WarrantyItemRow>) => void;
   onRemove: (id: string) => void;
+  onDetachReport: (reportId: string) => void;
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
@@ -203,13 +387,14 @@ function WarrantyItem({
         </button>
         <button
           className={`shrink-0 text-xs hover:underline ${
-            item.comment || item.checklist_photos.length > 0 ? "text-amber-dark" : "text-blueprint/40"
+            item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"
           }`}
           onClick={() => setExpanded((e) => !e)}
         >
           {item.comment && "📝 "}
           {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
-          {expanded ? "Notes & photos ▾" : "Notes & photos ▸"}
+          {reports.length > 0 && `📄${reports.length} `}
+          {expanded ? "Details ▾" : "Details ▸"}
         </button>
         <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
           Remove
@@ -256,6 +441,27 @@ function WarrantyItem({
               }}
             />
           </label>
+
+          {reports.length > 0 && (
+            <div className="space-y-1 border-t border-blueprint/10 pt-2">
+              <p className="text-xs font-medium text-blueprint/50">Inspection reports</p>
+              {reports.map((report) => (
+                <div key={report.id} className="flex items-center gap-2 text-xs">
+                  <a
+                    href={report.storage_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 truncate text-blueprint-dark hover:text-amber hover:underline"
+                  >
+                    📄 {report.file_name}
+                  </a>
+                  <button className="text-blueprint/50 hover:underline" onClick={() => onDetachReport(report.id)}>
+                    Detach
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

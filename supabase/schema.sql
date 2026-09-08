@@ -198,6 +198,22 @@ create table if not exists checklist_photos (
   created_at timestamptz not null default now()
 );
 
+-- Inspection report uploads (Warranty Request tab) — any file type (PDF,
+-- photos, scans), stored in the same 'project-files' bucket the Files tab
+-- uses. checklist_item_id starts null (just uploaded, not yet tied to a
+-- specific issue) and can be set/cleared afterward to attach the same
+-- report to one warranty checklist item; "on delete set null" means
+-- deleting that checklist item detaches the report rather than deleting it.
+create table if not exists inspection_reports (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  checklist_item_id uuid references checklist_items (id) on delete set null,
+  file_name text not null,
+  storage_url text not null,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists bids (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -471,6 +487,8 @@ create index if not exists idx_interior_designs_room on interior_designs (room_i
 create index if not exists idx_landscape_designs_project on landscape_designs (project_id, created_at desc);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
+create index if not exists idx_inspection_reports_project on inspection_reports (project_id, created_at desc);
+create index if not exists idx_inspection_reports_checklist_item on inspection_reports (checklist_item_id);
 create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
 create index if not exists idx_project_shares_project on project_shares (project_id);
@@ -574,6 +592,7 @@ alter table interior_designs enable row level security;
 alter table landscape_designs enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
+alter table inspection_reports enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
 alter table project_shares enable row level security;
@@ -703,6 +722,10 @@ create policy "checklist_items_member" on checklist_items
 create policy "checklist_photos_member" on checklist_photos
   for all using (exists (select 1 from checklist_items c where c.id = checklist_photos.checklist_item_id and has_project_access(c.project_id)))
   with check (exists (select 1 from checklist_items c where c.id = checklist_photos.checklist_item_id and has_project_access(c.project_id)));
+
+create policy "inspection_reports_member" on inspection_reports
+  for all using (has_project_access(inspection_reports.project_id))
+  with check (has_project_access(inspection_reports.project_id));
 
 create policy "bids_member" on bids
   for all using (has_project_access(bids.project_id))

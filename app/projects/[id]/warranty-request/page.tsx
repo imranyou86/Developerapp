@@ -6,21 +6,28 @@ export const dynamic = "force-dynamic";
 export default async function WarrantyRequestPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
 
-  const { data: items, error } = await supabase
-    .from("checklist_items")
-    .select("id, title, done, comment, sort_order, checklist_photos ( id, storage_url )")
-    .eq("project_id", params.id)
-    .eq("phase", "warranty")
-    .order("sort_order", { ascending: true });
+  const [{ data: items, error }, { data: reports, error: reportsError }] = await Promise.all([
+    supabase
+      .from("checklist_items")
+      .select("id, title, done, comment, sort_order, checklist_photos ( id, storage_url )")
+      .eq("project_id", params.id)
+      .eq("phase", "warranty")
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("inspection_reports")
+      .select("id, project_id, checklist_item_id, file_name, storage_url, created_at")
+      .eq("project_id", params.id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   return (
     <div>
-      {error && (
+      {(error || reportsError) && (
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          Could not load warranty requests: {error.message}
+          Could not load warranty requests: {(error ?? reportsError)?.message}
         </div>
       )}
-      <WarrantyRequestClient projectId={params.id} initialItems={items ?? []} />
+      <WarrantyRequestClient projectId={params.id} initialItems={items ?? []} initialReports={reports ?? []} />
     </div>
   );
 }

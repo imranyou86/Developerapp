@@ -93,3 +93,60 @@ export async function deleteWarrantyPhoto(projectId: string, photoId: string): P
   revalidate(projectId);
   return { ok: true };
 }
+
+// Inspection reports are uploaded once (any file type — PDF, photos, scans)
+// and can then be attached to a specific warranty item, same idea as
+// checklist photos but decoupled: a report can exist unattached, and
+// attachInspectionReport can move it between items or detach it later
+// rather than being fixed to the item it was uploaded under.
+export async function addInspectionReport(
+  projectId: string,
+  fileName: string,
+  storageUrl: string
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error, data } = await supabase
+    .from("inspection_reports")
+    .insert({ project_id: projectId, file_name: fileName, storage_url: storageUrl, created_by: user.id })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl,
+    fileName,
+    category: "document",
+    sourceTable: "inspection_reports",
+    sourceId: data.id,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: data.id };
+}
+
+export async function attachInspectionReport(
+  projectId: string,
+  reportId: string,
+  checklistItemId: string | null
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("inspection_reports").update({ checklist_item_id: checklistItemId }).eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+export async function deleteInspectionReport(projectId: string, reportId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("inspection_reports").delete().eq("id", reportId);
+  if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "inspection_reports", reportId);
+  revalidate(projectId);
+  return { ok: true };
+}
