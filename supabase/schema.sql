@@ -12,6 +12,12 @@ create table if not exists projects (
   user_id uuid not null references auth.users (id) on delete cascade,
   name text not null,
   address text,
+  -- 'warranty_tracker' is for a property that skips the construction
+  -- workflow entirely — already built elsewhere, or done and only needing
+  -- its warranty period tracked. app/projects/[id]/layout.tsx restricts
+  -- such a project to just the 'warranty-request' tab for every role,
+  -- regardless of that role's usual tab_permissions.
+  kind text not null default 'construction' check (kind in ('construction', 'warranty_tracker')),
   created_at timestamptz not null default now()
 );
 

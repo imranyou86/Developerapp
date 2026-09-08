@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { CHECKLIST_SEED } from "@/lib/checklist-seed";
+import type { ProjectKind } from "@/lib/types";
 
 export interface ActionResult {
   ok: boolean;
@@ -10,7 +11,7 @@ export interface ActionResult {
   id?: string;
 }
 
-export async function createProject(name: string, address: string): Promise<ActionResult> {
+export async function createProject(name: string, address: string, kind: ProjectKind = "construction"): Promise<ActionResult> {
   const supabase = createClient();
   const {
     data: { user },
@@ -20,22 +21,25 @@ export async function createProject(name: string, address: string): Promise<Acti
 
   const { data, error } = await supabase
     .from("projects")
-    .insert({ user_id: user.id, name: name.trim(), address: address.trim() || null })
+    .insert({ user_id: user.id, name: name.trim(), address: address.trim() || null, kind })
     .select("id")
     .single();
 
   if (error) return { ok: false, error: error.message };
 
-  // Seed the standard checklist immediately so the Checklist tab is never empty.
-  const seedRows = CHECKLIST_SEED.map((item, i) => ({
-    project_id: data.id,
-    phase: item.phase,
-    title: item.title,
-    sort_order: i,
-  }));
-  const { error: seedError } = await supabase.from("checklist_items").insert(seedRows);
-  if (seedError) {
-    return { ok: false, error: `Project created, but checklist seed failed: ${seedError.message}` };
+  // A warranty tracker never sees the Checklist tab (see the layout's tab
+  // restriction), so the rough-in/finish QA seed would just be dead rows.
+  if (kind === "construction") {
+    const seedRows = CHECKLIST_SEED.map((item, i) => ({
+      project_id: data.id,
+      phase: item.phase,
+      title: item.title,
+      sort_order: i,
+    }));
+    const { error: seedError } = await supabase.from("checklist_items").insert(seedRows);
+    if (seedError) {
+      return { ok: false, error: `Project created, but checklist seed failed: ${seedError.message}` };
+    }
   }
 
   revalidatePath("/projects");

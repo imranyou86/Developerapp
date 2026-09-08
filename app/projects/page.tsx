@@ -18,7 +18,7 @@ export default async function ProjectsPage() {
   const { data, error } = await supabase
     .from("projects")
     .select(
-      `id, name, address, created_at,
+      `id, name, address, kind, created_at,
        rooms ( id, tasks ( id, done ), budget_items ( id, budgeted, actual ) )`
     )
     .order("created_at", { ascending: false });
@@ -43,6 +43,7 @@ export default async function ProjectsPage() {
       id: p.id,
       name: p.name,
       address: p.address,
+      kind: p.kind,
       roomCount: rooms.length,
       tasksDone,
       tasksTotal,

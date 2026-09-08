@@ -627,6 +627,22 @@ yet; each one only adds what a given feature needed.
   see Warranty Request by default (same "field-relevant, not financial"
   reasoning as Chat/Certificate of Occupancy) so the team can act on what
   gets filed there.
+- **Warranty tracker construction type** (`projects.kind`, migration
+  `030_warranty_tracker_projects.sql`) — a second way to get a
+  warranty-only project, alongside setting a member's account to the
+  Warranty role: create the construction itself as a tracker, for a
+  property that's already built elsewhere and never needs the full
+  workflow at all. Picked at creation time in "+ New construction"
+  (`CreateProjectModal` in `projects-client.tsx`); `createProject` skips
+  seeding the rough-in/finish checklist for this kind, since it'll never
+  have a Checklist tab to show it on. `app/projects/[id]/layout.tsx`
+  intersects the normal per-role allowed tabs with just `warranty-request`
+  when `kind = 'warranty_tracker'` — every role, Developer included, sees
+  only that one tab on a project like this, not because of who they are
+  but because of what the project itself is. The constructions list badges
+  these projects "Warranty Tracker" and swaps their card's Rooms/Tasks/
+  Budget stats (always zero — nothing ever populates them) for a plain
+  one-line description instead.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

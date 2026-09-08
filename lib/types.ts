@@ -24,11 +24,14 @@ export type ChecklistPhase = "rough" | "finish" | "warranty";
 // that used to import it, purely so those call sites stay self-documenting.
 export type StyleName = string;
 
+export type ProjectKind = "construction" | "warranty_tracker";
+
 export interface Project {
   id: string;
   user_id: string;
   name: string;
   address: string | null;
+  kind: ProjectKind;
   created_at: string;
 }
 

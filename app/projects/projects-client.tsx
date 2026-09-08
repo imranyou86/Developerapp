@@ -6,11 +6,13 @@ import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { createProject, deleteProject, renameProject } from "@/app/projects/actions";
+import type { ProjectKind } from "@/lib/types";
 
 export interface ProjectSummary {
   id: string;
   name: string;
   address: string | null;
+  kind: ProjectKind;
   roomCount: number;
   tasksDone: number;
   tasksTotal: number;
@@ -54,33 +56,40 @@ export function ProjectsClient({ projects }: { projects: ProjectSummary[] }) {
                 style={{ animationDelay: `${Math.min(i * 40, 400)}ms` }}
               >
                 <Link href={`/projects/${p.id}`} className="flex-1">
-                  <h3 className="font-semibold text-blueprint-dark transition-colors hover:text-amber">{p.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-blueprint-dark transition-colors hover:text-amber">{p.name}</h3>
+                    {p.kind === "warranty_tracker" && <span className="badge-amber text-xs">Warranty Tracker</span>}
+                  </div>
                   {p.address && <p className="mt-0.5 text-xs text-blueprint/50">{p.address}</p>}
 
-                  <dl className="mt-4 space-y-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <dt className="text-blueprint/60">Rooms</dt>
-                      <dd className="font-medium">{p.roomCount}</dd>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <dt className="text-blueprint/60">Tasks</dt>
-                      <dd className="font-medium">
-                        {p.tasksDone}/{p.tasksTotal}
-                        {p.tasksTotal > 0 && <span className="ml-1 text-xs text-blueprint/40">({taskPct}%)</span>}
-                      </dd>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <dt className="text-blueprint/60">Budget</dt>
-                      <dd className="font-medium">
-                        {currency(p.actual)} / {currency(p.budgeted)}
-                        {p.budgeted > 0 && (
-                          <span className={`ml-1 text-xs ${budgetPct > 100 ? "text-red-600" : "text-blueprint/40"}`}>
-                            ({budgetPct}%)
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                  </dl>
+                  {p.kind === "warranty_tracker" ? (
+                    <p className="mt-4 text-sm text-blueprint/50">Tracks warranty items only — no construction workflow.</p>
+                  ) : (
+                    <dl className="mt-4 space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <dt className="text-blueprint/60">Rooms</dt>
+                        <dd className="font-medium">{p.roomCount}</dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-blueprint/60">Tasks</dt>
+                        <dd className="font-medium">
+                          {p.tasksDone}/{p.tasksTotal}
+                          {p.tasksTotal > 0 && <span className="ml-1 text-xs text-blueprint/40">({taskPct}%)</span>}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-blueprint/60">Budget</dt>
+                        <dd className="font-medium">
+                          {currency(p.actual)} / {currency(p.budgeted)}
+                          {p.budgeted > 0 && (
+                            <span className={`ml-1 text-xs ${budgetPct > 100 ? "text-red-600" : "text-blueprint/40"}`}>
+                              ({budgetPct}%)
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
                 </Link>
 
                 <div className="mt-4 flex gap-2 border-t border-blueprint/10 pt-3">
@@ -151,11 +160,13 @@ function CreateProjectModal({
   const { notify } = useToast();
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [kind, setKind] = useState<ProjectKind>("construction");
   const [pending, startTransition] = useTransition();
 
   function close() {
     setName("");
     setAddress("");
+    setKind("construction");
     onClose();
   }
 
@@ -174,7 +185,7 @@ function CreateProjectModal({
             disabled={pending || !name.trim()}
             onClick={() =>
               startTransition(async () => {
-                const res = await createProject(name, address);
+                const res = await createProject(name, address, kind);
                 if (!res.ok) {
                   notify("error", res.error ?? "Could not create construction.");
                   return;
@@ -197,6 +208,28 @@ function CreateProjectModal({
         <div>
           <label className="label">Address (optional)</label>
           <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="123 Maple St." />
+        </div>
+        <div>
+          <label className="label">Type</label>
+          <div className="space-y-2">
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-blueprint/10 p-3 text-sm has-[:checked]:border-amber has-[:checked]:bg-amber/5">
+              <input type="radio" className="mt-0.5" checked={kind === "construction"} onChange={() => setKind("construction")} />
+              <span>
+                <span className="block font-medium text-blueprint-dark">Full construction</span>
+                <span className="block text-xs text-blueprint/50">Plan, rooms, budget, checklist, and every other tab.</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-blueprint/10 p-3 text-sm has-[:checked]:border-amber has-[:checked]:bg-amber/5">
+              <input type="radio" className="mt-0.5" checked={kind === "warranty_tracker"} onChange={() => setKind("warranty_tracker")} />
+              <span>
+                <span className="block font-medium text-blueprint-dark">Warranty tracker only</span>
+                <span className="block text-xs text-blueprint/50">
+                  For a property that&apos;s already built — skips the whole construction workflow and shows only the
+                  Warranty Request tab.
+                </span>
+              </span>
+            </label>
+          </div>
         </div>
       </div>
     </Modal>
