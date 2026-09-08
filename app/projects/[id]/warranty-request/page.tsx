@@ -9,7 +9,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
   const [{ data: items, error }, { data: reports, error: reportsError }] = await Promise.all([
     supabase
       .from("checklist_items")
-      .select("id, title, done, comment, sort_order, checklist_photos ( id, storage_url )")
+      .select("id, title, done, status, comment, sort_order, checklist_photos ( id, storage_url )")
       .eq("project_id", params.id)
       .eq("phase", "warranty")
       .order("sort_order", { ascending: true }),

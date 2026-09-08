@@ -676,6 +676,22 @@ yet; each one only adds what a given feature needed.
   generated — one report can produce several items, and
   `inspection_reports.checklist_item_id` only ever points at one — so
   attaching stays the manual dropdown, same as before.
+- **Warranty item review status** (`checklist_items.status`, migration
+  `032_warranty_item_status.sql`) — a second, independent axis from "done"
+  (Fixed). Each warranty item gets a dropdown: Pending review (default),
+  Validate (confirmed as a real, warranty-covered issue), or Not covered by
+  warranty (reviewed and rejected — normal wear, homeowner-caused damage,
+  outside the warranty period, whatever the reason). Kept as its own
+  `status` column rather than folded into `done` because the two aren't the
+  same axis — an item can be validated but not yet fixed, and an
+  invalidated item was never going to be "fixed" under this claim at all;
+  modeling that as more boolean flags on `done` would allow nonsense
+  combinations a single enum doesn't. Marking an item "Not covered" clears
+  a stray "Fixed" check and disables the checkbox (nothing left to fix
+  under warranty), and the title renders struck through in red instead of
+  the normal gray. `status` lives on `checklist_items` itself (not a
+  separate table) so rough/finish items carry the same column — they just
+  never touch it and stay at the 'pending' default.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

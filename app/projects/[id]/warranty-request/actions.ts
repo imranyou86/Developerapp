@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
+import type { WarrantyItemStatus } from "@/lib/types";
 
 // Warranty requests are checklist_items/checklist_photos rows with
 // phase = "warranty" — same shape (title/done/comment/photos) as the
@@ -37,6 +38,18 @@ export async function addWarrantyItem(projectId: string, title: string): Promise
 export async function toggleWarrantyItem(projectId: string, itemId: string, done: boolean): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ done }).eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+export async function setWarrantyStatus(
+  projectId: string,
+  itemId: string,
+  status: WarrantyItemStatus
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("checklist_items").update({ status }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };

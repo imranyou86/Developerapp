@@ -186,6 +186,10 @@ create table if not exists checklist_items (
   phase text not null check (phase in ('rough', 'finish', 'warranty')),
   title text not null,
   done boolean not null default false,
+  -- Warranty-only review status, independent of "done" (an item can be
+  -- validated but not yet fixed, or invalidated and never fixed at all).
+  -- Rough/finish items never touch this — it just stays 'pending' for them.
+  status text not null default 'pending' check (status in ('pending', 'validated', 'invalidated')),
   comment text,
   sort_order int not null default 0,
   created_at timestamptz not null default now()

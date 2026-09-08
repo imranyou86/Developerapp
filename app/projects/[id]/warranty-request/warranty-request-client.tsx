@@ -16,10 +16,12 @@ import {
   deleteInspectionReport,
   deleteWarrantyItem,
   deleteWarrantyPhoto,
+  setWarrantyStatus,
   toggleWarrantyItem,
   updateWarrantyComment,
   type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
+import type { WarrantyItemStatus } from "@/lib/types";
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
 
@@ -36,6 +38,7 @@ interface WarrantyItemRow {
   id: string;
   title: string;
   done: boolean;
+  status: WarrantyItemStatus;
   comment: string | null;
   sort_order: number;
   checklist_photos: WarrantyPhoto[];
@@ -88,6 +91,7 @@ export function WarrantyRequestClient({
         id: it.id,
         title: it.title,
         done: false,
+        status: "pending" as const,
         comment: it.comment,
         sort_order: prev.length + i,
         checklist_photos: [],
@@ -104,7 +108,15 @@ export function WarrantyRequestClient({
     } else {
       setItems((prev) => [
         ...prev,
-        { id: res.id!, title: newTitle.trim(), done: false, comment: null, sort_order: prev.length, checklist_photos: [] },
+        {
+          id: res.id!,
+          title: newTitle.trim(),
+          done: false,
+          status: "pending",
+          comment: null,
+          sort_order: prev.length,
+          checklist_photos: [],
+        },
       ]);
       setNewTitle("");
     }
@@ -471,6 +483,23 @@ function WarrantyItem({
     }
   }
 
+  async function handleStatusChange(status: WarrantyItemStatus) {
+    const previous = item.status;
+    onUpdate(item.id, { status });
+    const res = await setWarrantyStatus(projectId, item.id, status);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update status.");
+      onUpdate(item.id, { status: previous });
+      return;
+    }
+    // Not covered by warranty means it was never going to be fixed under
+    // this claim — clear a stray "Fixed" check rather than leaving it
+    // checked-but-disabled.
+    if (status === "invalidated" && item.done) {
+      handleToggle(false);
+    }
+  }
+
   async function handleSaveComment() {
     setSavingComment(true);
     const res = await updateWarrantyComment(projectId, item.id, comment);
@@ -526,13 +555,36 @@ function WarrantyItem({
   return (
     <div className="rounded-lg border border-blueprint/10">
       <div className="flex items-center gap-2 px-2 py-1.5">
-        <input type="checkbox" checked={item.done} onChange={(e) => handleToggle(e.target.checked)} title="Fixed" />
+        <input
+          type="checkbox"
+          checked={item.done}
+          onChange={(e) => handleToggle(e.target.checked)}
+          title="Fixed"
+          disabled={item.status === "invalidated"}
+        />
         <button
-          className={`flex-1 text-left text-sm ${item.done ? "text-blueprint/40 line-through" : "text-blueprint-dark"}`}
+          className={`flex-1 text-left text-sm ${
+            item.status === "invalidated"
+              ? "text-red-400 line-through"
+              : item.done
+                ? "text-blueprint/40 line-through"
+                : "text-blueprint-dark"
+          }`}
           onClick={() => setExpanded((e) => !e)}
         >
           {item.title}
         </button>
+        <select
+          className={`input w-auto shrink-0 text-xs ${
+            item.status === "validated" ? "text-sage-700" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+          }`}
+          value={item.status}
+          onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
+        >
+          <option value="pending">Pending review</option>
+          <option value="validated">Validate</option>
+          <option value="invalidated">Not covered by warranty</option>
+        </select>
         <button
           className={`shrink-0 text-xs hover:underline ${
             item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"

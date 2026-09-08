@@ -17,6 +17,11 @@ export type FinishCategory =
 // ChecklistClient's phase filter, which simply never matches "warranty".
 export type ChecklistPhase = "rough" | "finish" | "warranty";
 
+// Warranty-only review status on a checklist_items row, independent of
+// "done" — an item can be validated but not yet fixed, or invalidated and
+// never fixed at all. Rough/finish items never touch this.
+export type WarrantyItemStatus = "pending" | "validated" | "invalidated";
+
 // Used to be a fixed 5-value union (one fixed preset design style) — the
 // Rooms tab now lets someone type/search any style name and pick their own
 // colors instead of choosing from a locked list, so this is just a plain
