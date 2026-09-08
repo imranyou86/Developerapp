@@ -150,3 +150,47 @@ export async function deleteInspectionReport(projectId: string, reportId: string
   revalidate(projectId);
   return { ok: true };
 }
+
+export interface WarrantyFinding {
+  title: string;
+  detail: string | null;
+}
+
+export interface CreatedWarrantyItem {
+  id: string;
+  title: string;
+  comment: string | null;
+}
+
+// Bulk-creates warranty checklist items from a report's AI-extracted
+// findings (app/api/claude/extract-inspection-report) — one insert instead
+// of one addWarrantyItem call per finding, and sort_order is computed once
+// against the count at call time rather than racing per-item.
+export async function addWarrantyItemsFromReport(
+  projectId: string,
+  findings: WarrantyFinding[]
+): Promise<ActionResult & { items?: CreatedWarrantyItem[] }> {
+  const usable = findings.filter((f) => f.title.trim());
+  if (usable.length === 0) return { ok: false, error: "No findings to add." };
+
+  const supabase = createClient();
+  const { count } = await supabase
+    .from("checklist_items")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .eq("phase", "warranty");
+
+  const rows = usable.map((f, i) => ({
+    project_id: projectId,
+    phase: "warranty" as const,
+    title: f.title.trim(),
+    comment: f.detail?.trim() || null,
+    sort_order: (count ?? 0) + i,
+  }));
+
+  const { error, data } = await supabase.from("checklist_items").insert(rows).select("id, title, comment");
+  if (error) return { ok: false, error: error.message };
+
+  revalidate(projectId);
+  return { ok: true, items: data };
+}

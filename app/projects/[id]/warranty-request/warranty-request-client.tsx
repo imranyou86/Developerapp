@@ -6,9 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import {
   addInspectionReport,
   addWarrantyItem,
+  addWarrantyItemsFromReport,
   addWarrantyPhoto,
   attachInspectionReport,
   deleteInspectionReport,
@@ -16,7 +18,14 @@ import {
   deleteWarrantyPhoto,
   toggleWarrantyItem,
   updateWarrantyComment,
+  type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
+
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
+
+function fileExtension(fileName: string): string {
+  return fileName.split(".").pop()?.toLowerCase() ?? "";
+}
 
 interface WarrantyPhoto {
   id: string;
@@ -72,6 +81,19 @@ export function WarrantyRequestClient({
   function removeReport(id: string) {
     setReports((prev) => prev.filter((r) => r.id !== id));
   }
+  function addGeneratedItems(newItems: CreatedWarrantyItem[]) {
+    setItems((prev) => [
+      ...prev,
+      ...newItems.map((it, i) => ({
+        id: it.id,
+        title: it.title,
+        done: false,
+        comment: it.comment,
+        sort_order: prev.length + i,
+        checklist_photos: [],
+      })),
+    ]);
+  }
 
   async function handleAdd() {
     if (!newTitle.trim()) return;
@@ -101,7 +123,15 @@ export function WarrantyRequestClient({
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <InspectionReportsSection projectId={projectId} reports={reports} items={items} onAdd={(r) => setReports((prev) => [r, ...prev])} onAttach={handleAttach} onRemove={removeReport} />
+      <InspectionReportsSection
+        projectId={projectId}
+        reports={reports}
+        items={items}
+        onAdd={(r) => setReports((prev) => [r, ...prev])}
+        onAttach={handleAttach}
+        onRemove={removeReport}
+        onItemsGenerated={addGeneratedItems}
+      />
 
       <div className="card p-5">
         <div className="mb-1 flex items-center justify-between">
@@ -161,6 +191,7 @@ function InspectionReportsSection({
   onAdd,
   onAttach,
   onRemove,
+  onItemsGenerated,
 }: {
   projectId: string;
   reports: InspectionReportRow[];
@@ -168,12 +199,14 @@ function InspectionReportsSection({
   onAdd: (report: InspectionReportRow) => void;
   onAttach: (reportId: string, checklistItemId: string | null) => void;
   onRemove: (id: string) => void;
+  onItemsGenerated: (items: CreatedWarrantyItem[]) => void;
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
   const uploadTaskKey = "inspection-report-upload";
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<InspectionReportRow | null>(null);
+  const [generatingStatus, setGeneratingStatus] = useState<Record<string, string>>({});
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -212,6 +245,109 @@ function InspectionReportsSection({
     }
   }
 
+  // Reads the report's stored file directly by URL (works for a report
+  // uploaded just now or one uploaded long ago) — a PDF gets its text
+  // extracted with pdf.js, falling back to rendered page images for a
+  // scanned/image-only PDF, same approach the Bids tab uses for reading
+  // contractor bids; an image file goes straight to Claude as-is.
+  async function handleGenerateItems(report: InspectionReportRow) {
+    const setStatus = (s: string) => setGeneratingStatus((prev) => ({ ...prev, [report.id]: s }));
+    const ext = fileExtension(report.file_name);
+    if (ext !== "pdf" && !IMAGE_EXTENSIONS.includes(ext)) {
+      notify("error", "Automatic checklist generation only works for PDF or photo reports.");
+      return;
+    }
+
+    const taskKey = `inspection-extract:${report.id}`;
+    try {
+      await run(taskKey, `Reading "${report.file_name}"…`, async () => {
+        let requestBody: { text?: string; pageImageUrls?: string[] };
+
+        if (ext === "pdf") {
+          setStatus("Reading PDF…");
+          const pdfjsLib = await import("pdfjs-dist");
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+          const pdf = await pdfjsLib.getDocument({ url: report.storage_url }).promise;
+
+          let fullText = "";
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map((it) => ("str" in it ? it.str : "")).join(" ");
+            fullText += `\n\n--- Page ${pageNum} ---\n${pageText}`;
+          }
+
+          if (fullText.trim().length > 50) {
+            requestBody = { text: fullText };
+          } else {
+            // Likely a scanned/image-only PDF — render pages as images instead.
+            setStatus("Report looks scanned — rendering pages for image-based reading…");
+            const supabase = createClient();
+            const {
+              data: { user },
+            } = await supabase.auth.getUser();
+            if (!user) throw new Error("Not signed in.");
+
+            const pageImageUrls: string[] = [];
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+              const page = await pdf.getPage(pageNum);
+              const viewport = page.getViewport({ scale: 2 });
+              const canvas = document.createElement("canvas");
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const context = canvas.getContext("2d");
+              if (!context) throw new Error("Canvas rendering is not supported in this browser.");
+              await page.render({ canvasContext: context, viewport }).promise;
+              const blob: Blob = await new Promise((resolve, reject) =>
+                canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode page image."))), "image/png")
+              );
+              const imgPath = `${user.id}/${projectId}/${Date.now()}-p${pageNum}-${report.file_name}.png`;
+              const { error: imgUploadError } = await supabase.storage.from("project-files").upload(imgPath, blob, {
+                contentType: "image/png",
+              });
+              if (imgUploadError) throw new Error(imgUploadError.message);
+              const { data: imgPub } = supabase.storage.from("project-files").getPublicUrl(imgPath);
+              pageImageUrls.push(imgPub.publicUrl);
+            }
+            requestBody = { pageImageUrls };
+          }
+        } else {
+          setStatus("Reading photo…");
+          requestBody = { pageImageUrls: [report.storage_url] };
+        }
+
+        setStatus("Finding issues to add…");
+        const res = await fetchWithRetry("/api/claude/extract-inspection-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Could not read this report.");
+
+        const findings: { title: string; detail: string | null }[] = json.items ?? [];
+        if (findings.length === 0) {
+          notify("success", "No actionable issues found in this report.");
+          return;
+        }
+
+        const addRes = await addWarrantyItemsFromReport(projectId, findings);
+        if (!addRes.ok || !addRes.items) throw new Error(addRes.error ?? "Could not add items.");
+
+        onItemsGenerated(addRes.items);
+        notify("success", `Added ${addRes.items.length} item${addRes.items.length === 1 ? "" : "s"} from "${report.file_name}".`);
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not read this report.");
+    } finally {
+      setGeneratingStatus((prev) => {
+        const next = { ...prev };
+        delete next[report.id];
+        return next;
+      });
+    }
+  }
+
   return (
     <div className="card p-5">
       <div className="mb-1 flex items-center justify-between">
@@ -237,34 +373,46 @@ function InspectionReportsSection({
       {reports.length === 0 ? (
         <p className="text-sm text-blueprint/40">No inspection reports uploaded yet.</p>
       ) : (
-        <div className="space-y-2">
-          {reports.map((report) => (
-            <div key={report.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-blueprint/10 p-2 text-sm">
-              <a
-                href={report.storage_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 truncate text-blueprint-dark hover:text-amber hover:underline"
-              >
-                📄 {report.file_name}
-              </a>
-              <select
-                className="input w-auto text-xs"
-                value={report.checklist_item_id ?? ""}
-                onChange={(e) => onAttach(report.id, e.target.value || null)}
-              >
-                <option value="">Not attached</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                  </option>
-                ))}
-              </select>
-              <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(report)}>
-                Delete
-              </button>
-            </div>
-          ))}
+        <div className="space-y-1">
+          {reports.map((report) => {
+            const status = generatingStatus[report.id];
+            return (
+              <div key={report.id} className="rounded-lg border border-blueprint/10 p-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={report.storage_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 truncate text-blueprint-dark hover:text-amber hover:underline"
+                  >
+                    📄 {report.file_name}
+                  </a>
+                  <select
+                    className="input w-auto text-xs"
+                    value={report.checklist_item_id ?? ""}
+                    onChange={(e) => onAttach(report.id, e.target.value || null)}
+                  >
+                    <option value="">Not attached</option>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-ghost text-xs"
+                    onClick={() => handleGenerateItems(report)}
+                    disabled={!!status}
+                  >
+                    {status ?? "Generate checklist items"}
+                  </button>
+                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(report)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

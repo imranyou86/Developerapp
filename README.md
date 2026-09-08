@@ -658,6 +658,24 @@ yet; each one only adds what a given feature needed.
   the report rather than deleting it (`on delete set null`), mirrored in
   the client so local state doesn't show a report "attached" to an item
   that no longer exists.
+- **"Generate checklist items" from an inspection report** — reading a
+  report by hand and retyping each finding as its own warranty item is the
+  slow part; a "Generate checklist items" button per report does it
+  instead. Reads the report straight from its stored URL (works for a
+  report uploaded just now or long ago, not just the one still in memory
+  from an upload) — a PDF gets its text pulled with `pdf.js`, falling back
+  to rendering pages as images for a scanned/image-only PDF, the same
+  approach `bids-client.tsx` already uses for reading contractor bids; a
+  photo report goes straight to Claude as an image. `/api/claude/extract-
+  inspection-report` is told to pull out every actionable issue as
+  `{ title, detail }` — deliberately dropping passed/satisfactory items and
+  boilerplate report text — and `addWarrantyItemsFromReport` bulk-inserts
+  them as warranty checklist items (`title` → the item, `detail` → its
+  comment) in one insert rather than one `addWarrantyItem` call per
+  finding. The report itself isn't auto-attached to any of the items it
+  generated — one report can produce several items, and
+  `inspection_reports.checklist_item_id` only ever points at one — so
+  attaching stays the manual dropdown, same as before.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you
