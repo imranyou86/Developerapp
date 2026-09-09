@@ -370,7 +370,7 @@ export function DealDetailClient({ deal, initialAnalyses }: { deal: Deal; initia
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-6 py-8">
+      <main className="mx-auto max-w-4xl animate-fade-in-up space-y-6 px-6 py-8">
         <div className="card p-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <div>

@@ -173,16 +173,17 @@ export function FinishIdClient({
         <div className="card p-10 text-center text-sm text-blueprint/60">No scans yet.</div>
       ) : (
         <div className="space-y-4">
-          {scans.map((scan) => (
-            <ScanCard
-              key={scan.id}
-              scan={scan}
-              projects={projects}
-              roomsByProject={roomsByProject}
-              expanded={expandedScanId === scan.id}
-              onToggle={() => setExpandedScanId((id) => (id === scan.id ? null : scan.id))}
-              onDelete={() => setDeleting(scan)}
-            />
+          {scans.map((scan, i) => (
+            <div key={scan.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
+              <ScanCard
+                scan={scan}
+                projects={projects}
+                roomsByProject={roomsByProject}
+                expanded={expandedScanId === scan.id}
+                onToggle={() => setExpandedScanId((id) => (id === scan.id ? null : scan.id))}
+                onDelete={() => setDeleting(scan)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -515,9 +516,10 @@ function IdentifiedItemRow({
               return (
                 <label
                   key={mi}
-                  className={`flex items-start gap-2 rounded-lg border p-2 text-xs ${
+                  className={`flex animate-fade-in-up items-start gap-2 rounded-lg border p-2 text-xs transition-colors ${
                     isSelected ? "border-amber bg-amber/5" : "border-blueprint/10"
                   }`}
+                  style={{ animationDelay: `${Math.min(mi * 40, 320)}ms` }}
                 >
                   <input
                     type="radio"

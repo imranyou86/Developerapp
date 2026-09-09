@@ -281,7 +281,10 @@ function BreakdownBars({ breakdown, total }: { breakdown: CostBreakdownLine[]; t
               </span>
             </div>
             <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-concrete">
-              <div className="h-full bg-amber" style={{ width: `${Math.min(line.pct, 100)}%` }} />
+              <div
+                className="h-full bg-amber transition-all duration-500 ease-out"
+                style={{ width: `${Math.min(line.pct, 100)}%` }}
+              />
             </div>
             {line.description && <p className="mt-0.5 text-xs text-blueprint/50">{line.description}</p>}
           </div>

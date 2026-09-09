@@ -122,14 +122,16 @@ function ChecklistPhaseColumn({
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-concrete">
         <div
-          className="h-full bg-sage"
+          className="h-full bg-sage transition-all duration-500 ease-out"
           style={{ width: items.length ? `${(done / items.length) * 100}%` : "0%" }}
         />
       </div>
 
       <div className="mt-4 space-y-2">
-        {items.map((item) => (
-          <ChecklistItemRow key={item.id} projectId={projectId} item={item} onUpdate={onUpdate} onRemove={onRemove} />
+        {items.map((item, i) => (
+          <div key={item.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
+            <ChecklistItemRow projectId={projectId} item={item} onUpdate={onUpdate} onRemove={onRemove} />
+          </div>
         ))}
       </div>
 

@@ -258,8 +258,12 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
         <p className="text-sm text-blueprint/50">No landscape designs yet — fill in the form above to get started.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {designs.map((d) => (
-            <div key={d.id} className="rounded-lg border border-blueprint/10 p-3">
+          {designs.map((d, i) => (
+            <div
+              key={d.id}
+              className="card-hover animate-fade-in-up rounded-lg border border-blueprint/10 p-3"
+              style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}
+            >
               <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
                 <Image src={d.generated_image_url} alt={d.style} fill className="object-cover" unoptimized />
               </div>

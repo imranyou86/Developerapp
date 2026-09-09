@@ -326,8 +326,12 @@ export function PlanClient({
         <div className="card p-10 text-center text-sm text-blueprint/60">No plan pages uploaded yet.</div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-          {pages.map((p) => (
-            <div key={p.id} className={`card overflow-hidden ${p.is_layout ? "" : "opacity-60"}`}>
+          {pages.map((p, i) => (
+            <div
+              key={p.id}
+              className={`card card-hover animate-fade-in-up overflow-hidden transition-opacity ${p.is_layout ? "" : "opacity-60"}`}
+              style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+            >
               <div className="relative aspect-[4/3] bg-concrete">
                 <Image src={p.storage_url} alt={p.label} fill className="object-contain" unoptimized />
               </div>

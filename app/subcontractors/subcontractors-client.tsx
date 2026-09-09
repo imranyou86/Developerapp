@@ -165,8 +165,12 @@ export function SubcontractorsClient({
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((s) => (
-            <div key={s.id} className="card p-4">
+          {filtered.map((s, i) => (
+            <div
+              key={s.id}
+              className="card card-hover animate-fade-in-up p-4"
+              style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">

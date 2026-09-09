@@ -72,7 +72,7 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
         />
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
+      <main className="mx-auto max-w-5xl animate-fade-in-up px-6 py-8">
         <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Landscape</h2>
         <LandscapeSections projectList={projectList} selectedId={selectedId} designs={designs} standaloneDesigns={standaloneDesigns} />
       </main>

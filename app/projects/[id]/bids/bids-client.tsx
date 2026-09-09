@@ -262,19 +262,20 @@ export function BidsClient({
           </div>
         ) : (
           <div className="space-y-4">
-            {pendingBids.map((bid) => (
-              <IncomingBidCard
-                key={bid.id}
-                projectId={projectId}
-                bid={bid}
-                projectAddress={projectAddress}
-                onAccept={() => handleStatusChange(bid, "accepted")}
-                onDecline={() => handleStatusChange(bid, "declined")}
-                onDelete={() => setDeleting(bid)}
-                onEvaluated={(evaluation) =>
-                  setBids((prev) => prev.map((b) => (b.id === bid.id ? { ...b, ...evaluation } : b)))
-                }
-              />
+            {pendingBids.map((bid, i) => (
+              <div key={bid.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 40, 300)}ms` }}>
+                <IncomingBidCard
+                  projectId={projectId}
+                  bid={bid}
+                  projectAddress={projectAddress}
+                  onAccept={() => handleStatusChange(bid, "accepted")}
+                  onDecline={() => handleStatusChange(bid, "declined")}
+                  onDelete={() => setDeleting(bid)}
+                  onEvaluated={(evaluation) =>
+                    setBids((prev) => prev.map((b) => (b.id === bid.id ? { ...b, ...evaluation } : b)))
+                  }
+                />
+              </div>
             ))}
           </div>
         )}

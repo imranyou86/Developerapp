@@ -5,6 +5,7 @@ import { ProjectTabs } from "@/app/projects/[id]/project-tabs";
 import { ShareButton } from "@/app/projects/[id]/share-button";
 import { InviteButton } from "@/app/projects/[id]/invite-button";
 import { TabAccessGuard } from "@/components/TabAccessGuard";
+import { PageTransition } from "@/components/PageTransition";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 
 export default async function ProjectLayout({
@@ -57,9 +58,11 @@ export default async function ProjectLayout({
         <ProjectTabs projectId={project.id} allowedSlugs={allowedSlugs} />
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
-        <TabAccessGuard projectId={project.id} allowedSlugs={allowedSlugs}>
-          {children}
-        </TabAccessGuard>
+        <PageTransition>
+          <TabAccessGuard projectId={project.id} allowedSlugs={allowedSlugs}>
+            {children}
+          </TabAccessGuard>
+        </PageTransition>
       </main>
     </div>
   );

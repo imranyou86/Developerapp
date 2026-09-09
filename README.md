@@ -279,6 +279,67 @@ yet; each one only adds what a given feature needed.
     the JSX — the rest of the app's screens require your live Supabase
     project to authenticate into, which this sandboxed session's network
     can't reach, so give the other tabs a look yourself.
+- **Design system / motion pass #2** — every feature built after the first
+  pass above (Chat, Warranty Request, House Book, Landscape, Finish ID, the
+  Bids/Deals/Subcontractors lists, Rooms, Plan, Admin, …) had shipped with
+  zero animation — only `/login` and the projects grid used the keyframes
+  from pass #1. This pass brought the rest of the app in line, still with
+  no new dependency:
+  - **A brighter, more saturated palette** — `tailwind.config.ts`'s four
+    semantic colors (`blueprint`, `concrete`, `amber`, `sage`) were muted
+    navy/beige/terracotta; every one of them is used by name everywhere in
+    the app (`bg-blueprint`, `text-amber`, …), so brightening the four hex
+    values in one file re-themes every screen at once — no component
+    touched a color literal directly. `concrete` (the app's page
+    background) went from a dim beige to a near-white, so accent colors
+    read with far more contrast against it.
+  - **`components/PageTransition.tsx`** — a small client component that
+    keys its children by `usePathname()`, forcing a fresh mount (and a
+    replayed `animate-fade-in-up`) on every navigation. Needed specifically
+    for `app/projects/[id]/layout.tsx`: its `<main>` persists across every
+    project tab (Plan, Checklist, Chat, Warranty Request, …), so a plain
+    CSS animation class there would only ever play once, on the very first
+    tab ever visited — wrapping `{children}` in `PageTransition` instead of
+    directly in `<main>` makes every tab switch fade in fresh, without
+    remounting the header/nav/providers around it (which would lose
+    background-task state; see the Global background-task tracking note).
+    Every other top-level page (Buyers Guide, Interior Design, Construction
+    Cost, Landscape, Subcontractors, Admin, the constructions list, a deal's
+    detail page) is its own route with no shared persistent layout, so
+    those just got `animate-fade-in-up` added straight to their `<main>`.
+  - **Staggered entrance for every major list/grid** — checklist items,
+    warranty items and their inspection reports, subcontractors, incoming
+    bids, landscape/interior-design galleries, Finish ID scans and its
+    product-match results, Buyers Guide search results and saved deals,
+    plan page thumbnails, room cards, admin's user list, and chat messages
+    all animate in with `animate-fade-in-up` and a per-index
+    `animationDelay` (capped, usually at 300-320ms, so a long list doesn't
+    drag the entrance out) — the same pattern pass #1 established for the
+    projects grid, just applied everywhere else it was missing. Chat is the
+    one exception worth calling out: since messages mount once and never
+    remount on re-render, giving every bubble the same class means an
+    *incoming* message animates in while every already-mounted one stays
+    put — no per-message replay, no needing to track "is this new."
+  - **Progress bars now animate their width** (`transition-all
+    duration-500`) on Checklist, Warranty Request, and Construction Cost's
+    breakdown bars, instead of snapping instantly when an item is
+    checked off.
+  - Fixed one latent bug surfaced while doing this: a warranty item's
+    status `<select>` used `text-sage-700`, which doesn't exist — `sage` is
+    a custom token with only `DEFAULT`/`light`/`dark` keys (unlike Tailwind's
+    *built-in* `amber`, which still has its full numeric scale sitting
+    alongside this app's custom `amber` — that's why `text-amber-700`
+    elsewhere in the app was never actually broken). Fixed to `text-sage-dark`.
+  - Still no animation library — every transition here is a Tailwind
+    `@keyframes` triggered by a class, animating only `opacity`/`transform`
+    (compositor-only, GPU-accelerated properties), so none of this adds
+    JS execution cost or changes what data gets fetched. Confirmed via a
+    full `next build`: per-route bundle sizes moved by low-single-digit KB
+    at most (e.g. Warranty Request: 7.03 kB → 7.09 kB) — visual polish
+    without a performance trade-off. Verified the palette change with a
+    Playwright screenshot of `/login` (the one page reachable without a
+    live Supabase session in this sandbox); the rest of the app's screens
+    are worth a look in your own browser.
 - **Plan tab** — every page of an uploaded plan PDF is rendered client-side
   (via pdf.js) and stored as its own labeled page in Supabase Storage.
   "Detect rooms from plan" sends every stored page together to Claude in one

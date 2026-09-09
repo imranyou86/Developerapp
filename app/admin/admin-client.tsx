@@ -309,8 +309,12 @@ function UsersSection({
         can&apos;t use email-based recovery themselves.
       </p>
       <div className="space-y-2">
-        {rows.map((u) => (
-          <div key={u.id} className="flex items-center gap-2 rounded-lg border border-blueprint/10 bg-white p-2 text-sm">
+        {rows.map((u, i) => (
+          <div
+            key={u.id}
+            className="flex animate-fade-in-up items-center gap-2 rounded-lg border border-blueprint/10 bg-white p-2 text-sm"
+            style={{ animationDelay: `${Math.min(i * 20, 240)}ms` }}
+          >
             <span className="flex-1 truncate">
               {u.email}
               {u.id === currentUserId && <span className="ml-2 text-xs text-blueprint/40">(you)</span>}

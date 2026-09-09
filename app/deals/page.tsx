@@ -46,7 +46,7 @@ export default async function DealsPage() {
         />
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
+      <main className="mx-auto max-w-5xl animate-fade-in-up px-6 py-8">
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-blueprint-dark">Buyers Guide</h2>
           <p className="text-sm text-blueprint/50">

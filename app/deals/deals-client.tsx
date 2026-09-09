@@ -372,11 +372,15 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
             <p className="text-sm text-blueprint/50">Nothing found for that ZIP right now.</p>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((listing) => {
+              {results.map((listing, i) => {
                 const address = listing.addressLine1 ?? listing.formattedAddress;
                 const alreadySaved = savedIds.has(listing.id) || savedAddresses.has(address.toLowerCase());
                 return (
-                  <div key={listing.id} className="card p-4">
+                  <div
+                    key={listing.id}
+                    className="card card-hover animate-fade-in-up p-4"
+                    style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+                  >
                     <p className="font-medium text-blueprint-dark">{address}</p>
                     <p className="text-xs text-blueprint/50">
                       {listing.city}, {listing.state} {listing.zipCode}
@@ -417,8 +421,12 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
                   {label} <span className="text-sm font-normal text-blueprint/40">({inSection.length})</span>
                 </h2>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {inSection.map((deal) => (
-                    <div key={deal.id} className="card p-4">
+                  {inSection.map((deal, i) => (
+                    <div
+                      key={deal.id}
+                      className="card card-hover animate-fade-in-up p-4"
+                      style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+                    >
                       <div className="mb-1 flex items-start justify-between gap-2">
                         <p className="font-medium text-blueprint-dark">{deal.address}</p>
                         <span className={STATUS_STYLE[deal.status]}>{deal.status}</span>

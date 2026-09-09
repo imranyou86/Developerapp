@@ -67,7 +67,7 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
         />
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
+      <main className="mx-auto max-w-5xl animate-fade-in-up px-6 py-8">
         <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Interior Design</h2>
         <InteriorDesignSections
           projectList={projectList}

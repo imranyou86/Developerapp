@@ -119,7 +119,7 @@ export function ChatClient({
           messages.map((m) => {
             const isOwn = m.user_id === currentUserId;
             return (
-              <div key={m.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+              <div key={m.id} className={`flex animate-fade-in-up ${isOwn ? "justify-end" : "justify-start"}`}>
                 <div className={`group max-w-[75%] rounded-lg px-3 py-2 text-sm ${isOwn ? "bg-blueprint text-white" : "bg-concrete text-blueprint-dark"}`}>
                   {!isOwn && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender_email}</p>}
                   <p className="whitespace-pre-wrap break-words">{m.body}</p>

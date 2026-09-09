@@ -277,7 +277,7 @@ function Section({
 function ImageCheckCard({ src, label, checked, onToggle }: { src: string; label: string; checked: boolean; onToggle: () => void }) {
   return (
     <label
-      className={`block cursor-pointer overflow-hidden rounded-lg border-2 transition-colors ${
+      className={`block cursor-pointer overflow-hidden rounded-lg border-2 transition-all duration-200 hover:-translate-y-0.5 ${
         checked ? "border-amber" : "border-transparent"
       }`}
     >

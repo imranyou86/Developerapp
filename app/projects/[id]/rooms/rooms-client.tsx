@@ -72,18 +72,19 @@ export function RoomsClient({
         </div>
       ) : (
         <div className="space-y-4">
-          {rooms.map((room) => (
-            <RoomCard
-              key={room.id}
-              projectId={projectId}
-              room={room}
-              hasPlanPages={planPages.length > 0}
-              onViewPlans={() => setViewingPlans(true)}
-              onDeleteRequested={() => setDeleting(room)}
-              onRoomUpdated={(updated) =>
-                setRooms((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
-              }
-            />
+          {rooms.map((room, i) => (
+            <div key={room.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
+              <RoomCard
+                projectId={projectId}
+                room={room}
+                hasPlanPages={planPages.length > 0}
+                onViewPlans={() => setViewingPlans(true)}
+                onDeleteRequested={() => setDeleting(room)}
+                onRoomUpdated={(updated) =>
+                  setRooms((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+                }
+              />
+            </div>
           ))}
         </div>
       )}

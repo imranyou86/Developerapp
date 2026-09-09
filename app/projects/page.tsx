@@ -79,7 +79,7 @@ export default async function ProjectsPage() {
         />
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8">
+      <main className="mx-auto max-w-5xl animate-fade-in-up px-6 py-8">
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
             Could not load projects: {error.message}

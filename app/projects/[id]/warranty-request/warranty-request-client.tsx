@@ -159,23 +159,24 @@ export function WarrantyRequestClient({
 
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-concrete">
           <div
-            className="h-full bg-sage"
+            className="h-full bg-sage transition-all duration-500 ease-out"
             style={{ width: items.length ? `${(fixed / items.length) * 100}%` : "0%" }}
           />
         </div>
 
         <div className="mt-4 space-y-2">
           {items.length === 0 && <p className="text-sm text-blueprint/40">No warranty items yet.</p>}
-          {items.map((item) => (
-            <WarrantyItem
-              key={item.id}
-              projectId={projectId}
-              item={item}
-              reports={reports.filter((r) => r.checklist_item_id === item.id)}
-              onUpdate={updateItem}
-              onRemove={removeItem}
-              onDetachReport={(reportId) => handleAttach(reportId, null)}
-            />
+          {items.map((item, i) => (
+            <div key={item.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
+              <WarrantyItem
+                projectId={projectId}
+                item={item}
+                reports={reports.filter((r) => r.checklist_item_id === item.id)}
+                onUpdate={updateItem}
+                onRemove={removeItem}
+                onDetachReport={(reportId) => handleAttach(reportId, null)}
+              />
+            </div>
           ))}
         </div>
 
@@ -386,10 +387,14 @@ function InspectionReportsSection({
         <p className="text-sm text-blueprint/40">No inspection reports uploaded yet.</p>
       ) : (
         <div className="space-y-1">
-          {reports.map((report) => {
+          {reports.map((report, i) => {
             const status = generatingStatus[report.id];
             return (
-              <div key={report.id} className="rounded-lg border border-blueprint/10 p-2 text-sm">
+              <div
+                key={report.id}
+                className="animate-fade-in-up rounded-lg border border-blueprint/10 p-2 text-sm"
+                style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
+              >
                 <div className="flex flex-wrap items-center gap-2">
                   <a
                     href={report.storage_url}
@@ -576,7 +581,7 @@ function WarrantyItem({
         </button>
         <select
           className={`input w-auto shrink-0 text-xs ${
-            item.status === "validated" ? "text-sage-700" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+            item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
           }`}
           value={item.status}
           onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}

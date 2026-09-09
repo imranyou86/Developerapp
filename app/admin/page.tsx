@@ -66,7 +66,7 @@ export default async function AdminPage() {
         <TopNav showAdmin showDeals showInteriorDesign showConstructionCost showLandscape showSubcontractors />
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-10 px-6 py-8">
+      <main className="mx-auto max-w-5xl animate-fade-in-up space-y-10 px-6 py-8">
         <AdminClient
           matrix={matrix}
           users={users}

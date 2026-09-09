@@ -5,24 +5,28 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Brightened from the original muted navy/terracotta blueprint
+        // palette — same semantic names (so every existing bg-blueprint/
+        // text-amber/etc. call site picks this up with zero changes), just
+        // more saturated and higher-contrast for a livelier feel.
         blueprint: {
-          DEFAULT: "#1F3A5F",
-          light: "#2E5182",
-          dark: "#152943",
+          DEFAULT: "#1D63C4",
+          light: "#3C82E8",
+          dark: "#123E80",
         },
         concrete: {
-          DEFAULT: "#EEEAE2",
-          dark: "#E2DCCF",
+          DEFAULT: "#F4F7F6",
+          dark: "#E6EEEA",
         },
         amber: {
-          DEFAULT: "#C9822B",
-          light: "#DDA05C",
-          dark: "#A8691D",
+          DEFAULT: "#F0862E",
+          light: "#F7A85C",
+          dark: "#C96A1A",
         },
         sage: {
-          DEFAULT: "#7A9471",
-          light: "#93AC8B",
-          dark: "#5E7657",
+          DEFAULT: "#3FAE72",
+          light: "#66C892",
+          dark: "#2C8557",
         },
       },
       fontFamily: {
