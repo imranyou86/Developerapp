@@ -16,7 +16,51 @@ function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/warranty-request`);
 }
 
+type Guard = { ok: true; userId: string } | { ok: false; error: string };
+
+// The 'warranty' role is view-only here: it can watch checklist items,
+// notes, and photos, and chat about them, but every mutation below is
+// blocked for it — adding a new item goes through requestWarrantyItem's
+// approval queue instead. Checked against the real stored profiles.role
+// (not a Developer's preview role — see getCurrentUser), same as
+// app/admin/actions.ts's requireDeveloper, since this is the actual
+// authorization boundary, not a preview-mode convenience.
+async function requireCanManageWarrantyItems(): Promise<Guard> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role === "warranty") {
+    return { ok: false, error: "Warranty accounts can request an item but can't edit it directly — ask a Contractor or Developer." };
+  }
+  return { ok: true, userId: user.id };
+}
+
+// Only a Contractor or Developer can approve/reject a filed request — same
+// boundary is also enforced in RLS (see warranty_item_requests_update in
+// supabase/migrations/034_warranty_item_requests.sql) for defense in depth,
+// since approving creates a real checklist item.
+async function requireApprover(): Promise<Guard> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "contractor" && profile?.role !== "developer") {
+    return { ok: false, error: "Only a Contractor or Developer can approve or reject a warranty request." };
+  }
+  return { ok: true, userId: user.id };
+}
+
 export async function addWarrantyItem(projectId: string, title: string): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   if (!title.trim()) return { ok: false, error: "Description is required." };
 
@@ -52,6 +96,9 @@ export async function toggleWarrantyItem(
   done: boolean,
   itemTitle?: string
 ): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ done }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
@@ -77,6 +124,9 @@ export async function setWarrantyStatus(
   status: WarrantyItemStatus,
   itemTitle?: string
 ): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ status }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
@@ -98,6 +148,9 @@ export async function setWarrantyStatus(
 }
 
 export async function updateWarrantyComment(projectId: string, itemId: string, comment: string): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ comment: comment || null }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
@@ -106,6 +159,9 @@ export async function updateWarrantyComment(projectId: string, itemId: string, c
 }
 
 export async function deleteWarrantyItem(projectId: string, itemId: string): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
@@ -119,6 +175,9 @@ export async function addWarrantyPhoto(
   storageUrl: string,
   itemTitle?: string
 ): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error, data } = await supabase
     .from("checklist_photos")
@@ -141,6 +200,9 @@ export async function addWarrantyPhoto(
 }
 
 export async function deleteWarrantyPhoto(projectId: string, photoId: string): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("checklist_photos").delete().eq("id", photoId);
   if (error) return { ok: false, error: error.message };
@@ -159,6 +221,9 @@ export async function addInspectionReport(
   fileName: string,
   storageUrl: string
 ): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const {
     data: { user },
@@ -190,6 +255,9 @@ export async function attachInspectionReport(
   reportId: string,
   checklistItemId: string | null
 ): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("inspection_reports").update({ checklist_item_id: checklistItemId }).eq("id", reportId);
   if (error) return { ok: false, error: error.message };
@@ -198,6 +266,9 @@ export async function attachInspectionReport(
 }
 
 export async function deleteInspectionReport(projectId: string, reportId: string): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const supabase = createClient();
   const { error } = await supabase.from("inspection_reports").delete().eq("id", reportId);
   if (error) return { ok: false, error: error.message };
@@ -225,6 +296,9 @@ export async function addWarrantyItemsFromReport(
   projectId: string,
   findings: WarrantyFinding[]
 ): Promise<ActionResult & { items?: CreatedWarrantyItem[] }> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
   const usable = findings.filter((f) => f.title.trim());
   if (usable.length === 0) return { ok: false, error: "No findings to add." };
 
@@ -257,4 +331,107 @@ export async function addWarrantyItemsFromReport(
 
   revalidate(projectId);
   return { ok: true, items: data };
+}
+
+// A 'warranty' user files here instead of calling addWarrantyItem directly
+// (requireCanManageWarrantyItems blocks that role from it) — a Contractor
+// or Developer then reviews the queue and approves or rejects it below.
+export async function requestWarrantyItem(projectId: string, title: string, comment?: string): Promise<ActionResult> {
+  if (!title.trim()) return { ok: false, error: "Description is required." };
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error, data } = await supabase
+    .from("warranty_item_requests")
+    .insert({ project_id: projectId, title: title.trim(), comment: comment?.trim() || null, requested_by: user.id })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await notifyProjectSubscribers(projectId, {
+    subject: "New warranty item request",
+    body: `A warranty item was requested: "${title.trim()}" — awaiting Contractor/Developer approval.`,
+    excludeUserId: user.id,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: data.id };
+}
+
+// Approving copies the request into a real checklist_items row (same shape
+// addWarrantyItem creates) and links back via checklist_item_id, so the
+// approved item then shows up in the normal list above the queue.
+export async function approveWarrantyItemRequest(projectId: string, requestId: string): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { data: request, error: fetchError } = await supabase
+    .from("warranty_item_requests")
+    .select("id, title, comment, status")
+    .eq("id", requestId)
+    .single();
+  if (fetchError) return { ok: false, error: fetchError.message };
+  if (request.status !== "pending") return { ok: false, error: "This request has already been reviewed." };
+
+  const { count } = await supabase
+    .from("checklist_items")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .eq("phase", "warranty");
+
+  const { error: insertError, data: item } = await supabase
+    .from("checklist_items")
+    .insert({ project_id: projectId, phase: "warranty", title: request.title, comment: request.comment, sort_order: count ?? 0 })
+    .select("id")
+    .single();
+  if (insertError) return { ok: false, error: insertError.message };
+
+  const { error: updateError } = await supabase
+    .from("warranty_item_requests")
+    .update({ status: "approved", checklist_item_id: item.id, reviewed_by: guard.userId, reviewed_at: new Date().toISOString() })
+    .eq("id", requestId);
+  if (updateError) return { ok: false, error: updateError.message };
+
+  await notifyProjectSubscribers(projectId, {
+    subject: "Warranty request approved",
+    body: `"${request.title}" was approved and added to the warranty list.`,
+    excludeUserId: guard.userId,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: item.id };
+}
+
+export async function rejectWarrantyItemRequest(projectId: string, requestId: string): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { data: request, error: fetchError } = await supabase
+    .from("warranty_item_requests")
+    .select("title, status")
+    .eq("id", requestId)
+    .single();
+  if (fetchError) return { ok: false, error: fetchError.message };
+  if (request.status !== "pending") return { ok: false, error: "This request has already been reviewed." };
+
+  const { error } = await supabase
+    .from("warranty_item_requests")
+    .update({ status: "rejected", reviewed_by: guard.userId, reviewed_at: new Date().toISOString() })
+    .eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
+
+  await notifyProjectSubscribers(projectId, {
+    subject: "Warranty request rejected",
+    body: `"${request.title}" was not approved as a warranty item.`,
+    excludeUserId: guard.userId,
+  });
+
+  revalidate(projectId);
+  return { ok: true };
 }

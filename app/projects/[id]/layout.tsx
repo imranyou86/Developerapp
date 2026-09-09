@@ -41,10 +41,11 @@ export default async function ProjectLayout({
 
   const roleAllowedSlugs = currentUser ? await getAllowedTabSlugs(currentUser.role) : [];
   // A warranty tracker skips the construction workflow entirely — every
-  // role sees only Warranty Request here, regardless of what tab_permissions
-  // would otherwise allow that role on a normal construction.
+  // role sees only Warranty Request and Chat here, regardless of what
+  // tab_permissions would otherwise allow that role on a normal construction.
+  const WARRANTY_TRACKER_SLUGS = ["warranty-request", "chat"];
   const allowedSlugs =
-    project.kind === "warranty_tracker" ? roleAllowedSlugs.filter((slug) => slug === "warranty-request") : roleAllowedSlugs;
+    project.kind === "warranty_tracker" ? roleAllowedSlugs.filter((slug) => WARRANTY_TRACKER_SLUGS.includes(slug)) : roleAllowedSlugs;
 
   return (
     <div className="min-h-screen bg-concrete">

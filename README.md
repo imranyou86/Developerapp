@@ -811,6 +811,42 @@ yet; each one only adds what a given feature needed.
   the normal gray. `status` lives on `checklist_items` itself (not a
   separate table) so rough/finish items carry the same column — they just
   never touch it and stay at the 'pending' default.
+- **Warranty role: Chat access + view-only + request/approval queue**
+  (migration `034_warranty_item_requests.sql`) — three changes to the
+  Warranty role's access, all in response to it being too locked-down:
+  Chat is now allowed alongside Warranty Request (`tab_permissions` and the
+  `warranty_tracker`-kind filter in `app/projects/[id]/layout.tsx` both
+  updated), since a homeowner filing warranty issues should be able to talk
+  to the team about them. On Warranty Request itself the role is now
+  view-only — it can watch every checklist item, note, photo, and
+  inspection report, but every mutating action (`toggleWarrantyItem`,
+  `setWarrantyStatus`, `updateWarrantyComment`, `deleteWarrantyItem`,
+  `addWarrantyPhoto`/`deleteWarrantyPhoto`, the inspection-report actions,
+  and direct `addWarrantyItem`) is blocked for it server-side by a shared
+  `requireCanManageWarrantyItems()` guard in
+  `app/projects/[id]/warranty-request/actions.ts` (checked against the
+  real stored `profiles.role`, the same pattern `app/admin/actions.ts`'s
+  `requireDeveloper()` uses, not a Developer's preview-role cookie) — the
+  client mirrors this by disabling/hiding those controls when
+  `viewerRole === "warranty"`, but the actual boundary is the action guard,
+  since RLS on `checklist_items` stays wide open to every project member
+  (unchanged, to avoid touching a widely-shared table's RLS for a
+  single-role restriction). Adding a new item now goes through a request
+  instead: a new `warranty_item_requests` table (`pending`/`approved`/
+  `rejected`) that `requestWarrantyItem` inserts into and a Contractor or
+  Developer reviews from a new "Warranty Item Requests" section on the
+  tab — `approveWarrantyItemRequest` copies the request into a real
+  `checklist_items` row (`phase = 'warranty'`) and links back via
+  `checklist_item_id`; `rejectWarrantyItemRequest` just marks it rejected.
+  Approval is gated by a `requireApprover()` action guard AND, since this
+  is a genuinely new authorization boundary (not an existing widely-shared
+  table), directly in RLS too (`warranty_item_requests_update` checks
+  `profiles.role in ('contractor', 'developer')`, the same
+  `is_developer()`-in-RLS pattern `project_invites` uses) for defense in
+  depth. The select policy stays broad (`has_project_access`) so a
+  homeowner can watch their own request move from pending to approved/
+  rejected. All three request/approval actions notify subscribers via the
+  existing email-alerts pipeline.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

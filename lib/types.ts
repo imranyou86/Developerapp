@@ -263,6 +263,21 @@ export interface ProjectAlertSubscription {
   created_at: string;
 }
 
+export type WarrantyItemRequestStatus = "pending" | "approved" | "rejected";
+
+export interface WarrantyItemRequest {
+  id: string;
+  project_id: string;
+  title: string;
+  comment: string | null;
+  requested_by: string;
+  status: WarrantyItemRequestStatus;
+  checklist_item_id: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
 export type DealStatus = "researching" | "pursuing" | "passed" | "converted";
 
 export interface Deal {

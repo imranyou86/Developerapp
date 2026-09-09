@@ -12,16 +12,19 @@ import {
   addWarrantyItem,
   addWarrantyItemsFromReport,
   addWarrantyPhoto,
+  approveWarrantyItemRequest,
   attachInspectionReport,
   deleteInspectionReport,
   deleteWarrantyItem,
   deleteWarrantyPhoto,
+  rejectWarrantyItemRequest,
+  requestWarrantyItem,
   setWarrantyStatus,
   toggleWarrantyItem,
   updateWarrantyComment,
   type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
-import type { WarrantyItemStatus } from "@/lib/types";
+import type { UserRole, WarrantyItemRequest, WarrantyItemStatus } from "@/lib/types";
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
 
@@ -57,17 +60,27 @@ export function WarrantyRequestClient({
   projectId,
   initialItems,
   initialReports,
+  initialRequests,
+  viewerRole,
 }: {
   projectId: string;
   initialItems: WarrantyItemRow[];
   initialReports: InspectionReportRow[];
+  initialRequests: WarrantyItemRequest[];
+  viewerRole: UserRole;
 }) {
   const { notify } = useToast();
   const [items, setItems] = useState<WarrantyItemRow[]>(initialItems);
   const [reports, setReports] = useState<InspectionReportRow[]>(initialReports);
+  const [requests, setRequests] = useState<WarrantyItemRequest[]>(initialRequests);
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const fixed = items.filter((i) => i.done).length;
+  // The 'warranty' role can watch checklist items, notes, and photos here
+  // and chat about them, but can't mutate anything directly — they file a
+  // request instead, which a Contractor or Developer approves or rejects.
+  const canManage = viewerRole !== "warranty";
+  const canApprove = viewerRole === "contractor" || viewerRole === "developer";
 
   function updateItem(id: string, patch: Partial<WarrantyItemRow>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -133,12 +146,61 @@ export function WarrantyRequestClient({
     }
   }
 
+  async function handleRequest(title: string, comment: string) {
+    if (!title.trim()) return;
+    setAdding(true);
+    const res = await requestWarrantyItem(projectId, title, comment);
+    if (!res.ok || !res.id) {
+      notify("error", res.error ?? "Could not submit request.");
+    } else {
+      setRequests((prev) => [
+        {
+          id: res.id!,
+          project_id: projectId,
+          title: title.trim(),
+          comment: comment.trim() || null,
+          requested_by: "",
+          status: "pending",
+          checklist_item_id: null,
+          reviewed_by: null,
+          reviewed_at: null,
+          created_at: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      notify("success", "Request submitted — a Contractor or Developer will review it.");
+    }
+    setAdding(false);
+  }
+
+  async function handleApprove(request: WarrantyItemRequest) {
+    const res = await approveWarrantyItemRequest(projectId, request.id);
+    if (!res.ok || !res.id) {
+      notify("error", res.error ?? "Could not approve request.");
+      return;
+    }
+    setRequests((prev) =>
+      prev.map((r) => (r.id === request.id ? { ...r, status: "approved", checklist_item_id: res.id! } : r))
+    );
+    addGeneratedItems([{ id: res.id, title: request.title, comment: request.comment }]);
+  }
+
+  async function handleReject(request: WarrantyItemRequest) {
+    const res = await rejectWarrantyItemRequest(projectId, request.id);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not reject request.");
+      return;
+    }
+    setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, status: "rejected" } : r)));
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <InspectionReportsSection
         projectId={projectId}
         reports={reports}
         items={items}
+        canManage={canManage}
         onAdd={(r) => setReports((prev) => [r, ...prev])}
         onAttach={handleAttach}
         onRemove={removeReport}
@@ -153,8 +215,9 @@ export function WarrantyRequestClient({
           </span>
         </div>
         <p className="mb-4 text-sm text-blueprint/60">
-          List anything that needs to be fixed under warranty, one item at a time — each becomes a checklist item
-          the team can track through to done.
+          {canManage
+            ? "List anything that needs to be fixed under warranty, one item at a time — each becomes a checklist item the team can track through to done."
+            : "Here's everything filed under warranty and where it stands. To add something new, submit a request below — a Contractor or Developer reviews it before it's added."}
         </p>
 
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-concrete">
@@ -172,6 +235,7 @@ export function WarrantyRequestClient({
                 projectId={projectId}
                 item={item}
                 reports={reports.filter((r) => r.checklist_item_id === item.id)}
+                canManage={canManage}
                 onUpdate={updateItem}
                 onRemove={removeItem}
                 onDetachReport={(reportId) => handleAttach(reportId, null)}
@@ -180,19 +244,143 @@ export function WarrantyRequestClient({
           ))}
         </div>
 
-        <div className="mt-3 flex gap-2">
+        {canManage && (
+          <div className="mt-3 flex gap-2">
+            <input
+              className="input flex-1"
+              placeholder="Describe the issue — e.g. &quot;Leaky faucet in kitchen&quot;"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            />
+            <button className="btn-outline" onClick={handleAdd} disabled={adding || !newTitle.trim()}>
+              Add
+            </button>
+          </div>
+        )}
+      </div>
+
+      <RequestsSection requests={requests} canManage={canManage} canApprove={canApprove} onRequest={handleRequest} onApprove={handleApprove} onReject={handleReject} />
+    </div>
+  );
+}
+
+function RequestsSection({
+  requests,
+  canManage,
+  canApprove,
+  onRequest,
+  onApprove,
+  onReject,
+}: {
+  requests: WarrantyItemRequest[];
+  canManage: boolean;
+  canApprove: boolean;
+  onRequest: (title: string, comment: string) => Promise<void>;
+  onApprove: (request: WarrantyItemRequest) => Promise<void>;
+  onReject: (request: WarrantyItemRequest) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [actingOn, setActingOn] = useState<string | null>(null);
+  const pending = requests.filter((r) => r.status === "pending");
+  const reviewed = requests.filter((r) => r.status !== "pending");
+
+  async function handleSubmit() {
+    if (!title.trim()) return;
+    setSubmitting(true);
+    await onRequest(title, comment);
+    setTitle("");
+    setComment("");
+    setSubmitting(false);
+  }
+
+  if (requests.length === 0 && canManage) return null;
+
+  return (
+    <div className="card p-5">
+      <h2 className="mb-1 font-semibold text-blueprint-dark">Warranty Item Requests</h2>
+      <p className="mb-4 text-sm text-blueprint/60">
+        {canApprove
+          ? "Requests filed by a warranty account, awaiting your approval before they're added as a warranty item."
+          : "Items requested but not yet added to the warranty list above."}
+      </p>
+
+      {pending.length === 0 ? (
+        <p className="text-sm text-blueprint/40">No pending requests.</p>
+      ) : (
+        <div className="space-y-2">
+          {pending.map((request) => (
+            <div key={request.id} className="rounded-lg border border-amber/30 bg-amber/5 p-2.5 text-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-blueprint-dark">{request.title}</p>
+                  {request.comment && <p className="mt-0.5 text-xs text-blueprint/60">{request.comment}</p>}
+                </div>
+                {canApprove && (
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      className="text-xs text-sage-dark hover:underline"
+                      disabled={actingOn === request.id}
+                      onClick={async () => {
+                        setActingOn(request.id);
+                        await onApprove(request);
+                        setActingOn(null);
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      className="text-xs text-red-500 hover:underline"
+                      disabled={actingOn === request.id}
+                      onClick={async () => {
+                        setActingOn(request.id);
+                        await onReject(request);
+                        setActingOn(null);
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {reviewed.length > 0 && (
+        <div className="mt-3 space-y-1 border-t border-blueprint/10 pt-2">
+          {reviewed.map((request) => (
+            <div key={request.id} className="flex items-center justify-between text-xs text-blueprint/50">
+              <span className={request.status === "rejected" ? "line-through" : ""}>{request.title}</span>
+              <span className={request.status === "approved" ? "text-sage-dark" : "text-red-500"}>{request.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!canManage && (
+        <div className="mt-4 space-y-2 border-t border-blueprint/10 pt-3">
           <input
-            className="input flex-1"
+            className="input"
             placeholder="Describe the issue — e.g. &quot;Leaky faucet in kitchen&quot;"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
           />
-          <button className="btn-outline" onClick={handleAdd} disabled={adding || !newTitle.trim()}>
-            Add
+          <textarea
+            className="input"
+            rows={2}
+            placeholder="Additional details (optional)…"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <button className="btn-outline" onClick={handleSubmit} disabled={submitting || !title.trim()}>
+            Submit request
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -201,6 +389,7 @@ function InspectionReportsSection({
   projectId,
   reports,
   items,
+  canManage,
   onAdd,
   onAttach,
   onRemove,
@@ -209,6 +398,7 @@ function InspectionReportsSection({
   projectId: string;
   reports: InspectionReportRow[];
   items: WarrantyItemRow[];
+  canManage: boolean;
   onAdd: (report: InspectionReportRow) => void;
   onAttach: (reportId: string, checklistItemId: string | null) => void;
   onRemove: (id: string) => void;
@@ -365,19 +555,21 @@ function InspectionReportsSection({
     <div className="card p-5">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="font-semibold text-blueprint-dark">Inspection Reports</h2>
-        <label className="btn-outline cursor-pointer text-xs">
-          {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Upload report"}
-          <input
-            type="file"
-            accept="application/pdf,image/*,.doc,.docx"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUpload(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
+        {canManage && (
+          <label className="btn-outline cursor-pointer text-xs">
+            {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Upload report"}
+            <input
+              type="file"
+              accept="application/pdf,image/*,.doc,.docx"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUpload(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        )}
       </div>
       <p className="mb-3 text-sm text-blueprint/60">
         Upload an inspector&apos;s report, then attach it to the warranty item it applies to.
@@ -404,28 +596,38 @@ function InspectionReportsSection({
                   >
                     📄 {report.file_name}
                   </a>
-                  <select
-                    className="input w-auto text-xs"
-                    value={report.checklist_item_id ?? ""}
-                    onChange={(e) => onAttach(report.id, e.target.value || null)}
-                  >
-                    <option value="">Not attached</option>
-                    {items.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn-ghost text-xs"
-                    onClick={() => handleGenerateItems(report)}
-                    disabled={!!status}
-                  >
-                    {status ?? "Generate checklist items"}
-                  </button>
-                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(report)}>
-                    Delete
-                  </button>
+                  {canManage ? (
+                    <select
+                      className="input w-auto text-xs"
+                      value={report.checklist_item_id ?? ""}
+                      onChange={(e) => onAttach(report.id, e.target.value || null)}
+                    >
+                      <option value="">Not attached</option>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.title}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs text-blueprint/50">
+                      {items.find((item) => item.id === report.checklist_item_id)?.title ?? "Not attached"}
+                    </span>
+                  )}
+                  {canManage && (
+                    <>
+                      <button
+                        className="btn-ghost text-xs"
+                        onClick={() => handleGenerateItems(report)}
+                        disabled={!!status}
+                      >
+                        {status ?? "Generate checklist items"}
+                      </button>
+                      <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(report)}>
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -459,6 +661,7 @@ function WarrantyItem({
   projectId,
   item,
   reports,
+  canManage,
   onUpdate,
   onRemove,
   onDetachReport,
@@ -466,6 +669,7 @@ function WarrantyItem({
   projectId: string;
   item: WarrantyItemRow;
   reports: InspectionReportRow[];
+  canManage: boolean;
   onUpdate: (id: string, patch: Partial<WarrantyItemRow>) => void;
   onRemove: (id: string) => void;
   onDetachReport: (reportId: string) => void;
@@ -565,7 +769,7 @@ function WarrantyItem({
           checked={item.done}
           onChange={(e) => handleToggle(e.target.checked)}
           title="Fixed"
-          disabled={item.status === "invalidated"}
+          disabled={!canManage || item.status === "invalidated"}
         />
         <button
           className={`flex-1 text-left text-sm ${
@@ -579,17 +783,27 @@ function WarrantyItem({
         >
           {item.title}
         </button>
-        <select
-          className={`input w-auto shrink-0 text-xs ${
-            item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
-          }`}
-          value={item.status}
-          onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
-        >
-          <option value="pending">Pending review</option>
-          <option value="validated">Validate</option>
-          <option value="invalidated">Not covered by warranty</option>
-        </select>
+        {canManage ? (
+          <select
+            className={`input w-auto shrink-0 text-xs ${
+              item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+            }`}
+            value={item.status}
+            onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
+          >
+            <option value="pending">Pending review</option>
+            <option value="validated">Validate</option>
+            <option value="invalidated">Not covered by warranty</option>
+          </select>
+        ) : (
+          <span
+            className={`shrink-0 text-xs ${
+              item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+            }`}
+          >
+            {item.status === "validated" ? "Validated" : item.status === "invalidated" ? "Not covered" : "Pending review"}
+          </span>
+        )}
         <button
           className={`shrink-0 text-xs hover:underline ${
             item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"
@@ -601,9 +815,11 @@ function WarrantyItem({
           {reports.length > 0 && `📄${reports.length} `}
           {expanded ? "Details ▾" : "Details ▸"}
         </button>
-        <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
-          Remove
-        </button>
+        {canManage && (
+          <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
+            Remove
+          </button>
+        )}
       </div>
 
       {expanded && (
@@ -613,8 +829,9 @@ function WarrantyItem({
             rows={2}
             placeholder="Notes…"
             value={comment}
+            readOnly={!canManage}
             onChange={(e) => setComment(e.target.value)}
-            onBlur={handleSaveComment}
+            onBlur={canManage ? handleSaveComment : undefined}
           />
           {savingComment && <p className="text-xs text-blueprint/40">Saving…</p>}
 
@@ -623,29 +840,33 @@ function WarrantyItem({
               {item.checklist_photos.map((photo) => (
                 <div key={photo.id} className="group relative h-16 w-16 overflow-hidden rounded-md">
                   <Image src={photo.storage_url} alt="" fill className="object-cover" unoptimized />
-                  <button
-                    className="absolute inset-0 hidden items-center justify-center bg-blueprint-dark/60 text-xs text-white group-hover:flex"
-                    onClick={() => handleDeletePhoto(photo.id)}
-                  >
-                    Remove
-                  </button>
+                  {canManage && (
+                    <button
+                      className="absolute inset-0 hidden items-center justify-center bg-blueprint-dark/60 text-xs text-white group-hover:flex"
+                      onClick={() => handleDeletePhoto(photo.id)}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
-          <label className="btn-ghost inline-block cursor-pointer text-xs">
-            {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Add photo"}
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handlePhotoUpload(file);
-              }}
-            />
-          </label>
+          {canManage && (
+            <label className="btn-ghost inline-block cursor-pointer text-xs">
+              {uploading || isRunning(uploadTaskKey) ? "Uploading…" : "+ Add photo"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handlePhotoUpload(file);
+                }}
+              />
+            </label>
+          )}
 
           {reports.length > 0 && (
             <div className="space-y-1 border-t border-blueprint/10 pt-2">
@@ -660,9 +881,11 @@ function WarrantyItem({
                   >
                     📄 {report.file_name}
                   </a>
-                  <button className="text-blueprint/50 hover:underline" onClick={() => onDetachReport(report.id)}>
-                    Detach
-                  </button>
+                  {canManage && (
+                    <button className="text-blueprint/50 hover:underline" onClick={() => onDetachReport(report.id)}>
+                      Detach
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -670,23 +893,25 @@ function WarrantyItem({
         </div>
       )}
 
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Remove warranty item?"
-        message={`"${item.title}" will be permanently removed.`}
-        confirmLabel="Remove"
-        danger
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={async () => {
-          const res = await deleteWarrantyItem(projectId, item.id);
-          if (!res.ok) {
-            notify("error", res.error ?? "Could not remove item.");
-          } else {
-            onRemove(item.id);
-          }
-          setConfirmDelete(false);
-        }}
-      />
+      {canManage && (
+        <ConfirmDialog
+          open={confirmDelete}
+          title="Remove warranty item?"
+          message={`"${item.title}" will be permanently removed.`}
+          confirmLabel="Remove"
+          danger
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => {
+            const res = await deleteWarrantyItem(projectId, item.id);
+            if (!res.ok) {
+              notify("error", res.error ?? "Could not remove item.");
+            } else {
+              onRemove(item.id);
+            }
+            setConfirmDelete(false);
+          }}
+        />
+      )}
     </div>
   );
 }

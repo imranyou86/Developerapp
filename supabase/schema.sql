@@ -218,6 +218,28 @@ create table if not exists inspection_reports (
   created_at timestamptz not null default now()
 );
 
+-- The Warranty role can't add a warranty checklist item directly (see the
+-- app-layer role guard in app/projects/[id]/warranty-request/actions.ts) —
+-- they file a request here instead, which a Contractor or Developer
+-- approves (creating the real checklist_items row, phase='warranty', and
+-- linking it back via checklist_item_id) or rejects. Anyone with project
+-- access can see the queue (so a homeowner can watch their own request's
+-- status), but only Contractor/Developer can move it out of 'pending' —
+-- enforced in RLS itself (see the update policy below), not just the
+-- action, since approval is a real authorization boundary.
+create table if not exists warranty_item_requests (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  title text not null,
+  comment text,
+  requested_by uuid not null references auth.users (id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  checklist_item_id uuid references checklist_items (id) on delete set null,
+  reviewed_by uuid references auth.users (id) on delete set null,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists bids (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -341,8 +363,8 @@ create table if not exists profiles (
   email text not null,
   -- 'warranty' is a homeowner given access once their construction is
   -- complete — account-wide (like every other role here), tab_permissions
-  -- restricts it to seeing only the 'warranty-request' tab (see the seed
-  -- insert below).
+  -- restricts it to seeing only the 'warranty-request' and 'chat' tabs (see
+  -- the seed insert below).
   role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
   -- Gates access to the whole app (enforced in middleware.ts): new signups
   -- land here as 'pending' until a Developer approves them from Admin's
@@ -511,6 +533,7 @@ create index if not exists idx_checklist_items_project on checklist_items (proje
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
 create index if not exists idx_inspection_reports_project on inspection_reports (project_id, created_at desc);
 create index if not exists idx_inspection_reports_checklist_item on inspection_reports (checklist_item_id);
+create index if not exists idx_warranty_item_requests_project on warranty_item_requests (project_id, status, created_at);
 create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
 create index if not exists idx_project_shares_project on project_shares (project_id);
@@ -539,11 +562,16 @@ create index if not exists idx_certificate_of_occupancy_checks_project on certif
 -- everyone, Contractor included — clearance status and team communication
 -- are both field-relevant, not financial tabs. Warranty is the exception
 -- shape: rather than losing a few tabs like Contractor, it loses every tab
--- EXCEPT warranty-request — that account is meant to see nothing else, on
--- any construction it can reach.
+-- EXCEPT warranty-request and chat — that account can file/track warranty
+-- requests and talk to the team about them, but sees nothing else, on any
+-- construction it can reach. It's also view-only on warranty-request itself
+-- (enforced app-side, not here — see the role guard in
+-- app/projects/[id]/warranty-request/actions.ts): it can watch checklist
+-- items and notes and request new ones, but can't mark items done, change
+-- status, or delete anything without a Contractor/Developer approving.
 insert into tab_permissions (role, tab, allowed)
 select r.role, t.tab, case
-  when r.role = 'warranty' and t.tab <> 'warranty-request' then false
+  when r.role = 'warranty' and t.tab not in ('warranty-request', 'chat') then false
   when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false
   else true
 end
@@ -616,6 +644,7 @@ alter table landscape_designs enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table inspection_reports enable row level security;
+alter table warranty_item_requests enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
 alter table project_shares enable row level security;
@@ -750,6 +779,26 @@ create policy "checklist_photos_member" on checklist_photos
 create policy "inspection_reports_member" on inspection_reports
   for all using (has_project_access(inspection_reports.project_id))
   with check (has_project_access(inspection_reports.project_id));
+
+-- Anyone with project access can see the request queue (so a homeowner can
+-- watch their own request's status), but only Contractor/Developer can move
+-- one out of 'pending' — enforced here in RLS, not just the Server Action,
+-- since approval is a real authorization boundary (see project_invites'
+-- is_developer()-gated policy for the same pattern).
+create policy "warranty_item_requests_select" on warranty_item_requests
+  for select using (has_project_access(warranty_item_requests.project_id));
+
+create policy "warranty_item_requests_insert" on warranty_item_requests
+  for insert with check (has_project_access(warranty_item_requests.project_id) and auth.uid() = requested_by);
+
+create policy "warranty_item_requests_update" on warranty_item_requests
+  for update using (
+    has_project_access(warranty_item_requests.project_id)
+    and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer'))
+  );
+
+create policy "warranty_item_requests_delete" on warranty_item_requests
+  for delete using (auth.uid() = requested_by);
 
 create policy "bids_member" on bids
   for all using (has_project_access(bids.project_id))
