@@ -255,6 +255,14 @@ export interface ProjectMessage {
   created_at: string;
 }
 
+export interface ProjectAlertSubscription {
+  id: string;
+  project_id: string;
+  user_id: string;
+  email: string;
+  created_at: string;
+}
+
 export type DealStatus = "researching" | "pursuing" | "passed" | "converted";
 
 export interface Deal {

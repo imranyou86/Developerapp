@@ -481,7 +481,7 @@ function WarrantyItem({
 
   async function handleToggle(done: boolean) {
     onUpdate(item.id, { done });
-    const res = await toggleWarrantyItem(projectId, item.id, done);
+    const res = await toggleWarrantyItem(projectId, item.id, done, item.title);
     if (!res.ok) {
       notify("error", res.error ?? "Could not update item.");
       onUpdate(item.id, { done: !done });
@@ -491,7 +491,7 @@ function WarrantyItem({
   async function handleStatusChange(status: WarrantyItemStatus) {
     const previous = item.status;
     onUpdate(item.id, { status });
-    const res = await setWarrantyStatus(projectId, item.id, status);
+    const res = await setWarrantyStatus(projectId, item.id, status, item.title);
     if (!res.ok) {
       notify("error", res.error ?? "Could not update status.");
       onUpdate(item.id, { status: previous });

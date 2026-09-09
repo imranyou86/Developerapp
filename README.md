@@ -38,12 +38,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Project Settings -> API -> anon public key
 SUPABASE_SERVICE_ROLE_KEY=       # Project Settings -> API -> service_role key
 ANTHROPIC_API_KEY=               # console.anthropic.com -> API keys
 OPENAI_API_KEY=                  # platform.openai.com -> API keys (optional, Rooms tab image generation only)
+RESEND_API_KEY=                  # resend.com -> API keys (optional, email alerts only)
+ALERT_FROM_EMAIL=                # optional, needs a Resend-verified domain — see .env.example
 ```
 
 `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are server-only and must never be
 exposed with a `NEXT_PUBLIC_` prefix — they're read only inside `app/api/*`
 routes. `OPENAI_API_KEY` is only needed for the Rooms tab's "Generate image
-(AI)" button — the rest of the app works without it.
+(AI)" button; `RESEND_API_KEY`/`ALERT_FROM_EMAIL` only for the "Get alerts"
+email feature — the rest of the app works without either.
 
 ### 3. Run locally
 
@@ -695,6 +698,33 @@ yet; each one only adds what a given feature needed.
   a guarded `do $$ ... if not exists ...` block so re-running it is safe) —
   without that step the table exists and works for sending/reading, but
   nothing streams live.
+- **Email alerts** (migration `033_project_alerts.sql`) — a "🔔 Get alerts" /
+  "🔕 Alerts on" toggle in every construction's header (next to Invite/Share,
+  `app/projects/[id]/alert-subscribe-button.tsx`) subscribes the signed-in
+  user to an email whenever that project gets a new chat message, a
+  checklist item is added or marked done, a warranty item is filed or fixed,
+  or a warranty item's review status changes — one `project_alert_subscriptions`
+  row per (project, user), self-service only (`alerts-actions.ts`'s
+  `subscribeToAlerts`/`unsubscribeFromAlerts`, each scoped to `auth.uid()`).
+  Dispatch (`lib/alerts.ts`'s `notifyProjectSubscribers`, called from the
+  relevant action right after each mutation succeeds) reads every
+  subscriber's row via the service-role admin client rather than the
+  caller's own session — `project_alert_subscriptions_select`'s RLS only
+  lets a user see their own row, so the caller's normal client could never
+  see who else is subscribed to fan a notification out to; that's a
+  deliberate scope limit on the policy, not a workaround for a bug. Whoever
+  caused the change is excluded from the send. Actually sending mail is a
+  thin `fetch` wrapper around Resend's REST API (`lib/email.ts`, no SDK —
+  same style as `lib/anthropic.ts`/`lib/openai.ts`) gated behind
+  `RESEND_API_KEY`; every call site wraps dispatch in a try/catch that only
+  ever logs a failure (a bad key, Resend being down, a bounced address)
+  rather than surfacing it to the user or rolling back the action that
+  triggered it — the chat message/checklist change/etc. always succeeds on
+  its own merits regardless of whether the alert email actually went out.
+  With no `RESEND_API_KEY` set, subscribing still works (the toggle and the
+  DB row are unaffected) but no email is ever sent. `ALERT_FROM_EMAIL`
+  needs a domain verified in Resend's dashboard to actually deliver to
+  subscribers other than the Resend account owner — see `.env.example`.
 - **Warranty Request** (per-project tab, `warranty-request`, migration
   `029_warranty_request.sql`) plus a new **Warranty** account role, for a
   homeowner given access once their construction is complete. They log

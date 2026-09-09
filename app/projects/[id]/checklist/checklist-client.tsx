@@ -173,7 +173,7 @@ function ChecklistItemRow({
 
   async function handleToggle(done: boolean) {
     onUpdate(item.id, { done });
-    const res = await toggleChecklistItem(projectId, item.id, done);
+    const res = await toggleChecklistItem(projectId, item.id, done, item.title);
     if (!res.ok) {
       notify("error", res.error ?? "Could not update item.");
       onUpdate(item.id, { done: !done });

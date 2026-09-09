@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
+import { notifyProjectSubscribers } from "@/lib/alerts";
 
 // No revalidatePath here — messages arrive for every viewer live via
 // Supabase Realtime (see chat-client.tsx), so a server-driven refetch on
@@ -29,6 +30,12 @@ export async function sendMessage(projectId: string, id: string, body: string): 
     body: trimmed,
   });
   if (error) return { ok: false, error: error.message };
+
+  await notifyProjectSubscribers(projectId, {
+    subject: "New chat message",
+    body: `${user.email ?? "Someone"} wrote:\n\n${trimmed}`,
+    excludeUserId: user.id,
+  });
 
   return { ok: true, id };
 }

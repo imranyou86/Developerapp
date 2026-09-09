@@ -409,6 +409,24 @@ create table if not exists project_messages (
   created_at timestamptz not null default now()
 );
 
+-- Opt-in email alerts, one row per (project, subscriber) — a chat message,
+-- a checklist/warranty item added or marked fixed, or a warranty item's
+-- review status changing all notify every subscriber on that project (see
+-- lib/alerts.ts's notifyProjectSubscribers, called from the relevant
+-- actions), except whoever caused the change. email is denormalized at
+-- subscribe time (from auth.getUser(), not a join) for the same reason
+-- project_messages.sender_email is — profiles_select only lets a user read
+-- their own profile row, and this needs to read every subscriber's email
+-- from a single server-side query when dispatching, not just the caller's.
+create table if not exists project_alert_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  email text not null,
+  created_at timestamptz not null default now(),
+  unique (project_id, user_id)
+);
+
 -- Shared subcontractor directory — not scoped to a single project, so
 -- anyone can look up a vetted sub while working any construction. Any
 -- signed-in user can read the whole list (see the RLS policy below); only
@@ -506,6 +524,7 @@ create index if not exists idx_project_members_user on project_members (user_id)
 create index if not exists idx_project_invites_project on project_invites (project_id, created_at desc);
 create index if not exists idx_project_invites_token on project_invites (token);
 create index if not exists idx_project_messages_project on project_messages (project_id, created_at);
+create index if not exists idx_project_alert_subscriptions_project on project_alert_subscriptions (project_id);
 create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
 create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
 create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
@@ -608,6 +627,7 @@ alter table tab_permissions enable row level security;
 alter table project_members enable row level security;
 alter table project_invites enable row level security;
 alter table project_messages enable row level security;
+alter table project_alert_subscriptions enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
@@ -823,6 +843,18 @@ create policy "project_messages_insert" on project_messages
   for insert with check (has_project_access(project_id) and auth.uid() = user_id);
 create policy "project_messages_delete" on project_messages
   for delete using (auth.uid() = user_id or is_developer());
+
+-- Self-service only — a user manages just their own subscription row, never
+-- another member's. Dispatching alerts (reading every subscriber's email
+-- for a project at once) happens server-side via the service-role admin
+-- client in lib/alerts.ts, which bypasses RLS entirely, so it never needs
+-- this policy to allow a broader read.
+create policy "project_alert_subscriptions_select" on project_alert_subscriptions
+  for select using (auth.uid() = user_id);
+create policy "project_alert_subscriptions_insert" on project_alert_subscriptions
+  for insert with check (has_project_access(project_id) and auth.uid() = user_id);
+create policy "project_alert_subscriptions_delete" on project_alert_subscriptions
+  for delete using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,

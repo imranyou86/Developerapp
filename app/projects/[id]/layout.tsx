@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ProjectTabs } from "@/app/projects/[id]/project-tabs";
 import { ShareButton } from "@/app/projects/[id]/share-button";
 import { InviteButton } from "@/app/projects/[id]/invite-button";
+import { AlertSubscribeButton } from "@/app/projects/[id]/alert-subscribe-button";
 import { TabAccessGuard } from "@/components/TabAccessGuard";
 import { PageTransition } from "@/components/PageTransition";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
@@ -29,6 +30,15 @@ export default async function ProjectLayout({
 
   if (!project) notFound();
 
+  const { data: alertSub } = currentUser
+    ? await supabase
+        .from("project_alert_subscriptions")
+        .select("id")
+        .eq("project_id", project.id)
+        .eq("user_id", currentUser.id)
+        .maybeSingle()
+    : { data: null };
+
   const roleAllowedSlugs = currentUser ? await getAllowedTabSlugs(currentUser.role) : [];
   // A warranty tracker skips the construction workflow entirely — every
   // role sees only Warranty Request here, regardless of what tab_permissions
@@ -51,6 +61,7 @@ export default async function ProjectLayout({
             {project.address && <p className="text-sm text-blueprint/50">{project.address}</p>}
           </div>
           <div className="flex shrink-0 gap-2">
+            {currentUser && <AlertSubscribeButton projectId={project.id} initialSubscribed={!!alertSub} />}
             {currentUser?.role === "developer" && <InviteButton projectId={project.id} />}
             <ShareButton projectId={project.id} initialShares={shares ?? []} />
           </div>

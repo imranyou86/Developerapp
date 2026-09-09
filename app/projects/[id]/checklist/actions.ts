@@ -6,6 +6,7 @@ import type { ActionResult } from "@/app/projects/actions";
 import type { ChecklistPhase } from "@/lib/types";
 import { CHECKLIST_SEED } from "@/lib/checklist-seed";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
+import { notifyProjectSubscribers } from "@/lib/alerts";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/checklist`);
@@ -29,10 +30,27 @@ export async function ensureChecklistSeeded(projectId: string): Promise<void> {
   }
 }
 
-export async function toggleChecklistItem(projectId: string, itemId: string, done: boolean): Promise<ActionResult> {
+export async function toggleChecklistItem(
+  projectId: string,
+  itemId: string,
+  done: boolean,
+  itemTitle?: string
+): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ done }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
+
+  if (done) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await notifyProjectSubscribers(projectId, {
+      subject: "Checklist item done",
+      body: `"${itemTitle ?? "A checklist item"}" was marked done.`,
+      excludeUserId: user?.id,
+    });
+  }
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -69,6 +87,16 @@ export async function addChecklistItem(
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  await notifyProjectSubscribers(projectId, {
+    subject: "New checklist item",
+    body: `"${title.trim()}" was added to the checklist.`,
+    excludeUserId: user?.id,
+  });
+
   revalidate(projectId);
   return { ok: true, id: data.id };
 }

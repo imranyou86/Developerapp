@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
+import { notifyProjectSubscribers } from "@/lib/alerts";
 import type { WarrantyItemStatus } from "@/lib/types";
 
 // Warranty requests are checklist_items/checklist_photos rows with
@@ -31,14 +32,41 @@ export async function addWarrantyItem(projectId: string, title: string): Promise
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  await notifyProjectSubscribers(projectId, {
+    subject: "New warranty request",
+    body: `A new warranty item was filed: "${title.trim()}"`,
+    excludeUserId: user?.id,
+  });
+
   revalidate(projectId);
   return { ok: true, id: data.id };
 }
 
-export async function toggleWarrantyItem(projectId: string, itemId: string, done: boolean): Promise<ActionResult> {
+export async function toggleWarrantyItem(
+  projectId: string,
+  itemId: string,
+  done: boolean,
+  itemTitle?: string
+): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ done }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
+
+  if (done) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await notifyProjectSubscribers(projectId, {
+      subject: "Warranty item fixed",
+      body: `"${itemTitle ?? "A warranty item"}" was marked fixed.`,
+      excludeUserId: user?.id,
+    });
+  }
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -46,11 +74,25 @@ export async function toggleWarrantyItem(projectId: string, itemId: string, done
 export async function setWarrantyStatus(
   projectId: string,
   itemId: string,
-  status: WarrantyItemStatus
+  status: WarrantyItemStatus,
+  itemTitle?: string
 ): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").update({ status }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
+
+  if (status !== "pending") {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const label = status === "validated" ? "validated" : "marked not covered by warranty";
+    await notifyProjectSubscribers(projectId, {
+      subject: "Warranty item status changed",
+      body: `"${itemTitle ?? "A warranty item"}" was ${label}.`,
+      excludeUserId: user?.id,
+    });
+  }
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -203,6 +245,15 @@ export async function addWarrantyItemsFromReport(
 
   const { error, data } = await supabase.from("checklist_items").insert(rows).select("id, title, comment");
   if (error) return { ok: false, error: error.message };
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  await notifyProjectSubscribers(projectId, {
+    subject: "New warranty requests from an inspection report",
+    body: `${data.length} new warranty item${data.length === 1 ? "" : "s"} added:\n${data.map((it) => `- ${it.title}`).join("\n")}`,
+    excludeUserId: user?.id,
+  });
 
   revalidate(projectId);
   return { ok: true, items: data };
