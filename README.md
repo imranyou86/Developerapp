@@ -37,16 +37,13 @@ NEXT_PUBLIC_SUPABASE_URL=        # Project Settings -> API -> Project URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Project Settings -> API -> anon public key
 SUPABASE_SERVICE_ROLE_KEY=       # Project Settings -> API -> service_role key
 ANTHROPIC_API_KEY=               # console.anthropic.com -> API keys
-RENTCAST_API_KEY=                # rentcast.io -> API keys (Buyers Guide only)
 OPENAI_API_KEY=                  # platform.openai.com -> API keys (optional, Rooms tab image generation only)
 ```
 
-`ANTHROPIC_API_KEY`, `RENTCAST_API_KEY`, and `OPENAI_API_KEY` are server-only
-and must never be exposed with a `NEXT_PUBLIC_` prefix — they're read only
-inside `app/api/*` routes. `RENTCAST_API_KEY` is only needed for the Buyers
-Guide tab (ZIP search + comps/value estimates); `OPENAI_API_KEY` is only
-needed for the Rooms tab's "Generate image (AI)" button — the rest of the
-app works without either.
+`ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are server-only and must never be
+exposed with a `NEXT_PUBLIC_` prefix — they're read only inside `app/api/*`
+routes. `OPENAI_API_KEY` is only needed for the Rooms tab's "Generate image
+(AI)" button — the rest of the app works without it.
 
 ### 3. Run locally
 
@@ -862,9 +859,8 @@ yet; each one only adds what a given feature needed.
   service-role admin client (`lib/supabase/admin.ts`) that looks the token
   up server-side, entirely bypassing RLS for that one path; the browser
   never gets a Supabase key capable of reading other users' data.
-- **Buyers Guide tab** (top-level, not per-project) — search homes for sale
-  by ZIP via the RentCast API, or paste in a specific listing directly. For a
-  specific listing, pasting the URL (Zillow, Redfin, etc.) and clicking
+- **Buyers Guide tab** (top-level, not per-project) — paste in a specific
+  listing to research. Pasting the URL (Zillow, Redfin, etc.) and clicking
   "Look up listing" fills in the address/price/beds/baths/sqft/lot
   size/year built for review before saving — Claude never fetches the URL
   itself (most listing sites block that), it parses the address out of the
@@ -872,16 +868,32 @@ yet; each one only adds what a given feature needed.
   `lookup-property-details`. Manual entry is still there as a fallback if
   the lookup can't find something. Running an analysis estimates construction cost
   from square footage at an editable $/sqft rate, then uses Claude with web
-  search to find comps (recently sold, prioritizing renovated/new-construction
-  comps) and estimate the after-repair/rebuild value (ARV). The buy/pass
-  verdict and profit margin are computed deterministically from those
-  numbers, not left to the model. A pursued deal converts into a real
-  construction project with one click. Every Claude web-search tool call in
-  this app (Buyers Guide, Finish ID's product match, Construction Cost)
-  deliberately uses the **basic** `web_search_20250305` tool type, not the
-  newer sandboxed variant — that one took 60-90+ seconds in testing (routes
-  searches through a server-side Python sandbox), well past a serverless
-  function's timeout.
+  search to find the property's current as-is value AND comps (recently
+  sold, prioritizing renovated/new-construction comps) and estimate the
+  after-repair/rebuild value (ARV). The buy/pass verdict and profit margin
+  are computed deterministically from those numbers, not left to the model
+  — profit deducts an estimated ~7% of ARV for selling costs (agent
+  commission + closing), disclosed in the analysis's "COST ASSUMPTIONS"
+  section. A pursued deal converts into a real construction project with
+  one click. Every Claude web-search tool call in this app (Buyers Guide,
+  Finish ID's product match, Construction Cost) deliberately uses the
+  **basic** `web_search_20250305` tool type, not the newer sandboxed
+  variant — that one took 60-90+ seconds in testing (routes searches
+  through a server-side Python sandbox), well past a serverless function's
+  timeout.
+  - **RentCast removed** — this tab originally used the RentCast API for two
+    things: a ZIP-code "browse homes for sale" grid, and a pre-fetched
+    AVM/comps lookup feeding into the ARV analysis above. RentCast's paid
+    tiers ($74-449/mo past the 50-request free tier) weren't worth carrying
+    for a feature this app already had a cheaper alternative for — Claude
+    web search, the same pattern already used for the "paste a listing URL"
+    lookup, zoning lookup, and property-detail lookup elsewhere in this tab.
+    The ZIP-browse grid is gone entirely (no replacement — paste a listing
+    URL instead), and `evaluate-deal`'s current-value-estimate and comps are
+    now 100% Claude web search rather than a RentCast-plus-web-search blend.
+    `lib/rentcast.ts`, `app/api/rentcast/search/`, and `saveDeal` (the
+    ZIP-grid's save action — `saveManualDeal`, used by the URL/manual flow,
+    is unaffected) are deleted; no `RENTCAST_API_KEY` is needed anymore.
 - **Buyers Guide ground-up rebuild calculator** — the zone field is a
   dropdown of LA (LAMC) residential zones (`lib/laZoning.ts`), with an
   "Other" fallback for anything not listed. "Look up %" grounds a

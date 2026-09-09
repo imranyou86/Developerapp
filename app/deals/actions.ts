@@ -3,42 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createProject, type ActionResult } from "@/app/projects/actions";
-import type { RentcastListing } from "@/lib/rentcast";
 import type { DealStatus } from "@/lib/types";
-
-export async function saveDeal(listing: RentcastListing): Promise<ActionResult> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
-
-  const address = listing.addressLine1 ?? listing.formattedAddress;
-  if (!address) return { ok: false, error: "Listing has no address." };
-
-  const { data, error } = await supabase
-    .from("deals")
-    .insert({
-      user_id: user.id,
-      address,
-      city: listing.city ?? null,
-      state: listing.state ?? null,
-      zip_code: listing.zipCode ?? "",
-      list_price: listing.price ?? null,
-      beds: listing.bedrooms ?? null,
-      baths: listing.bathrooms ?? null,
-      sqft: listing.squareFootage ?? null,
-      lot_size: listing.lotSize ?? null,
-      year_built: listing.yearBuilt ?? null,
-      raw_listing: listing,
-    })
-    .select("id")
-    .single();
-
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/deals");
-  return { ok: true, id: data.id };
-}
 
 export interface ManualDealInput {
   address: string;

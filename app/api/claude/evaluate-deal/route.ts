@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
-import { getValueEstimate } from "@/lib/rentcast";
 import type { DealComp, DealScope, DealVerdict } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -25,6 +24,7 @@ interface EvaluateDealRequest {
 }
 
 interface ArvResult {
+  current_value_estimate: number | null;
   arv_estimate: number;
   arv_low: number;
   arv_high: number;
@@ -41,19 +41,23 @@ worth buying to renovate or rebuild, by estimating its ARV — the After-Repair/
 would sell for once the described construction work is complete — and giving a comprehensive,
 specific analysis of why it is or isn't a good deal.
 
-You'll be given the property's listing details, an automated value estimate and any comparable
-sales already available, and a description of the planned construction scope and budget. Search
-the web for additional comparable sales in the same area — prioritize recently sold homes that
-are already renovated, remodeled, or newly built, since those are the best comps for an ARV
-estimate (not other as-is fixer-uppers) — and for general neighborhood/market trend context.
+You'll be given the property's listing details and a description of the planned construction
+scope and budget. Use the web_search tool yourself for everything else — there is no pre-fetched
+automated valuation or comp data provided to you:
+1. Search for the property's current as-is estimated value (an automated estimate from a listing
+   site, or recent nearby comps for a similar unrenovated home) — this grounds current_value_estimate.
+2. Search for additional comparable sales in the same area — prioritize recently sold homes that
+   are already renovated, remodeled, or newly built, since those are the best comps for an ARV
+   estimate (not other as-is fixer-uppers) — and for general neighborhood/market trend context.
 
 Return:
+- current_value_estimate: the property's current as-is value in USD, or null if you genuinely
+  can't find or estimate one
 - arv_estimate: your best point estimate of the completed home's value, in USD
 - arv_low / arv_high: a reasonable range around that estimate
-- comps: up to 6 comparable sales you found or were given, each with: address, sold_price
-  (number or null), sold_date (string or null), sqft (number or null), distance_miles (number or
-  null), source ("rentcast" if it came from the provided data, "web_search" if you found it),
-  and url (string or null)
+- comps: up to 6 comparable sales you found, each with: address, sold_price (number or null),
+  sold_date (string or null), sqft (number or null), distance_miles (number or null), source
+  (always "web_search"), and url (string or null)
 - market_analysis: 2-4 sentences on the specific neighborhood/submarket — price trends (rising,
   flat, softening), inventory levels, what kind of buyer is active there
 - comp_analysis: 2-4 sentences explicitly walking through how the comps you found support (or
@@ -74,7 +78,7 @@ Be honest and specific throughout, grounded in what you actually found — never
 optimistic, and say plainly when data is thin or a comp is a stretch.
 
 Respond with ONLY a JSON object, no prose, matching this shape exactly:
-{ "arv_estimate": number, "arv_low": number, "arv_high": number, "comps": [ { "address": string, "sold_price": number | null, "sold_date": string | null, "sqft": number | null, "distance_miles": number | null, "source": "rentcast" | "web_search", "url": string | null } ], "market_analysis": string, "comp_analysis": string, "risk_factors": string[], "upside_factors": string[], "bottom_line": string }`;
+{ "current_value_estimate": number | null, "arv_estimate": number, "arv_low": number, "arv_high": number, "comps": [ { "address": string, "sold_price": number | null, "sold_date": string | null, "sqft": number | null, "distance_miles": number | null, "source": "web_search", "url": string | null } ], "market_analysis": string, "comp_analysis": string, "risk_factors": string[], "upside_factors": string[], "bottom_line": string }`;
 
 function computeVerdict(profitMarginPct: number): DealVerdict {
   if (profitMarginPct >= 20) return "good_deal";
@@ -97,26 +101,6 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Best-effort — an address RentCast can't resolve shouldn't block the
-    // whole evaluation, since web search can still ground an ARV estimate.
-    let currentValueEstimate: number | null = null;
-    let rentcastComps: DealComp[] = [];
-    try {
-      const avm = await getValueEstimate(body.address);
-      currentValueEstimate = avm.price;
-      rentcastComps = avm.comparables.slice(0, 6).map((c) => ({
-        address: c.formattedAddress ?? "Unknown address",
-        sold_price: c.price ?? null,
-        sold_date: c.removedDate ?? c.listedDate ?? null,
-        sqft: c.squareFootage ?? null,
-        distance_miles: c.distance ?? null,
-        source: "rentcast",
-        url: null,
-      }));
-    } catch (avmErr) {
-      console.warn("RentCast AVM lookup failed, continuing without it:", avmErr);
-    }
-
     const anthropic = getAnthropicClient();
     const targetSqft = body.scope === "ground_up" ? body.targetSqft : body.sqft;
     const query = [
@@ -132,9 +116,6 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
       body.yearBuilt && `Year built: ${body.yearBuilt}`,
       `Planned scope: ${body.scope === "ground_up" ? "full ground-up rebuild" : "remodel"} — ${body.scopeDescription}`,
       `Construction budget: $${body.constructionBudget.toLocaleString()} (at $${body.costPerSqft}/sqft × ${(targetSqft ?? 0).toLocaleString()} sqft)`,
-      currentValueEstimate && `Current as-is automated value estimate: $${currentValueEstimate.toLocaleString()}`,
-      rentcastComps.length > 0 &&
-        `Known comparable sales:\n${rentcastComps.map((c) => `- ${c.address}: ${c.sold_price ? `$${c.sold_price.toLocaleString()}` : "price unknown"}${c.sqft ? `, ${c.sqft} sqft` : ""}`).join("\n")}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -151,7 +132,10 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
       output_config: { effort: "low" },
       // Basic search tool (not the sandboxed 20260209 variant) — that one
       // took 60-90s+ in testing, well past a serverless function's timeout.
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+      // max_uses raised from 3 to 5 now that Claude has to find the
+      // current-value estimate itself too, not just ARV comps — that used
+      // to be pre-fetched from RentCast.
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
       messages: [{ role: "user", content: `Evaluate this property:\n\n${query}` }],
     });
 
@@ -178,14 +162,6 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
     const profitMarginPct = totalCost > 0 ? (estimatedProfit / totalCost) * 100 : 0;
     const verdict = computeVerdict(profitMarginPct);
 
-    // Merge RentCast comps (already fetched) ahead of whatever Claude cites,
-    // deduping by address.
-    const seen = new Set(rentcastComps.map((c) => c.address.toLowerCase()));
-    const mergedComps = [
-      ...rentcastComps,
-      ...arv.comps.filter((c) => !seen.has(c.address.toLowerCase())),
-    ].slice(0, 8);
-
     const reasoning = [
       `MARKET CONTEXT\n${arv.market_analysis}`,
       `COMP ANALYSIS\n${arv.comp_analysis}`,
@@ -196,7 +172,7 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
     ].join("\n\n");
 
     return NextResponse.json({
-      current_value_estimate: currentValueEstimate,
+      current_value_estimate: arv.current_value_estimate,
       arv_estimate: arv.arv_estimate,
       arv_low: arv.arv_low,
       arv_high: arv.arv_high,
@@ -205,7 +181,7 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
       profit_margin_pct: profitMarginPct,
       verdict,
       reasoning,
-      comps: mergedComps,
+      comps: arv.comps.slice(0, 8),
     });
   } catch (err) {
     console.error("evaluate-deal failed", err);

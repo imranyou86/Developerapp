@@ -6,10 +6,9 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { deleteDeal, saveDeal, saveManualDeal } from "@/app/deals/actions";
+import { deleteDeal, saveManualDeal } from "@/app/deals/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { stripLeadingZero } from "@/lib/numberInput";
-import type { RentcastListing } from "@/lib/rentcast";
 import type { DealStatus } from "@/lib/types";
 
 interface DealRow {
@@ -53,14 +52,10 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
   const router = useRouter();
-  const [zip, setZip] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<RentcastListing[] | null>(null);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [deals, setDeals] = useState<DealRow[]>(initialDeals);
   const [deleting, setDeleting] = useState<DealRow | null>(null);
 
-  const [showManual, setShowManual] = useState(false);
+  const [showManual, setShowManual] = useState(true);
   const [manual, setManual] = useState({
     address: "",
     city: "",
@@ -151,84 +146,15 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
     }
   }
 
-  const savedAddresses = new Set(deals.map((d) => d.address.toLowerCase()));
-
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!/^\d{5}$/.test(zip)) {
-      notify("error", "Enter a valid 5-digit ZIP code.");
-      return;
-    }
-    setSearching(true);
-    setResults(null);
-    try {
-      const res = await fetchWithRetry(`/api/rentcast/search?zip=${zip}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Search failed.");
-      setResults(json.listings ?? []);
-      if ((json.listings ?? []).length === 0) {
-        notify("success", "No active listings found for that ZIP.");
-      }
-    } catch (err) {
-      notify("error", err instanceof Error ? err.message : "Search failed.");
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function handleSave(listing: RentcastListing) {
-    const res = await saveDeal(listing);
-    if (!res.ok || !res.id) {
-      notify("error", res.error ?? "Could not save deal.");
-      return;
-    }
-    setSavedIds((prev) => new Set([...prev, listing.id]));
-    setDeals((prev) => [
-      {
-        id: res.id!,
-        address: listing.addressLine1 ?? listing.formattedAddress,
-        city: listing.city ?? null,
-        state: listing.state ?? null,
-        zip_code: listing.zipCode ?? "",
-        list_price: listing.price ?? null,
-        beds: listing.bedrooms ?? null,
-        baths: listing.bathrooms ?? null,
-        sqft: listing.squareFootage ?? null,
-        year_built: listing.yearBuilt ?? null,
-        status: "researching",
-        project_id: null,
-        created_at: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    notify("success", "Saved — see it below to analyze the deal.");
-  }
-
   return (
     <div className="space-y-8">
-      <form onSubmit={handleSearch} className="card flex flex-wrap items-end gap-3 p-6">
-        <div className="flex-1">
-          <label className="label">ZIP code</label>
-          <input
-            className="input"
-            value={zip}
-            onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
-            placeholder="90210"
-            inputMode="numeric"
-          />
-        </div>
-        <button type="submit" className="btn-amber" disabled={searching}>
-          {searching ? "Searching…" : "Search homes for sale"}
-        </button>
-      </form>
-
       <div className="card p-6">
         <button
           type="button"
           className="flex w-full items-center justify-between text-left"
           onClick={() => setShowManual((v) => !v)}
         >
-          <span className="font-medium text-blueprint-dark">Have a specific listing from Zillow (or anywhere else)?</span>
+          <span className="font-medium text-blueprint-dark">Add a property to research</span>
           <span className="text-blueprint/40">{showManual ? "▾" : "▸"}</span>
         </button>
         {showManual && (
@@ -363,53 +289,10 @@ export function DealsClient({ initialDeals }: { initialDeals: DealRow[] }) {
         )}
       </div>
 
-      {results && (
-        <div>
-          <h2 className="mb-3 text-lg font-semibold text-blueprint-dark">
-            {results.length} home{results.length === 1 ? "" : "s"} for sale
-          </h2>
-          {results.length === 0 ? (
-            <p className="text-sm text-blueprint/50">Nothing found for that ZIP right now.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((listing, i) => {
-                const address = listing.addressLine1 ?? listing.formattedAddress;
-                const alreadySaved = savedIds.has(listing.id) || savedAddresses.has(address.toLowerCase());
-                return (
-                  <div
-                    key={listing.id}
-                    className="card card-hover animate-fade-in-up p-4"
-                    style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
-                  >
-                    <p className="font-medium text-blueprint-dark">{address}</p>
-                    <p className="text-xs text-blueprint/50">
-                      {listing.city}, {listing.state} {listing.zipCode}
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-blueprint-dark">{currency(listing.price ?? null)}</p>
-                    <p className="text-xs text-blueprint/60">
-                      {listing.bedrooms ?? "—"} bd · {listing.bathrooms ?? "—"} ba ·{" "}
-                      {listing.squareFootage ? `${listing.squareFootage.toLocaleString()} sqft` : "sqft n/a"}
-                      {listing.yearBuilt && ` · built ${listing.yearBuilt}`}
-                    </p>
-                    <button
-                      className="btn-outline mt-3 w-full text-xs"
-                      onClick={() => handleSave(listing)}
-                      disabled={alreadySaved}
-                    >
-                      {alreadySaved ? "Saved" : "Save & analyze"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="space-y-8">
         {deals.length === 0 ? (
           <div className="card p-10 text-center text-sm text-blueprint/60">
-            Search a ZIP code above and save a listing to start evaluating it.
+            Add a property above to start evaluating it.
           </div>
         ) : (
           DEAL_SECTIONS.map(({ status, label }) => {
