@@ -163,8 +163,18 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
 
     const arv = extractJson<ArvResult>(text);
 
+    // Applied to the completed-value estimate, not the purchase price — this is the standard
+    // rule-of-thumb flip/rebuild calculators use for what it actually costs to cash out the
+    // finished home (agent commission + closing costs), previously left out of this calculation
+    // entirely despite the UI captioning the result "before ... selling commissions" — the
+    // caption was accurate, but meant the verdict itself (good/marginal/pass) was computed off
+    // gross, not real, profit. Financing/holding costs during construction still aren't modeled
+    // here — this app doesn't know the buyer's loan terms or timeline — so that gap remains and
+    // stays disclosed.
+    const SELLING_COST_PCT = 7;
     const totalCost = (body.listPrice ?? 0) + body.constructionBudget;
-    const estimatedProfit = arv.arv_estimate - totalCost;
+    const sellingCosts = Math.round(arv.arv_estimate * (SELLING_COST_PCT / 100));
+    const estimatedProfit = arv.arv_estimate - totalCost - sellingCosts;
     const profitMarginPct = totalCost > 0 ? (estimatedProfit / totalCost) * 100 : 0;
     const verdict = computeVerdict(profitMarginPct);
 
@@ -181,6 +191,7 @@ area depends on local zoning/FAR/setbacks, which you don't need to verify)`,
       `COMP ANALYSIS\n${arv.comp_analysis}`,
       `RISK FACTORS\n${arv.risk_factors.map((r) => `• ${r}`).join("\n")}`,
       `UPSIDE FACTORS\n${arv.upside_factors.length > 0 ? arv.upside_factors.map((u) => `• ${u}`).join("\n") : "None identified — this is a risk-dominant deal."}`,
+      `COST ASSUMPTIONS\nEstimated profit deducts ~${SELLING_COST_PCT}% of the completed value ($${sellingCosts.toLocaleString()}) for selling costs (agent commission + closing costs). Financing/holding costs during construction are not modeled.`,
       `BOTTOM LINE\n${arv.bottom_line}`,
     ].join("\n\n");
 

@@ -573,6 +573,37 @@ yet; each one only adds what a given feature needed.
   to compare — swapping away from the AI-recommended tier falls back to a
   deterministic sqft × fixed-band calculation rather than a second AI
   call.
+  - **Data-accuracy pass** — an audit of every AI/API data-retrieval path
+    in the app surfaced two real gaps here specifically (the other ~11
+    routes were already solid: web-search-grounded, honest confidence
+    levels, "never invent a number"). First: `cost_per_sqft` and
+    `contingency_pct` were already clamped server-side to sane bands, but
+    `total_sqft` — the single biggest multiplier in every total below it —
+    had zero guardrail; it's now checked for finite/positive and clamped
+    to a believable 100-50,000 sqft range before anything is computed from
+    it. Second: the category `breakdown`'s percentages were only ever
+    *asked* of Claude ("should sum to ~100"), never enforced, so the
+    displayed per-category dollar amounts could silently fail to add up to
+    the shown total — they're now normalized to actually sum to 100 before
+    being priced.
+  - `lib/anthropic.ts`'s `extractJson` (which every one of these routes
+    depends on to pull JSON out of Claude's response) found the JSON's end
+    by counting `{`/`}` characters without tracking whether it was inside
+    a quoted string — a stray brace inside a free-text field (a "notes" or
+    "analysis" paragraph) could throw off the count. Now string-aware, the
+    same way `escapeControlCharsInStrings` in the same file already was.
+  - **Buyers Guide's profit math** (`app/api/claude/evaluate-deal/route.ts`)
+    computed `estimated_profit`/`profit_margin_pct` — and so the good/
+    marginal/pass verdict itself — off gross numbers only, with the actual
+    omission (selling commissions, closing costs) disclosed only as a UI
+    caption next to the figure, not reflected in the number or the verdict
+    it drove. Now deducts a standard ~7% of the completed value (agent
+    commission + closing costs, the same rule of thumb flip/rebuild
+    calculators use) before computing profit and verdict, with the
+    deduction itself spelled out in a new "COST ASSUMPTIONS" section of
+    the analysis. Financing/holding costs during construction still aren't
+    modeled — this app doesn't know the buyer's loan terms or timeline —
+    so the UI caption now scopes its disclaimer to just that remaining gap.
 - **Landscape** (top-level, next to Construction Cost — `landscape` tab,
   same project-picker shape as Interior Design/Construction Cost) — upload a
   photo of the house's exterior, check off which components to add (Grass /

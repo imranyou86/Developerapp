@@ -95,11 +95,26 @@ export function extractJson<T>(text: string): T {
   const candidate = raw.slice(start);
   let depth = 0;
   let end = -1;
+  let inString = false;
+  let escaped = false;
   const open = candidate[0];
   const close = open === "[" ? "]" : "}";
+  // Track whether we're inside a quoted string so a stray brace character
+  // in a free-text field (a "notes"/"analysis" paragraph, a URL, ...)
+  // doesn't throw off the depth count and truncate or misparse the JSON.
   for (let i = 0; i < candidate.length; i++) {
-    if (candidate[i] === open) depth++;
-    else if (candidate[i] === close) {
+    const ch = candidate[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === open) {
+      depth++;
+    } else if (ch === close) {
       depth--;
       if (depth === 0) {
         end = i;

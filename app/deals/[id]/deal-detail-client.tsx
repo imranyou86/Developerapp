@@ -709,7 +709,7 @@ function AnalysisCard({ analysis, listPrice }: { analysis: DealAnalysis; listPri
         <span className={`font-semibold ${(analysis.estimated_profit ?? 0) >= 0 ? "text-sage-dark" : "text-red-600"}`}>
           {currency(analysis.estimated_profit)}
         </span>
-        <span className="ml-1 text-xs text-blueprint/50">(before closing costs, selling commissions, and financing)</span>
+        <span className="ml-1 text-xs text-blueprint/50">(net of ~7% estimated selling costs; before financing/holding costs)</span>
       </p>
 
       {analysis.reasoning && <ReasoningSections text={analysis.reasoning} />}

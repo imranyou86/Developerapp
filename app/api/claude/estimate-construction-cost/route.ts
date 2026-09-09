@@ -184,6 +184,15 @@ export async function POST(req: Request) {
 
     const result = extractJson<CostEstimateResult>(text);
 
+    // Sanity-guard total_sqft the same way cost_per_sqft is guarded against straying from its
+    // tier band — it's the single biggest multiplier in every total below, so a misread
+    // dimension or unit mixup here would otherwise propagate straight through unchecked.
+    const rawTotalSqft = Number(result.total_sqft);
+    if (!Number.isFinite(rawTotalSqft) || rawTotalSqft <= 0) {
+      throw new Error("Claude returned an invalid total_sqft.");
+    }
+    const totalSqft = Math.min(Math.max(rawTotalSqft, 100), 50_000);
+
     // Enforce the fixed $/sqft band for whatever tier Claude picked, rather than trusting its
     // own arithmetic to stay in range — the tier's dollar bands are a product decision, not a
     // suggestion.
@@ -194,9 +203,9 @@ export async function POST(req: Request) {
     const costPerSqftMid = clampToBand(result.cost_per_sqft_mid);
     const costPerSqftHigh = clampToBand(result.cost_per_sqft_high);
 
-    const totalCostLow = result.total_sqft * costPerSqftLow;
-    const totalCostMid = result.total_sqft * costPerSqftMid;
-    const totalCostHigh = result.total_sqft * costPerSqftHigh;
+    const totalCostLow = totalSqft * costPerSqftLow;
+    const totalCostMid = totalSqft * costPerSqftMid;
+    const totalCostHigh = totalSqft * costPerSqftHigh;
 
     // The predicted figure is allowed to land anywhere sane near the tier band (it's the "most
     // accurate single number", not a band edge) but is still guarded against a wild outlier, and
@@ -206,17 +215,26 @@ export async function POST(req: Request) {
       result.cost_tier === "high" ? band.high * 1.5 : band.high * 1.15
     );
     const contingencyPct = Math.min(Math.max(result.contingency_pct, 0), 20);
-    const predictedTotalCost = Math.round(result.total_sqft * predictedCostPerSqft * (1 + contingencyPct / 100));
+    const predictedTotalCost = Math.round(totalSqft * predictedCostPerSqft * (1 + contingencyPct / 100));
 
-    const breakdown = result.breakdown.map((line) => ({
-      category: line.category,
-      pct: line.pct,
-      description: line.description,
-      cost: Math.round(totalCostMid * (line.pct / 100)),
-    }));
+    // Normalize the category percentages to actually sum to 100 before pricing them — Claude is
+    // only ever asked to make them "sum to ~100", not guaranteed to, and unlike cost_per_sqft/
+    // contingency above this was previously never enforced, so the displayed per-category dollar
+    // amounts could silently fail to add up to totalCostMid.
+    const rawPct = result.breakdown.map((line) => Math.max(Number(line.pct) || 0, 0));
+    const pctSum = rawPct.reduce((sum, pct) => sum + pct, 0);
+    const breakdown = result.breakdown.map((line, i) => {
+      const normalizedPct = pctSum > 0 ? (rawPct[i] / pctSum) * 100 : 0;
+      return {
+        category: line.category,
+        pct: normalizedPct,
+        description: line.description,
+        cost: Math.round(totalCostMid * (normalizedPct / 100)),
+      };
+    });
 
     return NextResponse.json({
-      total_sqft: result.total_sqft,
+      total_sqft: totalSqft,
       stories: result.stories,
       quality_tier: result.quality_tier,
       cost_tier: result.cost_tier,
