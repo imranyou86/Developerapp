@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import { notifyProjectSubscribers } from "@/lib/alerts";
+import { logActivity } from "@/lib/activityLog";
 import type { WarrantyItemStatus } from "@/lib/types";
 
 // Warranty requests are checklist_items/checklist_photos rows with
@@ -158,13 +159,23 @@ export async function updateWarrantyComment(projectId: string, itemId: string, c
   return { ok: true };
 }
 
-export async function deleteWarrantyItem(projectId: string, itemId: string): Promise<ActionResult> {
+export async function deleteWarrantyItem(projectId: string, itemId: string, itemTitle?: string): Promise<ActionResult> {
   const guard = await requireCanManageWarrantyItems();
   if (!guard.ok) return { ok: false, error: guard.error };
 
   const supabase = createClient();
   const { error } = await supabase.from("checklist_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "warranty_item.deleted",
+    entityType: "checklist_items",
+    entityId: itemId,
+    detail: itemTitle ? `Deleted warranty item "${itemTitle}"` : "Deleted a warranty item",
+  });
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -273,6 +284,15 @@ export async function deleteInspectionReport(projectId: string, reportId: string
   const { error } = await supabase.from("inspection_reports").delete().eq("id", reportId);
   if (error) return { ok: false, error: error.message };
   await removeProjectFile(supabase, "inspection_reports", reportId);
+
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "inspection_report.deleted",
+    entityType: "inspection_reports",
+    entityId: reportId,
+  });
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -397,6 +417,15 @@ export async function approveWarrantyItemRequest(projectId: string, requestId: s
     .eq("id", requestId);
   if (updateError) return { ok: false, error: updateError.message };
 
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "warranty_item_request.approved",
+    entityType: "warranty_item_requests",
+    entityId: requestId,
+    detail: `Approved "${request.title}"`,
+  });
+
   await notifyProjectSubscribers(projectId, {
     subject: "Warranty request approved",
     body: `"${request.title}" was approved and added to the warranty list.`,
@@ -425,6 +454,15 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
     .update({ status: "rejected", reviewed_by: guard.userId, reviewed_at: new Date().toISOString() })
     .eq("id", requestId);
   if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "warranty_item_request.rejected",
+    entityType: "warranty_item_requests",
+    entityId: requestId,
+    detail: `Rejected "${request.title}"`,
+  });
 
   await notifyProjectSubscribers(projectId, {
     subject: "Warranty request rejected",

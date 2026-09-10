@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSiteOrigin } from "@/lib/site";
+import { logActivity } from "@/lib/activityLog";
 import type { ActionResult } from "@/app/projects/actions";
 import type { UserRole } from "@/lib/types";
 
@@ -82,25 +83,45 @@ export async function sendProjectInvite(
   return { ok: true, id: data.id, token: data.token, emailSent, emailNote };
 }
 
-export async function revokeInvite(inviteId: string, projectId: string): Promise<ActionResult> {
+export async function revokeInvite(inviteId: string, projectId: string, email?: string): Promise<ActionResult> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };
 
   const supabase = createClient();
   const { error } = await supabase.from("project_invites").update({ status: "revoked" }).eq("id", inviteId);
   if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: auth.userId,
+    action: "project_invite.revoked",
+    entityType: "project_invites",
+    entityId: inviteId,
+    detail: email ? `Revoked the invite sent to ${email}` : "Revoked a project invite",
+  });
+
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/admin");
   return { ok: true };
 }
 
-export async function removeMember(memberId: string, projectId: string): Promise<ActionResult> {
+export async function removeMember(memberId: string, projectId: string, email?: string): Promise<ActionResult> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };
 
   const supabase = createClient();
   const { error } = await supabase.from("project_members").delete().eq("id", memberId);
   if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: auth.userId,
+    action: "project_member.removed",
+    entityType: "project_members",
+    entityId: memberId,
+    detail: email ? `Removed ${email} from this construction` : "Removed a project member",
+  });
+
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/admin");
   return { ok: true };

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
+import { logActivity } from "@/lib/activityLog";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/bids`);
@@ -67,11 +68,27 @@ export async function saveBid(projectId: string, input: SaveBidInput): Promise<A
 export async function setBidStatus(
   projectId: string,
   bidId: string,
-  status: "pending" | "accepted" | "declined"
+  status: "pending" | "accepted" | "declined",
+  contractor?: string
 ): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("bids").update({ status }).eq("id", bidId);
   if (error) return { ok: false, error: error.message };
+
+  if (status === "accepted" || status === "declined") {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await logActivity(supabase, {
+      projectId,
+      userId: user?.id ?? null,
+      action: status === "accepted" ? "bid.accepted" : "bid.declined",
+      entityType: "bids",
+      entityId: bidId,
+      detail: contractor ? `${status === "accepted" ? "Accepted" : "Declined"} bid from ${contractor}` : undefined,
+    });
+  }
+
   revalidate(projectId);
   return { ok: true };
 }
@@ -106,11 +123,24 @@ export async function saveBidEvaluation(
   return { ok: true };
 }
 
-export async function deleteBid(projectId: string, bidId: string): Promise<ActionResult> {
+export async function deleteBid(projectId: string, bidId: string, contractor?: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("bids").delete().eq("id", bidId);
   if (error) return { ok: false, error: error.message };
   await removeProjectFile(supabase, "bids", bidId);
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  await logActivity(supabase, {
+    projectId,
+    userId: user?.id ?? null,
+    action: "bid.deleted",
+    entityType: "bids",
+    entityId: bidId,
+    detail: contractor ? `Deleted bid from ${contractor}` : "Deleted a bid",
+  });
+
   revalidate(projectId);
   return { ok: true };
 }
