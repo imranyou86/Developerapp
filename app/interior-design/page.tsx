@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { InteriorDesignSections } from "@/app/interior-design/interior-design-sections";
@@ -103,7 +104,7 @@ async function loadPlanPages(projectId: string) {
     .eq("project_id", projectId)
     .eq("is_layout", true)
     .order("sort_order");
-  return data ?? [];
+  return signRowsUrl(data ?? [], "storage_url");
 }
 
 async function loadDesigns(projectId: string) {
@@ -115,7 +116,8 @@ async function loadDesigns(projectId: string) {
     )
     .eq("project_id", projectId)
     .order("created_at", { ascending: false });
-  return data ?? [];
+  const withPhotos = await signRowsUrl(data ?? [], "original_photo_url");
+  return signRowsUrl(withPhotos, "generated_image_url");
 }
 
 async function loadFinishScans(): Promise<{ id: string; storage_url: string; label: string | null; results: IdentifiedFinish[]; created_at: string }[]> {
@@ -124,5 +126,5 @@ async function loadFinishScans(): Promise<{ id: string; storage_url: string; lab
     .from("finish_scans")
     .select("id, storage_url, label, results, created_at")
     .order("created_at", { ascending: false });
-  return data ?? [];
+  return signRowsUrl(data ?? [], "storage_url");
 }

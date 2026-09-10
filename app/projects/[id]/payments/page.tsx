@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { PaymentsClient } from "@/app/projects/[id]/payments/payments-client";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ export default async function PaymentsPage({ params }: { params: { id: string } 
     .eq("status", "accepted")
     .order("uploaded_at", { ascending: false });
 
+  const signedBids = await signRowsUrl(bids ?? [], "file_url");
+
   return (
     <div>
       {error && (
@@ -22,7 +25,7 @@ export default async function PaymentsPage({ params }: { params: { id: string } 
           Could not load payments: {error.message}
         </div>
       )}
-      <PaymentsClient projectId={params.id} initialBids={bids ?? []} />
+      <PaymentsClient projectId={params.id} initialBids={signedBids} />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
 import type { UserRole, WarrantyItemRequest, WarrantyItemStatus } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
 
@@ -427,8 +428,11 @@ function InspectionReportsSection({
         });
         if (uploadError) throw new Error(uploadError.message);
 
-        const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
-        const res = await addInspectionReport(projectId, file.name, pub.publicUrl);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("project-files")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+        const res = await addInspectionReport(projectId, file.name, pub.signedUrl);
         if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save report.");
 
         onAdd({
@@ -436,7 +440,7 @@ function InspectionReportsSection({
           project_id: projectId,
           checklist_item_id: null,
           file_name: file.name,
-          storage_url: pub.publicUrl,
+          storage_url: pub.signedUrl,
           created_at: new Date().toISOString(),
         });
         notify("success", `Uploaded "${file.name}".`);
@@ -509,8 +513,11 @@ function InspectionReportsSection({
                 contentType: "image/png",
               });
               if (imgUploadError) throw new Error(imgUploadError.message);
-              const { data: imgPub } = supabase.storage.from("project-files").getPublicUrl(imgPath);
-              pageImageUrls.push(imgPub.publicUrl);
+              const { data: imgPub, error: imgPubSignError } = await supabase.storage
+                .from("project-files")
+                .createSignedUrl(imgPath, SIGNED_URL_TTL_SECONDS);
+              if (imgPubSignError || !imgPub) throw new Error(imgPubSignError?.message ?? "Could not get a URL for the uploaded file.");
+              pageImageUrls.push(imgPub.signedUrl);
             }
             requestBody = { pageImageUrls };
           }
@@ -736,12 +743,15 @@ function WarrantyItem({
         });
         if (uploadError) throw new Error(uploadError.message);
 
-        const { data: pub } = supabase.storage.from("checklist-photos").getPublicUrl(path);
-        const res = await addWarrantyPhoto(projectId, item.id, pub.publicUrl, item.title);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("checklist-photos")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+        const res = await addWarrantyPhoto(projectId, item.id, pub.signedUrl, item.title);
         if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
 
         onUpdate(item.id, {
-          checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.publicUrl }],
+          checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.signedUrl }],
         });
         notify("success", "Photo added.");
       });
@@ -902,7 +912,7 @@ function WarrantyItem({
           danger
           onCancel={() => setConfirmDelete(false)}
           onConfirm={async () => {
-            const res = await deleteWarrantyItem(projectId, item.id);
+            const res = await deleteWarrantyItem(projectId, item.id, item.title);
             if (!res.ok) {
               notify("error", res.error ?? "Could not remove item.");
             } else {

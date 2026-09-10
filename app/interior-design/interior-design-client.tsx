@@ -17,6 +17,7 @@ import { stripLeadingZero } from "@/lib/numberInput";
 import { getFixturesForRoomType } from "@/lib/fixtureCatalog";
 import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
 import type { InteriorDesign, PlacedFixture } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 interface RoomOption {
   id: string;
@@ -185,8 +186,11 @@ export function InteriorDesignClient({
     });
     if (error) throw new Error(error.message);
 
-    const { data: pub } = supabase.storage.from("interior-design-photos").getPublicUrl(path);
-    return pub.publicUrl;
+    const { data: pub, error: pubSignError } = await supabase.storage
+      .from("interior-design-photos")
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+    return pub.signedUrl;
   }
 
   async function handleGenerate(e: React.FormEvent) {

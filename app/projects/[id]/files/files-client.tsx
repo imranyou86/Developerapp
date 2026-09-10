@@ -7,10 +7,11 @@ import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FileViewerModal, isImage, isPdf } from "@/components/FileViewer";
-import { deleteProjectFile, deleteProjectFiles, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
+import { deleteProjectFile, deleteProjectFiles, loadMoreProjectFiles, updateFileNotes, uploadProjectFile } from "@/app/projects/[id]/files/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { FileCategory, ProjectFile } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 const CATEGORY_LABEL: Record<FileCategory, string> = {
   plan: "Plan",
@@ -97,11 +98,21 @@ function groupPlanPages(files: ProjectFile[]): (ProjectFile | FileGroup)[] {
   return items;
 }
 
-export function FilesClient({ projectId, initialFiles }: { projectId: string; initialFiles: ProjectFile[] }) {
+export function FilesClient({
+  projectId,
+  initialFiles,
+  initialHasMore,
+}: {
+  projectId: string;
+  initialFiles: ProjectFile[];
+  initialHasMore: boolean;
+}) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
   const uploadTaskKey = `files-upload:${projectId}`;
   const [files, setFiles] = useState<ProjectFile[]>(initialFiles);
+  const [hasMoreFiles, setHasMoreFiles] = useState(initialHasMore);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = usePersistedSelection(`files-selected:${projectId}`, () => new Set());
   const [categoryFilter, setCategoryFilter] = useState<FileCategory | "all">("all");
   const [downloading, setDownloading] = useState(false);
@@ -229,6 +240,21 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
     }
   }
 
+  async function handleLoadMore() {
+    if (files.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldestLoaded = files[files.length - 1].created_at;
+      const { files: more, hasMore } = await loadMoreProjectFiles(projectId, oldestLoaded);
+      setFiles((prev) => [...prev, ...more]);
+      setHasMoreFiles(hasMore);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not load more files.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   async function handleDeleteSelected() {
     setBulkDeleting(true);
     const res = await deleteProjectFiles(projectId, deletableSelectedIds);
@@ -269,15 +295,18 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
         });
         if (uploadError) throw new Error(uploadError.message);
 
-        const { data: pub } = supabase.storage.from("project-files").getPublicUrl(path);
-        const res = await uploadProjectFile(projectId, pub.publicUrl, file.name, uploadCategory);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("project-files")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+        const res = await uploadProjectFile(projectId, pub.signedUrl, file.name, uploadCategory);
         if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save file.");
 
         setFiles((prev) => [
           {
             id: res.id!,
             project_id: projectId,
-            storage_url: pub.publicUrl,
+            storage_url: pub.signedUrl,
             file_name: file.name,
             category: uploadCategory,
             source_table: null,
@@ -463,6 +492,14 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
             </div>
           </div>
           )}
+
+          {hasMoreFiles && (
+            <div className="text-center">
+              <button className="btn-ghost text-xs" onClick={handleLoadMore} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : "Load more files"}
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -475,7 +512,7 @@ export function FilesClient({ projectId, initialFiles }: { projectId: string; in
         onCancel={() => setDeleting(null)}
         onConfirm={async () => {
           if (!deleting) return;
-          const res = await deleteProjectFile(projectId, deleting.id);
+          const res = await deleteProjectFile(projectId, deleting.id, deleting.file_name);
           if (!res.ok) {
             notify("error", res.error ?? "Could not remove file.");
           } else {

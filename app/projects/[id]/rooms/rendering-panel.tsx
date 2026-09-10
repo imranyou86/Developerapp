@@ -16,6 +16,7 @@ import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { FINISH_CATEGORIES } from "@/lib/finishes-db";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 import type { IdentifiedFinish, StyleName } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 const FINISH_CATEGORY_SET = new Set<string>(FINISH_CATEGORIES);
 
@@ -167,12 +168,15 @@ export function RenderingPanel({
     });
     if (uploadError) throw new Error(uploadError.message);
 
-    const { data: pub } = supabase.storage.from("rendering-photos").getPublicUrl(path);
+    const { data: pub, error: pubSignError } = await supabase.storage
+      .from("rendering-photos")
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
     const style = room.renderings.find((r) => r.id === renderingId)?.style;
     const label = style ? `${room.name} — ${style}` : room.name;
-    const res = await saveRenderingPhoto(projectId, renderingId, pub.publicUrl, label);
+    const res = await saveRenderingPhoto(projectId, renderingId, pub.signedUrl, label);
     if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
-    return pub.publicUrl;
+    return pub.signedUrl;
   }
 
   async function handleGenerateImage(rendering: RoomWithRelations["renderings"][number]) {

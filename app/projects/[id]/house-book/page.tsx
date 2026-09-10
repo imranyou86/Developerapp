@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { HouseBookClient } from "@/app/projects/[id]/house-book/house-book-client";
 import type { Subcontractor } from "@/lib/types";
 
@@ -48,12 +49,15 @@ export default async function HouseBookPage({ params }: { params: { id: string }
       .not("uploaded_photo_url", "is", null)
       .order("created_at", { ascending: false });
     const roomNameById = new Map(roomList.map((r) => [r.id, r.name]));
-    renderingsByRoom = (renderings ?? []).map((r) => ({
-      id: r.id,
-      roomName: roomNameById.get(r.room_id) ?? "Room",
-      style: r.style,
-      uploaded_photo_url: r.uploaded_photo_url as string,
-    }));
+    renderingsByRoom = await signRowsUrl(
+      (renderings ?? []).map((r) => ({
+        id: r.id,
+        roomName: roomNameById.get(r.room_id) ?? "Room",
+        style: r.style,
+        uploaded_photo_url: r.uploaded_photo_url as string,
+      })),
+      "uploaded_photo_url"
+    );
   }
 
   const subcontractorIds = (links ?? []).map((l) => l.subcontractor_id);
@@ -63,15 +67,21 @@ export default async function HouseBookPage({ params }: { params: { id: string }
     subcontractors = (data ?? []) as Subcontractor[];
   }
 
+  const [signedPlanPages, signedInteriorDesigns, signedLandscapeDesigns] = await Promise.all([
+    signRowsUrl(planPages ?? [], "storage_url"),
+    signRowsUrl(interiorDesigns ?? [], "generated_image_url"),
+    signRowsUrl(landscapeDesigns ?? [], "generated_image_url"),
+  ]);
+
   return (
     <HouseBookClient
       projectId={projectId}
       projectName={project?.name ?? "Construction"}
       projectAddress={project?.address ?? null}
-      planPages={planPages ?? []}
+      planPages={signedPlanPages}
       roomImages={renderingsByRoom}
-      interiorDesigns={interiorDesigns ?? []}
-      landscapeDesigns={landscapeDesigns ?? []}
+      interiorDesigns={signedInteriorDesigns}
+      landscapeDesigns={signedLandscapeDesigns}
       subcontractors={subcontractors}
     />
   );

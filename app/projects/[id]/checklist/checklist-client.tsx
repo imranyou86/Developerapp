@@ -15,6 +15,7 @@ import {
   updateChecklistComment,
 } from "@/app/projects/[id]/checklist/actions";
 import type { ChecklistPhase } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 interface ChecklistPhoto {
   id: string;
@@ -207,12 +208,15 @@ function ChecklistItemRow({
         });
         if (uploadError) throw new Error(uploadError.message);
 
-        const { data: pub } = supabase.storage.from("checklist-photos").getPublicUrl(path);
-        const res = await addChecklistPhoto(projectId, item.id, pub.publicUrl, item.title);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("checklist-photos")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+        const res = await addChecklistPhoto(projectId, item.id, pub.signedUrl, item.title);
         if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
 
         onUpdate(item.id, {
-          checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.publicUrl }],
+          checklist_photos: [...item.checklist_photos, { id: crypto.randomUUID(), storage_url: pub.signedUrl }],
         });
         notify("success", "Photo added.");
       });

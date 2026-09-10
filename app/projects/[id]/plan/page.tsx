@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { PlanClient } from "@/app/projects/[id]/plan/plan-client";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +16,12 @@ export default async function PlanPage({ params }: { params: { id: string } }) {
     supabase.from("rooms").select("name").eq("project_id", params.id),
   ]);
 
+  const signedPages = await signRowsUrl(pages ?? [], "storage_url");
+
   return (
     <PlanClient
       projectId={params.id}
-      initialPages={pages ?? []}
+      initialPages={signedPages}
       existingRoomNames={(rooms ?? []).map((r) => r.name)}
     />
   );

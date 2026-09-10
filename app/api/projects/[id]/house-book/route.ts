@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { enforceRateLimit } from "@/lib/rateLimit";
+import { signStorageUrls } from "@/lib/storage";
 import { getAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
 import { renderHouseBookPdf, type HouseBookSubcontractor } from "@/lib/houseBookPdf";
 
@@ -60,6 +62,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const limited = await enforceRateLimit(user.id, "house-book");
+  if (limited) return limited;
 
   const projectId = params.id;
   const body = (await req.json().catch(() => ({}))) as HouseBookRequest;
@@ -125,11 +130,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       }
     }
 
-    const images = [
+    const rawImages = [
       ...roomImages.map((r) => ({ url: r.uploaded_photo_url, caption: `${roomNameById.get(r.room_id) ?? "Room"} — ${r.style}` })),
       ...(interiorDesigns ?? []).map((d) => ({ url: d.generated_image_url, caption: `${d.room_type} — ${d.style}` })),
     ];
-    const landscape = (landscapeDesigns ?? []).map((l) => ({ url: l.generated_image_url, caption: l.style }));
+    const rawLandscape = (landscapeDesigns ?? []).map((l) => ({ url: l.generated_image_url, caption: l.style }));
+    const rawPlanPages = (planPages ?? []).map((p) => ({ url: p.storage_url, caption: p.label }));
+
+    // Storage buckets are private — every URL fetched below (by
+    // renderHouseBookPdf, to embed the actual bytes in the PDF) needs to be
+    // a signed URL, not the "public"-shaped string stored in the DB.
+    const [signedImageUrls, signedLandscapeUrls, signedPlanPageUrls] = await Promise.all([
+      signStorageUrls(rawImages.map((i) => i.url)),
+      signStorageUrls(rawLandscape.map((l) => l.url)),
+      signStorageUrls(rawPlanPages.map((p) => p.url)),
+    ]);
+    const images = rawImages.map((i, idx) => ({ url: signedImageUrls[idx] ?? i.url, caption: i.caption }));
+    const landscape = rawLandscape.map((l, idx) => ({ url: signedLandscapeUrls[idx] ?? l.url, caption: l.caption }));
+    const signedPlanPages = rawPlanPages.map((p, idx) => ({ url: signedPlanPageUrls[idx] ?? p.url, caption: p.caption }));
 
     if (images.length === 0 && landscape.length === 0 && (planPages ?? []).length === 0 && subcontractors.length === 0 && !includeClosingNote) {
       return NextResponse.json({ error: "Nothing selected to include." }, { status: 400 });
@@ -153,7 +171,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const pdfBuffer = await renderHouseBookPdf({
       projectName: project.name,
       projectAddress: project.address,
-      planPages: (planPages ?? []).map((p) => ({ url: p.storage_url, caption: p.label })),
+      planPages: signedPlanPages,
       images,
       landscape,
       subcontractors,

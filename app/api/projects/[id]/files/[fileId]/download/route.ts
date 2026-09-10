@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { withExtension } from "@/lib/projectFiles";
+import { signStorageUrl } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-// Storage bucket URLs are public, but a plain <a href> to them won't force a
-// correct filename cross-origin (the `download` attribute is ignored across
-// origins in most browsers). Proxying through here sets a real
-// Content-Disposition header instead.
+// Storage buckets are private (migration 037) and a signed URL still won't
+// force a correct filename cross-origin (the `download` attribute is
+// ignored across origins in most browsers) — proxying through here signs
+// the stored URL server-side and sets a real Content-Disposition header.
 export async function GET(req: Request, { params }: { params: { id: string; fileId: string } }) {
   const supabase = createClient();
   const {
@@ -28,7 +29,12 @@ export async function GET(req: Request, { params }: { params: { id: string; file
     return NextResponse.json({ error: "File not found." }, { status: 404 });
   }
 
-  const fileRes = await fetch(file.storage_url);
+  const signedUrl = await signStorageUrl(file.storage_url);
+  if (!signedUrl) {
+    return NextResponse.json({ error: "Could not fetch the stored file." }, { status: 502 });
+  }
+
+  const fileRes = await fetch(signedUrl);
   if (!fileRes.ok || !fileRes.body) {
     return NextResponse.json({ error: "Could not fetch the stored file." }, { status: 502 });
   }

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { LandscapeSections } from "@/app/landscape/landscape-sections";
@@ -9,6 +10,11 @@ import type { LandscapeDesign } from "@/lib/types";
 const LANDSCAPE_DESIGN_COLUMNS = "id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, created_at";
 
 export const dynamic = "force-dynamic";
+
+async function signLandscapeUrls(designs: LandscapeDesign[]): Promise<LandscapeDesign[]> {
+  const withOriginal = await signRowsUrl(designs, "original_photo_url");
+  return signRowsUrl(withOriginal, "generated_image_url");
+}
 
 export default async function LandscapePage({ searchParams }: { searchParams: { project?: string } }) {
   const supabase = createClient();
@@ -35,7 +41,7 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
       .select(LANDSCAPE_DESIGN_COLUMNS)
       .eq("project_id", selectedId)
       .order("created_at", { ascending: false });
-    designs = (data ?? []) as LandscapeDesign[];
+    designs = await signLandscapeUrls((data ?? []) as LandscapeDesign[]);
   }
 
   const { data: standaloneData } = await supabase
@@ -43,7 +49,7 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
     .select(LANDSCAPE_DESIGN_COLUMNS)
     .is("project_id", null)
     .order("created_at", { ascending: false });
-  const standaloneDesigns = (standaloneData ?? []) as LandscapeDesign[];
+  const standaloneDesigns = await signLandscapeUrls((standaloneData ?? []) as LandscapeDesign[]);
 
   return (
     <div className="min-h-screen bg-concrete">

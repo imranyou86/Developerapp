@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { signRowsUrl } from "@/lib/storage";
 import { BrandMark } from "@/components/BrandMark";
 import {
   BudgetSection,
@@ -79,6 +80,23 @@ export default async function SharePage({ params }: { params: { token: string } 
     return <InvalidLink reason="This construction no longer exists." />;
   }
 
+  const [signedPlanPages, signedRooms, signedChecklistItems, signedBids] = await Promise.all([
+    signRowsUrl(planPages ?? [], "storage_url"),
+    Promise.all(
+      (rooms ?? []).map(async (room) => ({
+        ...room,
+        renderings: await signRowsUrl(room.renderings ?? [], "uploaded_photo_url"),
+      }))
+    ),
+    Promise.all(
+      (checklistItems ?? []).map(async (item) => ({
+        ...item,
+        checklist_photos: await signRowsUrl(item.checklist_photos ?? [], "storage_url"),
+      }))
+    ),
+    signRowsUrl(bids ?? [], "file_url"),
+  ]);
+
   return (
     <div className="min-h-screen bg-concrete">
       <header className="border-b border-blueprint/10 bg-white">
@@ -90,11 +108,11 @@ export default async function SharePage({ params }: { params: { token: string } 
       </header>
 
       <main className="mx-auto max-w-6xl space-y-10 px-6 py-8">
-        <PlanSection pages={planPages ?? []} />
-        <RoomsSection rooms={rooms ?? []} />
-        <ChecklistSection items={checklistItems ?? []} />
-        <BudgetSection rooms={rooms ?? []} />
-        <PaymentsSection bids={bids ?? []} />
+        <PlanSection pages={signedPlanPages} />
+        <RoomsSection rooms={signedRooms} />
+        <ChecklistSection items={signedChecklistItems} />
+        <BudgetSection rooms={signedRooms} />
+        <PaymentsSection bids={signedBids} />
       </main>
 
       <footer className="border-t border-blueprint/10 py-6 text-center text-xs text-blueprint/40">

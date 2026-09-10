@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { getCurrentUser } from "@/lib/permissions-server";
 import { WarrantyRequestClient } from "@/app/projects/[id]/warranty-request/warranty-request-client";
 
@@ -27,6 +28,16 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
       .order("created_at", { ascending: false }),
   ]);
 
+  const [signedItems, signedReports] = await Promise.all([
+    Promise.all(
+      (items ?? []).map(async (item) => ({
+        ...item,
+        checklist_photos: await signRowsUrl(item.checklist_photos ?? [], "storage_url"),
+      }))
+    ),
+    signRowsUrl(reports ?? [], "storage_url"),
+  ]);
+
   return (
     <div>
       {(error || reportsError || requestsError) && (
@@ -36,8 +47,8 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
       )}
       <WarrantyRequestClient
         projectId={params.id}
-        initialItems={items ?? []}
-        initialReports={reports ?? []}
+        initialItems={signedItems}
+        initialReports={signedReports}
         initialRequests={requests ?? []}
         viewerRole={currentUser?.role ?? "owner"}
       />

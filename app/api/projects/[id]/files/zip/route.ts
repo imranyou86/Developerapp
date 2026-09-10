@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
 import { withExtension } from "@/lib/projectFiles";
+import { signStorageUrl } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,7 +39,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const results = await Promise.allSettled(
     files.map(async (f) => {
-      const res = await fetch(f.storage_url);
+      const signedUrl = await signStorageUrl(f.storage_url);
+      if (!signedUrl) throw new Error(`Failed to fetch ${f.file_name}`);
+      const res = await fetch(signedUrl);
       if (!res.ok) throw new Error(`Failed to fetch ${f.file_name}`);
       const buffer = Buffer.from(await res.arrayBuffer());
 

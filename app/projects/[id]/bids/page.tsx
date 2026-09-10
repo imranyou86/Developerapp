@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { BidsClient } from "@/app/projects/[id]/bids/bids-client";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,8 @@ export default async function BidsPage({ params }: { params: { id: string } }) {
     supabase.from("projects").select("address").eq("id", params.id).single(),
   ]);
 
+  const signedBids = await signRowsUrl(bids ?? [], "file_url");
+
   return (
     <div>
       {error && (
@@ -27,7 +30,7 @@ export default async function BidsPage({ params }: { params: { id: string } }) {
           Could not load bids: {error.message}
         </div>
       )}
-      <BidsClient projectId={params.id} initialBids={bids ?? []} projectAddress={project?.address ?? null} />
+      <BidsClient projectId={params.id} initialBids={signedBids} projectAddress={project?.address ?? null} />
     </div>
   );
 }

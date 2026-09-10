@@ -10,6 +10,7 @@ import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { LANDSCAPE_COMPONENTS, LANDSCAPE_STYLES, buildLandscapePrompt } from "@/lib/landscapePrompt";
 import { saveLandscapeDesign, deleteLandscapeDesign } from "@/app/landscape/actions";
 import type { LandscapeComponentSelection, LandscapeDesign } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 export function LandscapeClient({ projectId, initialDesigns }: { projectId: string | null; initialDesigns: LandscapeDesign[] }) {
   const { notify } = useToast();
@@ -64,8 +65,11 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
     });
     if (error) throw new Error(error.message);
 
-    const { data: pub } = supabase.storage.from("landscape-photos").getPublicUrl(path);
-    return pub.publicUrl;
+    const { data: pub, error: pubSignError } = await supabase.storage
+      .from("landscape-photos")
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+    return pub.signedUrl;
   }
 
   async function handleGenerate(e: React.FormEvent) {

@@ -1,5 +1,12 @@
 -- Alaia Homes Dev — schema + RLS
 -- Run this in the Supabase SQL editor (or via `supabase db push`) on a fresh project.
+--
+-- For an EXISTING project, don't re-run this file — apply the individual
+-- files under supabase/migrations/ instead (in filename order), which this
+-- file is kept in sync with after every change. `npm run migrate`
+-- (scripts/migrate.mjs) applies whichever migration files a project hasn't
+-- seen yet, tracked in a `schema_migrations` table, instead of pasting each
+-- one into the SQL editor by hand.
 
 create extension if not exists "pgcrypto";
 
@@ -517,6 +524,37 @@ create table if not exists certificate_of_occupancy_checks (
   created_at timestamptz not null default now()
 );
 
+-- Cost/abuse guard for the paid AI routes (see lib/rateLimit.ts) — one row
+-- per request that passed auth, so a per-user, per-route count over a
+-- rolling window can cap how often an expensive route (image generation,
+-- web-search-grounded estimates) can be called. No RLS policies at all
+-- (just RLS enabled below) — only ever read/written via the service-role
+-- admin client, same as project_alert_subscriptions' dispatch path.
+create table if not exists api_rate_limit_hits (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  route text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Append-only audit trail for the highest-value "who did that?" moments —
+-- see lib/activityLog.ts for exactly which actions write here (not every
+-- mutation in the app is logged). Deliberately no update/delete policy —
+-- only select/insert below — an audit log editable or erasable by its own
+-- author isn't an audit log. Note: deleting the construction itself isn't
+-- logged here, since project_id cascades on delete and would take its own
+-- log entries down with it.
+create table if not exists activity_log (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  user_id uuid references auth.users (id) on delete set null,
+  action text not null,
+  entity_type text,
+  entity_id text,
+  detail text,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_plan_pages_project on plan_pages (project_id, sort_order);
 create index if not exists idx_rooms_project on rooms (project_id);
 create index if not exists idx_tasks_room on tasks (room_id);
@@ -553,6 +591,8 @@ create index if not exists idx_subcontractors_company_name on subcontractors (co
 create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
 create index if not exists idx_project_subcontractors_sub on project_subcontractors (subcontractor_id);
 create index if not exists idx_certificate_of_occupancy_checks_project on certificate_of_occupancy_checks (project_id);
+create index if not exists idx_api_rate_limit_hits_user_route on api_rate_limit_hits (user_id, route, created_at);
+create index if not exists idx_activity_log_project on activity_log (project_id, created_at desc);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
@@ -660,6 +700,8 @@ alter table project_alert_subscriptions enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
+alter table api_rate_limit_hits enable row level security;
+alter table activity_log enable row level security;
 
 -- security definer so they can be called from other tables' RLS policies
 -- without recursing back through THEIR RLS.
@@ -800,6 +842,12 @@ create policy "warranty_item_requests_update" on warranty_item_requests
 create policy "warranty_item_requests_delete" on warranty_item_requests
   for delete using (auth.uid() = requested_by);
 
+-- No update/delete policy — see the table comment above.
+create policy "activity_log_select" on activity_log
+  for select using (has_project_access(project_id));
+create policy "activity_log_insert" on activity_log
+  for insert with check (has_project_access(project_id) and auth.uid() = user_id);
+
 create policy "bids_member" on bids
   for all using (has_project_access(bids.project_id))
   with check (has_project_access(bids.project_id));
@@ -910,17 +958,22 @@ create policy "project_alert_subscriptions_delete" on project_alert_subscription
 -- finish-scan photos
 -- ---------------------------------------------------------------------------
 
+-- Private, not public (migration 037) — a "public" bucket serves objects
+-- directly with no auth check at all, bypassing the storage.objects RLS
+-- policies below entirely for reads. The app instead exchanges each stored
+-- URL for a short-lived signed URL right before use (lib/storage.ts),
+-- after already checking access at the DB row level.
 insert into storage.buckets (id, name, public)
 values
-  ('plan-pages', 'plan-pages', true),
-  ('rendering-photos', 'rendering-photos', true),
-  ('checklist-photos', 'checklist-photos', true),
-  ('bid-files', 'bid-files', true),
-  ('finish-scans', 'finish-scans', true),
-  ('project-files', 'project-files', true),
-  ('interior-design-photos', 'interior-design-photos', true),
-  ('landscape-photos', 'landscape-photos', true)
-on conflict (id) do nothing;
+  ('plan-pages', 'plan-pages', false),
+  ('rendering-photos', 'rendering-photos', false),
+  ('checklist-photos', 'checklist-photos', false),
+  ('bid-files', 'bid-files', false),
+  ('finish-scans', 'finish-scans', false),
+  ('project-files', 'project-files', false),
+  ('interior-design-photos', 'interior-design-photos', false),
+  ('landscape-photos', 'landscape-photos', false)
+on conflict (id) do update set public = excluded.public;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
 -- simple "first path segment == auth.uid()" check scopes all storage access.

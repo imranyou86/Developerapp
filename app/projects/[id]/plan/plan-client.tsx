@@ -8,6 +8,7 @@ import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 import {
   addDetectedRooms,
   addPlanPage,
@@ -109,9 +110,12 @@ export function PlanClient({
     });
     if (uploadError) throw new Error(`Upload of "${file.name}" failed: ${uploadError.message}`);
 
-    const { data: pub } = supabase.storage.from("plan-pages").getPublicUrl(path);
+    const { data: pub, error: pubSignError } = await supabase.storage
+      .from("plan-pages")
+      .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
     const sortOrder = pages.length;
-    const res = await addPlanPage(projectId, pub.publicUrl, file.name, sortOrder);
+    const res = await addPlanPage(projectId, pub.signedUrl, file.name, sortOrder);
     if (!res.ok) throw new Error(res.error ?? "Could not save plan page.");
 
     // Use the real inserted row's id (res.id), not a locally-generated one —
@@ -122,7 +126,7 @@ export function PlanClient({
     // actually persisting.
     setPages((prev) => [
       ...prev,
-      { id: res.id!, storage_url: pub.publicUrl, label: file.name, sort_order: sortOrder, is_layout: true },
+      { id: res.id!, storage_url: pub.signedUrl, label: file.name, sort_order: sortOrder, is_layout: true },
     ]);
     notify("success", `Added "${file.name}".`);
   }
@@ -164,14 +168,17 @@ export function PlanClient({
       });
       if (uploadError) throw new Error(`Upload of "${label}" failed: ${uploadError.message}`);
 
-      const { data: pub } = supabase.storage.from("plan-pages").getPublicUrl(path);
+      const { data: pub, error: pubSignError } = await supabase.storage
+        .from("plan-pages")
+        .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+      if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
       const sortOrder = pages.length + pageNum - 1;
-      const res = await addPlanPage(projectId, pub.publicUrl, label, sortOrder);
+      const res = await addPlanPage(projectId, pub.signedUrl, label, sortOrder);
       if (!res.ok) throw new Error(`Saving "${label}" failed: ${res.error}`);
 
       setPages((prev) => [
         ...prev,
-        { id: res.id!, storage_url: pub.publicUrl, label, sort_order: sortOrder, is_layout: true },
+        { id: res.id!, storage_url: pub.signedUrl, label, sort_order: sortOrder, is_layout: true },
       ]);
     }
     notify("success", `Added ${pdf.numPages} page(s) from "${file.name}".`);

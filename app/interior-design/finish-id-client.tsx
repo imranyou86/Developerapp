@@ -11,6 +11,7 @@ import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import { deleteFinishScan, saveFinishScan } from "@/app/interior-design/finish-id-actions";
 import type { FinishCategory, IdentifiedFinish } from "@/lib/types";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 interface ProjectOption {
   id: string;
@@ -94,13 +95,16 @@ export function FinishIdClient({
         });
         if (uploadError) throw new Error(uploadError.message);
 
-        const { data: pub } = supabase.storage.from("finish-scans").getPublicUrl(path);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("finish-scans")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
 
         setUploadStatus("Identifying finishes…");
         const res = await fetchWithRetry("/api/claude/identify-finishes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageUrl: pub.publicUrl }),
+          body: JSON.stringify({ imageUrl: pub.signedUrl }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Finish identification failed.");
@@ -113,12 +117,12 @@ export function FinishIdClient({
           confidence: item.confidence,
         }));
 
-        const saveRes = await saveFinishScan(pub.publicUrl, file.name, results);
+        const saveRes = await saveFinishScan(pub.signedUrl, file.name, results);
         if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save scan.");
 
         const newScan: FinishScanRow = {
           id: saveRes.id,
-          storage_url: pub.publicUrl,
+          storage_url: pub.signedUrl,
           label: file.name,
           results,
           created_at: new Date().toISOString(),

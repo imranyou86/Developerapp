@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { ProjectPicker } from "@/components/ProjectPicker";
@@ -47,7 +48,7 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
     ]);
 
     projectAddress = project?.address ?? null;
-    planPages = pages ?? [];
+    planPages = await signRowsUrl(pages ?? [], "storage_url");
     const sqft = (rooms ?? []).reduce((sum, r) => (r.width && r.depth ? sum + Number(r.width) * Number(r.depth) : sum), 0);
     roomsSqftHint = sqft > 0 ? sqft : null;
     estimates = (estimateRows ?? []) as CostEstimate[];

@@ -16,6 +16,7 @@ import {
 } from "@/app/projects/[id]/bids/actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { stripLeadingZero } from "@/lib/numberInput";
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 interface PaymentLine {
   id: string;
@@ -142,7 +143,10 @@ export function BidsClient({
           contentType: "application/pdf",
         });
         if (uploadError) throw new Error(uploadError.message);
-        const { data: pub } = supabase.storage.from("bid-files").getPublicUrl(path);
+        const { data: pub, error: pubSignError } = await supabase.storage
+          .from("bid-files")
+          .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+        if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
 
         let requestBody: { text?: string; pageImageUrls?: string[] };
 
@@ -169,8 +173,11 @@ export function BidsClient({
               contentType: "image/png",
             });
             if (imgUploadError) throw new Error(imgUploadError.message);
-            const { data: imgPub } = supabase.storage.from("bid-files").getPublicUrl(imgPath);
-            pageImageUrls.push(imgPub.publicUrl);
+            const { data: imgPub, error: imgPubSignError } = await supabase.storage
+              .from("bid-files")
+              .createSignedUrl(imgPath, SIGNED_URL_TTL_SECONDS);
+            if (imgPubSignError || !imgPub) throw new Error(imgPubSignError?.message ?? "Could not get a URL for the uploaded file.");
+            pageImageUrls.push(imgPub.signedUrl);
           }
           requestBody = { pageImageUrls };
         }
@@ -188,7 +195,7 @@ export function BidsClient({
           contractor: json.contractor ?? "",
           total_amount: Number(json.total_amount) || 0,
           file_name: file.name,
-          file_url: pub.publicUrl,
+          file_url: pub.signedUrl,
           payment_schedule: (json.payment_schedule ?? []).map((l: { label: string; amount: number }) => ({
             label: l.label,
             amount: Number(l.amount) || 0,
@@ -205,7 +212,7 @@ export function BidsClient({
   }
 
   async function handleStatusChange(bid: BidRow, status: "pending" | "accepted" | "declined") {
-    const res = await setBidStatus(projectId, bid.id, status);
+    const res = await setBidStatus(projectId, bid.id, status, bid.contractor);
     if (!res.ok) {
       notify("error", res.error ?? "Could not update this bid.");
       return;
@@ -351,7 +358,7 @@ export function BidsClient({
         onCancel={() => setDeleting(null)}
         onConfirm={async () => {
           if (!deleting) return;
-          const res = await deleteBid(projectId, deleting.id);
+          const res = await deleteBid(projectId, deleting.id, deleting.contractor);
           if (!res.ok) {
             notify("error", res.error ?? "Could not delete bid.");
           } else {

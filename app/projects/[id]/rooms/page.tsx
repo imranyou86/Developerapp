@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { signRowsUrl } from "@/lib/storage";
 import { RoomsClient } from "@/app/projects/[id]/rooms/rooms-client";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,14 @@ export default async function RoomsPage({ params }: { params: { id: string } }) 
       .order("sort_order"),
   ]);
 
+  const signedRooms = await Promise.all(
+    (rooms ?? []).map(async (room) => ({
+      ...room,
+      renderings: await signRowsUrl(room.renderings ?? [], "uploaded_photo_url"),
+    }))
+  );
+  const signedPlanPages = await signRowsUrl(planPages ?? [], "storage_url");
+
   return (
     <div>
       {error && (
@@ -36,7 +45,7 @@ export default async function RoomsPage({ params }: { params: { id: string } }) 
           Could not load rooms: {error.message}
         </div>
       )}
-      <RoomsClient projectId={params.id} initialRooms={rooms ?? []} planPages={planPages ?? []} />
+      <RoomsClient projectId={params.id} initialRooms={signedRooms} planPages={signedPlanPages} />
     </div>
   );
 }
