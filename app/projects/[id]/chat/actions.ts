@@ -3,6 +3,32 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { notifyProjectSubscribers } from "@/lib/alerts";
+import { CHAT_PAGE_SIZE } from "@/lib/pagination";
+import type { ProjectMessage } from "@/lib/types";
+
+// Cursor-paginated "load older" for a chat that's grown past the first
+// page — the initial page load (chat/page.tsx) only fetches the most
+// recent CHAT_PAGE_SIZE messages; this fetches the next page further back
+// in time, ordered by created_at (with id as a tiebreaker for messages
+// sharing the same instant, e.g. a bulk import).
+export async function loadOlderMessages(
+  projectId: string,
+  beforeCreatedAt: string
+): Promise<{ messages: ProjectMessage[]; hasMore: boolean }> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("project_messages")
+    .select("id, project_id, user_id, sender_email, body, created_at")
+    .eq("project_id", projectId)
+    .lt("created_at", beforeCreatedAt)
+    .order("created_at", { ascending: false })
+    .limit(CHAT_PAGE_SIZE + 1);
+
+  const rows = (data ?? []) as ProjectMessage[];
+  const hasMore = rows.length > CHAT_PAGE_SIZE;
+  const page = hasMore ? rows.slice(0, CHAT_PAGE_SIZE) : rows;
+  return { messages: page.reverse(), hasMore };
+}
 
 // No revalidatePath here — messages arrive for every viewer live via
 // Supabase Realtime (see chat-client.tsx), so a server-driven refetch on

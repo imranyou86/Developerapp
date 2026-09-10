@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
-import { sendMessage, deleteMessage } from "@/app/projects/[id]/chat/actions";
+import { sendMessage, deleteMessage, loadOlderMessages } from "@/app/projects/[id]/chat/actions";
 import type { ProjectMessage } from "@/lib/types";
 
 function formatTimestamp(iso: string): string {
@@ -18,21 +18,58 @@ export function ChatClient({
   projectId,
   currentUserId,
   initialMessages,
+  initialHasMore,
 }: {
   projectId: string;
   currentUserId: string;
   initialMessages: ProjectMessage[];
+  initialHasMore: boolean;
 }) {
   const { notify } = useToast();
   const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const hasLoadedOlder = useRef(false);
 
   useEffect(() => {
+    // Only auto-scroll to the newest message on first render and when a new
+    // message arrives — not after prepending older history, which would
+    // otherwise yank the view back down away from what was just loaded.
+    if (hasLoadedOlder.current) {
+      hasLoadedOlder.current = false;
+      return;
+    }
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
+
+  async function handleLoadOlder() {
+    if (messages.length === 0) return;
+    const container = scrollRef.current;
+    const previousScrollHeight = container?.scrollHeight ?? 0;
+
+    setLoadingOlder(true);
+    try {
+      const { messages: older, hasMore: more } = await loadOlderMessages(projectId, messages[0].created_at);
+      hasLoadedOlder.current = true;
+      setMessages((prev) => [...older, ...prev]);
+      setHasMore(more);
+      // Keep the same messages in view instead of jumping to the top —
+      // restore scroll position relative to the content just inserted
+      // above it, once the new rows have actually rendered.
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - previousScrollHeight;
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not load older messages.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
 
   // Live updates for every viewer of this project's chat — Realtime's
   // postgres_changes respects RLS on its own, so this only ever receives
@@ -110,35 +147,44 @@ export function ChatClient({
 
   return (
     <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-blueprint/10 bg-white p-4">
+      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-blueprint/10 bg-white p-4">
         {messages.length === 0 ? (
           <p className="text-center text-sm text-blueprint/50">
             No messages yet — say something about this construction to get the thread going.
           </p>
         ) : (
-          messages.map((m) => {
-            const isOwn = m.user_id === currentUserId;
-            return (
-              <div key={m.id} className={`flex animate-fade-in-up ${isOwn ? "justify-end" : "justify-start"}`}>
-                <div className={`group max-w-[75%] rounded-lg px-3 py-2 text-sm ${isOwn ? "bg-blueprint text-white" : "bg-concrete text-blueprint-dark"}`}>
-                  {!isOwn && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender_email}</p>}
-                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className={`text-[10px] ${isOwn ? "text-white/60" : "text-blueprint/40"}`}>{formatTimestamp(m.created_at)}</span>
-                    {isOwn && (
-                      <button
-                        className={`text-[10px] opacity-0 hover:underline group-hover:opacity-100 ${isOwn ? "text-white/70" : "text-blueprint/50"}`}
-                        onClick={() => handleDelete(m.id)}
-                        disabled={deletingId === m.id}
-                      >
-                        Delete
-                      </button>
-                    )}
+          <>
+            {hasMore && (
+              <div className="text-center">
+                <button className="btn-ghost text-xs" onClick={handleLoadOlder} disabled={loadingOlder}>
+                  {loadingOlder ? "Loading…" : "Load older messages"}
+                </button>
+              </div>
+            )}
+            {messages.map((m) => {
+              const isOwn = m.user_id === currentUserId;
+              return (
+                <div key={m.id} className={`flex animate-fade-in-up ${isOwn ? "justify-end" : "justify-start"}`}>
+                  <div className={`group max-w-[75%] rounded-lg px-3 py-2 text-sm ${isOwn ? "bg-blueprint text-white" : "bg-concrete text-blueprint-dark"}`}>
+                    {!isOwn && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender_email}</p>}
+                    <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className={`text-[10px] ${isOwn ? "text-white/60" : "text-blueprint/40"}`}>{formatTimestamp(m.created_at)}</span>
+                      {isOwn && (
+                        <button
+                          className={`text-[10px] opacity-0 hover:underline group-hover:opacity-100 ${isOwn ? "text-white/70" : "text-blueprint/50"}`}
+                          onClick={() => handleDelete(m.id)}
+                          disabled={deletingId === m.id}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </>
         )}
         <div ref={bottomRef} />
       </div>
