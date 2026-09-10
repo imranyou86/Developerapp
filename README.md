@@ -1270,3 +1270,147 @@ yet; each one only adds what a given feature needed.
   same "typing replaces the old value" UX) so clicking into a prefilled
   number field selects it for overwriting instead of inserting at a cursor
   position next to existing digits.
+- **`getAllowedTabSlugs` fails closed, not open** (`lib/permissions-server.ts`)
+  — a role with zero configured `tab_permissions` rows (a query error, or a
+  seeding migration that never ran) used to fall through to "nothing
+  disallowed," silently granting that role every tab. `data` being `[]` is
+  truthy, so `if (!data)` never caught it. Now both `null` and `[]` return
+  no allowed tabs. Regression-tested in `lib/permissions-server.test.ts`.
+- **Test suite** (`vitest`, `npm run test`) — this project had zero
+  automated tests until now. `vitest.config.mts` resolves the `@/` path
+  alias the same way `tsconfig.json` does; tests live next to the code
+  they cover (`lib/anthropic.test.ts`, `lib/storage.test.ts`,
+  `lib/permissions-server.test.ts`) rather than in a separate `__tests__`
+  tree. This is a starting point, not full coverage — it covers `extractJson`
+  (including a regression test for the brace-in-a-string bug fixed in
+  commit `a1c223f`), the new signed-URL bucket/path parser, and the
+  tab-permissions fail-closed fix above. Server Actions and RLS policies
+  still have no automated coverage.
+- **`npm run migrate`** (`scripts/migrate.mjs`) — every schema change up to
+  this point required copying a `supabase/migrations/*.sql` file into the
+  Supabase SQL editor by hand, which is exactly how migration 034 went
+  unapplied and surfaced as a runtime "Could not find the table" error
+  instead of a build-time one. This script connects directly to the
+  project's Postgres database (`DATABASE_URL` — the direct connection on
+  port 5432, not the pgbouncer pooler, since it wraps each file in a
+  transaction) and applies whichever files in `supabase/migrations/` aren't
+  yet recorded in a new `schema_migrations` table, in filename order.
+  Leans on every migration in this project already being written
+  idempotently (`create table if not exists`, `on conflict do nothing`,
+  `drop constraint if exists` before re-adding it) rather than trying to
+  guess which ones already ran on a project that predates
+  `schema_migrations` existing at all — on first run it just replays
+  everything, which is a safe no-op for anything already applied by hand.
+  Still requires a one-time `DATABASE_URL` (see `.env.example`) and doesn't
+  replace `supabase/schema.sql` for a brand-new project.
+- **Rate limiting on the paid AI/OpenAI routes** (`lib/rateLimit.ts`,
+  migration `036_api_rate_limits.sql`) — nothing previously capped how many
+  times a signed-in user could call an expensive route (image generation,
+  web-search-grounded estimates), so a buggy client or a bad actor could
+  run up real API bills with no limit. `enforceRateLimit(userId, route)`
+  is a two-line guard dropped into every `app/api/claude/*` and
+  `app/api/openai/*` route (plus the House Book PDF's AI closing note)
+  right after the existing `auth.getUser()` check; it counts each user's
+  hits per route in a rolling hour window via the service-role admin
+  client (backed by a table, not in-memory state, since serverless route
+  handlers don't reliably share memory across instances) and returns a 429
+  with a `Retry-After` header once the per-route limit is hit. Limits are
+  generous for normal use (15-30 requests/hour depending on the route's
+  cost) — see `RATE_LIMITS` in `lib/rateLimit.ts` to tune them. Fails open
+  on a DB error, so an outage in the limiter itself never takes down the
+  feature it's protecting. `app/api/subcontractors/check-license` and the
+  Files Library's download/zip routes are deliberately excluded — no paid
+  API call behind them.
+- **Storage buckets are private; every file/photo URL is now signed**
+  (`lib/storage.ts`, `lib/storageClient.ts`, migration
+  `037_private_storage_buckets.sql`) — every one of the app's 8 Storage
+  buckets (plan pages, room renderings, checklist/warranty photos, bid
+  files, finish scans, the Files Library's generic uploads, interior
+  design and landscape renders) was public, meaning anyone with a stored
+  file's URL could read it with no authentication at all — a "public"
+  bucket serves objects directly and never checks the storage.objects RLS
+  policies for reads, so those policies (scoped to `(storage.foldername
+  (name))[1] = auth.uid()`, the uploader's own folder) were silently doing
+  nothing for anyone browsing the app normally. For a tool holding photos
+  and documents of someone's home construction, that was real exposure.
+  Every bucket is now private; a stored `storage_url` column still holds
+  the exact same string an upload's `getPublicUrl(path)` call always
+  produced — it's just a bucket+path encoder now, since that URL no longer
+  resolves on its own. `lib/storage.ts`'s `signStorageUrl`/`signStorageUrls`/
+  `signRowsUrl` parse the bucket+path back out of that string (`sign`-shaped
+  URLs work too, so nothing needs to change if a value already came from a
+  signed-URL call) and exchange it for a 24-hour signed URL, called from
+  every Server Component/Server Action/API route that reads one of these
+  columns before handing it to a client or fetching it server-side (the
+  Files Library's ZIP/download proxy routes, the House Book PDF generator,
+  the public `/share/[token]` page). Signing always uses the service-role
+  admin client rather than the caller's own session — access control
+  already happened at the DB row level (`has_project_access` RLS on
+  whatever table the URL came from) by the time signing runs, and the
+  per-bucket "owner" storage policies would otherwise lock every project
+  member other than the original uploader out of a co-member's upload the
+  moment the bucket went private. Every upload call site
+  (`getPublicUrl` → `createSignedUrl`) was updated the same way, for the
+  same reason applied in reverse: the uploader can always sign their own
+  just-uploaded object (it's in their own folder), so the value saved to
+  the DB and used for the immediate optimistic UI preview is a working URL
+  from the moment it's created, not a broken image until the next full
+  page load. Run migration 037 *after* deploying this app code — flipping
+  the buckets first would break every image/file link in a still-running
+  old deployment.
+- **Append-only activity log** (`activity_log`, migration
+  `038_activity_log.sql`, `lib/activityLog.ts`) — a "who did that?" trail
+  for the actions most likely to matter in a dispute: deleting a warranty
+  item or inspection report, approving/rejecting a warranty item request,
+  accepting/declining/deleting a bid, removing a team member or revoking
+  an invite, and deleting a file from the Files Library. Not a full audit
+  of every mutation in the app (there are ~30 delete-shaped actions across
+  every tab) — just the money/warranty/access-related ones, scoped
+  deliberately rather than instrumenting everything. `logActivity` never
+  throws (a logging failure shouldn't block the action it's describing)
+  and there's no update/delete RLS policy on the table at all — only
+  select/insert — since an audit log editable or erasable by its own
+  author isn't an audit log. Deleting the construction itself isn't logged
+  here: `activity_log.project_id` cascades on delete, which would take the
+  project's own log entries down with it at the exact moment they'd matter
+  most, and there's no separate account-level log this pass adds to fix
+  that. No dedicated viewer UI yet — the table is there to query directly
+  or build a page against later.
+- **One-click unsubscribe on alert emails** (`app/api/alerts/unsubscribe/route.ts`)
+  — every alert email now ends with an unsubscribe link scoped to that one
+  subscription, using the subscription row's own id (a random uuid) as the
+  token, the same "unguessable id in a public link" pattern
+  `project_shares`/`project_invites` already use for their own tokens.
+  Needs no sign-in (`middleware.ts` exempts this one path from the
+  auth/approval gate, same as the public `/share/[token]` page) since
+  whoever clicks it from their inbox is very likely not signed into that
+  browser at all. What this pass didn't build: a scheduled digest/batching
+  mode (an hourly or daily rollup instead of one email per event) — that
+  needs a queue table and a scheduled job (Vercel Cron or a Supabase
+  `pg_cron` job calling a new route), which is a bigger feature than an
+  unsubscribe link. Today's mitigation is narrower: a bulk action (e.g.
+  `addWarrantyItemsFromReport`) already sends one email per batch rather
+  than one per item, which is the main realistic source of a rapid-fire
+  sequence.
+- **Chat and the Files Library are paginated, not fully loaded** — Chat's
+  initial page load previously had a comment claiming "last 200 messages"
+  but actually fetched the *oldest* 200 (`.order("created_at", {ascending:
+  true}).limit(200)` returns the first 200 rows of that ascending order,
+  not the most recent ones) — a real bug, fixed alongside adding
+  pagination. The chat page now fetches the newest `CHAT_PAGE_SIZE` (50)
+  messages, newest-first then reversed for display, with a "Load older
+  messages" button (`loadOlderMessages` in `chat/actions.ts`) that
+  cursor-paginates further back by `created_at` and restores scroll
+  position relative to what was just prepended, rather than jumping the
+  view. The Files Library similarly now loads the newest `FILES_PAGE_SIZE`
+  (100) files with a "Load more files" button
+  (`loadMoreProjectFiles`) appending older ones to the same list — its
+  existing filter/search/bulk-select logic works unchanged since it
+  operates over whatever's currently loaded into state. Page sizes live in
+  `lib/pagination.ts` rather than the routes' own `"use server"` actions
+  files, since a Server Actions module may only export async functions,
+  not plain constants. Every other list in the app (checklist/warranty
+  items, the projects list, room/finish lists) stays unpaginated — those
+  are naturally bounded by the physical scope of one house or how many
+  constructions a single account manages, not a realistic growth risk the
+  way an ever-accumulating chat thread or file library is.
