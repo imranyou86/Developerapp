@@ -7,7 +7,8 @@ import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 import type { LandscapeDesign } from "@/lib/types";
 
-const LANDSCAPE_DESIGN_COLUMNS = "id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, created_at";
+const LANDSCAPE_DESIGN_COLUMNS =
+  "id, project_id, style, components, notes, original_photo_url, generated_image_url, prompt, layout, yard_width, yard_depth, created_at";
 
 export const dynamic = "force-dynamic";
 
