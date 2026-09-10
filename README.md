@@ -355,16 +355,18 @@ yet; each one only adds what a given feature needed.
   replacing the illustration; without that key, copy the same prompt into
   an image tool by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
-  - **Style search, not a locked list** — style used to be 5 fixed preset
-    buttons (`lib/styles.ts`'s `STYLE_PALETTES`), each with its own baked-in
-    color palette. `StyleName` (`lib/types.ts`) is now a plain `string`
-    instead of that 5-value union — DB-side `renderings.style` was already
-    unconstrained text, so no migration was needed. The panel is now a
-    free-text style search (an `<input>` with a `<datalist>` of the old
-    preset names as autocomplete suggestions — real suggestions, not a
-    restriction, so typing anything else works fine) plus three color
-    pickers (wall/floor/accent) that default to the first preset's palette
-    but are fully user-adjustable. "+ Add to list" queues a
+  - **Style is pure free text, no presets** — style used to be 5 fixed
+    preset buttons (`lib/styles.ts`'s `STYLE_PALETTES`), then a free-text
+    `<input>` with a `<datalist>` of those same names as autocomplete
+    suggestions. Both are gone now — `lib/styles.ts` keeps only the
+    `StylePalette` type (still used by `lib/illustration.ts`'s SVG
+    placeholder) and a `DEFAULT_PALETTE_COLORS` constant to seed the color
+    pickers, with no preset list or suggestion UI left anywhere. `StyleName`
+    (`lib/types.ts`) is a plain `string` — DB-side `renderings.style` was
+    already unconstrained text, so no migration was needed. The panel is a
+    plain free-text style input plus three color pickers (wall/floor/accent)
+    that default to `DEFAULT_PALETTE_COLORS` but are fully user-adjustable.
+    "+ Add to list" queues a
     `{name, wall, floor, accent}` entry as a removable chip rather than
     generating immediately, so you can line up several styles/colorways
     before committing; "Build design(s) (N)" then generates them one at a
@@ -401,12 +403,12 @@ yet; each one only adds what a given feature needed.
   optionally starting from a real photo of it
   empty/framed-out. Pick which construction it's for first
   (`app/interior-design/project-picker.tsx`, auto-selected when there's
-  only one), then pick a room type and a style (5 quick-fill presets from
-  the same palette list as Rooms & Tasks, or type your own), and size the
-  room either by selecting one of that project's pre-added rooms
+  only one), then pick a room type and type a style (free text, no presets),
+  and size the room either by selecting one of that project's pre-added rooms
   (auto-fills width/depth from `rooms`) or entering dimensions/sqft
   manually.
-  - **2D layout editor** (`app/interior-design/room-layout-editor.tsx`) —
+  - **2D layout editor** (`components/LayoutEditor.tsx` — shared with
+    Landscape's yard layout, see its bullet further down) —
     once the room has real dimensions, a scaled top-down SVG of it appears
     with a palette of draggable fixtures/furniture specific to the room
     type (`lib/fixtureCatalog.ts` — cabinets/island/range/fridge for a
@@ -449,7 +451,7 @@ yet; each one only adds what a given feature needed.
     - **Feet-and-inches accuracy** (`lib/feetInches.ts`) — every size and
       position is now precise to the nearest inch, not a rounded decimal
       foot: dragging/resizing snaps to a 1" grid (`SNAP` in
-      `room-layout-editor.tsx`, decoupled from the coarser 1ft visual grid
+      `components/LayoutEditor.tsx`, decoupled from the coarser 1ft visual grid
       lines, `GRID_SPACING`, so the reference grid doesn't get too dense to
       read), and every displayed number is formatted as `4'6"` rather than
       `4.5'` (`formatFeetInches`). This isn't just cosmetic — internally
@@ -471,7 +473,7 @@ yet; each one only adds what a given feature needed.
       gets architectural-style dimension lines with tick marks along its
       top and left edges showing total width/depth, drawn in a margin
       added outside the room in the SVG's `viewBox` (`MARGIN` in
-      `room-layout-editor.tsx`) so they don't overlap the fixtures. All
+      `components/LayoutEditor.tsx`) so they don't overlap the fixtures. All
       figures come directly from the same feet-based coordinates the
       drag/resize/clamp math already uses, so what's displayed is what's
       actually stored — not a separate, driftable label.
@@ -606,19 +608,42 @@ yet; each one only adds what a given feature needed.
     so the UI caption now scopes its disclaimer to just that remaining gap.
 - **Landscape** (top-level, next to Construction Cost — `landscape` tab,
   same project-picker shape as Interior Design/Construction Cost) — upload a
-  photo of the house's exterior, check off which components to add (Grass /
-  Lawn, Deck, Pool, Concrete / Patio work — each with an optional freeform
-  detail, e.g. "wood deck, 12x16 ft along the back"), pick a style, and
-  Gemini's image-*edit* call (`editRoomImage`, reused as-is from
-  Interior Design — it only cares about an image + a prompt, not what
-  feature is calling it) redesigns that actual photo's yard in place. Unlike
-  Interior Design there's no from-scratch path — a photo is always required,
-  since the point is redesigning this specific house rather than generating
-  a generic one. `lib/landscapePrompt.ts` builds the prompt the same way
-  `lib/interiorDesignPrompt.ts` does (component list first as an explicit
-  numbered "add exactly these" block, then an instruction to keep the
-  house's architecture/camera angle unchanged). `landscape_designs`
-  (migration `025_landscape.sql`) mirrors `interior_designs`'s shape.
+  photo of the house's exterior, type a style, optionally lay out yard
+  elements with the same 2D layout editor Interior Design uses (see below),
+  add freeform notes, and Gemini's image-*edit* call (`editRoomImage`, reused
+  as-is from Interior Design — it only cares about an image + a prompt, not
+  what feature is calling it) redesigns that actual photo's yard in place.
+  Unlike Interior Design there's no from-scratch path — a photo is always
+  required, since the point is redesigning this specific house rather than
+  generating a generic one. `lib/landscapePrompt.ts` builds the prompt the
+  same way `lib/interiorDesignPrompt.ts` does (the layout description first
+  as an explicit numbered "place exactly this" block, then an instruction to
+  keep the house's architecture/camera angle unchanged). `landscape_designs`
+  (migration `025_landscape.sql`) mirrors `interior_designs`'s shape. The
+  original fixed checklist of components (Grass/Lawn, Deck, Pool,
+  Concrete/Patio) was retired in favor of the layout editor below — its
+  `components` column stays in the schema for old rows but new saves always
+  write an empty array.
+  - **2D yard layout editor** (migration `039_landscape_layout.sql` adds
+    `layout`/`yard_width`/`yard_depth` to `landscape_designs`) — enter yard
+    dimensions and the same `components/LayoutEditor.tsx` used by Interior
+    Design's room layout appears, with a yard-specific catalog
+    (`lib/landscapeCatalog.ts`: pool, spa, deck, patio, walkway, lawn,
+    planting bed, fire pit, outdoor kitchen, pergola, fence line, retaining
+    wall, shed). The editor itself was generalized from Interior-Design-only
+    (`app/interior-design/room-layout-editor.tsx`, taking a `roomType`
+    string and resolving fixtures internally) into a shared component
+    (`components/LayoutEditor.tsx`, taking a `catalog: FixtureType[]` prop
+    directly) so both features share one drag/resize/rotate/snap
+    implementation — Landscape passes `areaNoun="yard"` for its helper copy,
+    Interior Design keeps the default "room" wording. The layout-to-prompt-
+    text logic (`describeLayout`, zone labels like "along the back wall") was
+    likewise extracted from `lib/interiorDesignPrompt.ts` into
+    `lib/layoutDescription.ts`, parameterized with `sideLabel`/`elementNoun`
+    (defaulting to Interior Design's exact original "wall"/"furniture or
+    fixtures" wording, so that extraction changed no existing behavior) —
+    Landscape calls it with `sideLabel: "side"`, `elementNoun: "landscape
+    elements"`.
   - **Standalone Photos** (`landscape-sections.tsx`, migration
     `027_landscape_standalone.sql`) — a second tab alongside "By
     Construction" for a photo that isn't tied to any tracked construction at
@@ -1437,3 +1462,36 @@ yet; each one only adds what a given feature needed.
   Claude-written prompt) didn't need to change — both providers take a
   plain natural-language instruction, no provider-specific prompt syntax
   was in play.
+- **Custom prompts and chained "add to this image" edits, across all three
+  image-generation surfaces** (Rooms, Interior Design, Landscape) — two
+  related capabilities layered on top of the Gemini swap above:
+  - **Editable prompt, not a locked auto-composed one.** Each surface's
+    prompt (Claude-written for Rooms, template-built by
+    `buildInteriorDesignPrompt`/`buildLandscapePrompt` for the other two) is
+    shown in a `<textarea>` seeded with that auto-composed suggestion but
+    freely overridable before generating — the auto text keeps tracking
+    form changes live until you actually type in the box (Interior
+    Design/Landscape's `promptDraft`/`promptEdited` state, with a "Reset to
+    auto-generated" button to go back), at which point your edit wins and
+    is sent to Gemini as-is. Rooms already had a per-rendering saved prompt
+    to edit in place (`promptOverrides` in `rendering-panel.tsx`), so it
+    didn't need the auto/edited split.
+  - **"Add to this image"** — a further edit pass chained onto the
+    CURRENTLY generated/uploaded image rather than the original "before"
+    photo, so edits stack (e.g. generate a room, then separately ask to
+    "add a rug and a floor lamp" onto that result, then ask again). All
+    three surfaces call the same `/api/gemini/edit-room-image` route with
+    `imageUrl` set to the current image and a freeform instruction typed
+    into an inline textarea. Rooms reuses its existing
+    `saveRenderingPhoto` action (it already updates `uploaded_photo_url` in
+    place); Interior Design and Landscape needed new
+    `updateInteriorDesignImage`/`updateLandscapeDesignImage` actions since
+    those designs store `generated_image_url` as a column on an
+    insert-once row — both update that column and re-call
+    `recordProjectFile` with the same `source_id` the design was created
+    with, so the Files Library entry is replaced in place rather than
+    duplicated.
+  - **Style presets removed everywhere.** Rooms' style `<datalist>`
+    suggestions, Interior Design's 5 quick-style buttons, and Landscape's 5
+    style preset buttons are all gone — style is plain free text on every
+    surface now (see the dedicated bullets above and below for each).

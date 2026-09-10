@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import type { ActionResult } from "@/app/projects/actions";
-import type { LandscapeComponentSelection } from "@/lib/types";
+import type { PlacedFixture } from "@/lib/types";
 
 function revalidate(projectId: string | null) {
   revalidatePath(`/landscape`);
@@ -13,11 +13,13 @@ function revalidate(projectId: string | null) {
 
 export interface SaveLandscapeDesignInput {
   style: string;
-  components: LandscapeComponentSelection[];
   notes: string | null;
   originalPhotoUrl: string;
   generatedImageUrl: string;
   prompt: string;
+  layout: PlacedFixture[];
+  yardWidth: number | null;
+  yardDepth: number | null;
 }
 
 export async function saveLandscapeDesign(projectId: string | null, input: SaveLandscapeDesignInput): Promise<ActionResult> {
@@ -33,11 +35,13 @@ export async function saveLandscapeDesign(projectId: string | null, input: SaveL
       project_id: projectId,
       created_by: user.id,
       style: input.style,
-      components: input.components,
       notes: input.notes,
       original_photo_url: input.originalPhotoUrl,
       generated_image_url: input.generatedImageUrl,
       prompt: input.prompt,
+      layout: input.layout,
+      yard_width: input.yardWidth,
+      yard_depth: input.yardDepth,
     })
     .select("id")
     .single();
@@ -67,6 +71,37 @@ export async function saveLandscapeDesign(projectId: string | null, input: SaveL
 
   revalidate(projectId);
   return { ok: true, id: data.id };
+}
+
+// "Add to this image" — a follow-up edit pass chained onto the CURRENTLY
+// generated image (not the original before-photo), so edits stack. Re-uses
+// the design row's existing source_id when re-recording the project file so
+// the Files Library entry is replaced in place, not duplicated.
+export async function updateLandscapeDesignImage(
+  projectId: string | null,
+  designId: string,
+  input: { style: string; generatedImageUrl: string; prompt: string }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("landscape_designs")
+    .update({ generated_image_url: input.generatedImageUrl, prompt: input.prompt })
+    .eq("id", designId);
+  if (error) return { ok: false, error: error.message };
+
+  if (projectId) {
+    await recordProjectFile(supabase, {
+      projectId,
+      storageUrl: input.generatedImageUrl,
+      fileName: `Landscape — ${input.style} (design)`,
+      category: "landscape_design",
+      sourceTable: "landscape_designs",
+      sourceId: designId,
+    });
+  }
+
+  revalidate(projectId);
+  return { ok: true, id: designId };
 }
 
 export async function deleteLandscapeDesign(projectId: string | null, designId: string): Promise<ActionResult> {

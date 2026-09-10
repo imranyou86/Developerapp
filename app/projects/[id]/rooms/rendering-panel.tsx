@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { STYLE_PALETTES } from "@/lib/styles";
+import { DEFAULT_PALETTE_COLORS } from "@/lib/styles";
 import type { StylePalette } from "@/lib/styles";
 import { buildRoomIllustration } from "@/lib/illustration";
 import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projects/[id]/rooms/actions";
@@ -47,17 +47,23 @@ export function RenderingPanel({
   const [generatingImageFor, setGeneratingImageFor] = useState<string | null>(null);
   const [sendingToFinishId, setSendingToFinishId] = useState<string | null>(null);
 
-  // Style search + custom colors, queued up before a single "Build" — no
-  // more locked list of 5 preset styles: STYLE_PALETTES[0] just seeds a
-  // sensible starting color set, and the datalist below offers the old
-  // preset names as autocomplete suggestions without restricting input to
-  // them.
+  // Free-text style + custom colors, queued up before a single "Build" — no
+  // preset list at all: DEFAULT_PALETTE_COLORS just seeds a sensible
+  // starting color set for the pickers.
   const [styleInput, setStyleInput] = useState("");
-  const [wallColor, setWallColor] = useState(STYLE_PALETTES[0].wall);
-  const [floorColor, setFloorColor] = useState(STYLE_PALETTES[0].floor);
-  const [accentColor, setAccentColor] = useState(STYLE_PALETTES[0].accent);
+  const [wallColor, setWallColor] = useState(DEFAULT_PALETTE_COLORS.wall);
+  const [floorColor, setFloorColor] = useState(DEFAULT_PALETTE_COLORS.floor);
+  const [accentColor, setAccentColor] = useState(DEFAULT_PALETTE_COLORS.accent);
   const [queue, setQueue] = useState<QueuedStyle[]>([]);
   const [building, setBuilding] = useState(false);
+  // Local overrides of a rendering's Claude-written image_prompt, keyed by
+  // rendering id — "write your own prompt" without needing a DB round trip
+  // just to try wording before generating; "Generate image (AI)" sends
+  // whichever text is in the box, not necessarily the original.
+  const [promptOverrides, setPromptOverrides] = useState<Record<string, string>>({});
+  const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
+  const [addToImageText, setAddToImageText] = useState("");
+  const [addingToImage, setAddingToImage] = useState<string | null>(null);
 
   function addToQueue() {
     const name = styleInput.trim();
@@ -180,7 +186,8 @@ export function RenderingPanel({
   }
 
   async function handleGenerateImage(rendering: RoomWithRelations["renderings"][number]) {
-    if (!rendering.image_prompt) return;
+    const prompt = promptOverrides[rendering.id] ?? rendering.image_prompt;
+    if (!prompt || !prompt.trim()) return;
     setGeneratingImageFor(rendering.id);
     const taskKey = `room-image:${rendering.id}`;
     try {
@@ -188,7 +195,7 @@ export function RenderingPanel({
         const res = await fetchWithRetry("/api/gemini/generate-room-image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: rendering.image_prompt }),
+          body: JSON.stringify({ prompt }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Image generation failed.");
@@ -209,6 +216,45 @@ export function RenderingPanel({
       notify("error", err instanceof Error ? err.message : "Image generation failed.");
     } finally {
       setGeneratingImageFor(null);
+    }
+  }
+
+  // Refines the CURRENT image (whatever's in uploaded_photo_url right now —
+  // the last AI generation or edit, not necessarily the original) with a
+  // follow-up instruction, chaining edits rather than starting over from
+  // scratch each time.
+  async function handleAddToImage(rendering: RoomWithRelations["renderings"][number]) {
+    if (!rendering.uploaded_photo_url || !addToImageText.trim()) return;
+    setAddingToImage(rendering.id);
+    const taskKey = `room-image-add:${rendering.id}`;
+    try {
+      await run(taskKey, `Adding to "${room.name}" — ${rendering.style} image…`, async () => {
+        const res = await fetchWithRetry("/api/gemini/edit-room-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: rendering.uploaded_photo_url, prompt: addToImageText.trim() }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Image edit failed.");
+
+        const byteChars = atob(json.base64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
+
+        const url = await uploadPhotoBlob(rendering.id, blob, "png");
+        onRoomUpdated({
+          ...room,
+          renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+        });
+        notify("success", "Image updated.");
+        setAddToImagePromptFor(null);
+        setAddToImageText("");
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Image edit failed.");
+    } finally {
+      setAddingToImage(null);
     }
   }
 
@@ -302,20 +348,14 @@ export function RenderingPanel({
       <div className="mb-4 space-y-3 rounded-lg border border-blueprint/10 bg-concrete/50 p-3">
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-[180px] flex-1">
-            <label className="label">Search a style</label>
+            <label className="label">Style</label>
             <input
               className="input"
-              list={`style-suggestions-${room.id}`}
               value={styleInput}
               onChange={(e) => setStyleInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addToQueue())}
               placeholder="e.g. Coastal, Japandi, Mid-Century Modern…"
             />
-            <datalist id={`style-suggestions-${room.id}`}>
-              {STYLE_PALETTES.map((p) => (
-                <option key={p.name} value={p.name} />
-              ))}
-            </datalist>
           </div>
           <div>
             <label className="label">Wall</label>
@@ -408,11 +448,16 @@ export function RenderingPanel({
               {r.description && <p className="mb-2 text-xs text-blueprint/70">{r.description}</p>}
               {r.image_prompt && (
                 <details className="text-xs">
-                  <summary className="cursor-pointer text-amber-dark">Image prompt (used by &quot;Generate image&quot;, or copy to ChatGPT/Midjourney by hand)</summary>
-                  <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{r.image_prompt}</p>
+                  <summary className="cursor-pointer text-amber-dark">Image prompt — edit before generating, or copy elsewhere</summary>
+                  <textarea
+                    className="input mt-1 text-xs"
+                    rows={4}
+                    value={promptOverrides[r.id] ?? r.image_prompt}
+                    onChange={(e) => setPromptOverrides((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                  />
                   <button
                     className="btn-ghost mt-1 text-xs"
-                    onClick={() => handleCopyPrompt(r.image_prompt!)}
+                    onClick={() => handleCopyPrompt(promptOverrides[r.id] ?? r.image_prompt!)}
                   >
                     Copy prompt
                   </button>
@@ -454,6 +499,12 @@ export function RenderingPanel({
                 {r.uploaded_photo_url && (
                   <>
                     <button
+                      className="btn-outline flex-1 text-xs"
+                      onClick={() => setAddToImagePromptFor(addToImagePromptFor === r.id ? null : r.id)}
+                    >
+                      Add to this image
+                    </button>
+                    <button
                       className="btn-ghost flex-1 text-xs"
                       onClick={() => handleSaveImage(r.uploaded_photo_url!, `${room.name}-${r.style}`)}
                     >
@@ -471,6 +522,25 @@ export function RenderingPanel({
                   </>
                 )}
               </div>
+              {addToImagePromptFor === r.id && (
+                <div className="mt-2 space-y-1.5 border-t border-blueprint/10 pt-2">
+                  <textarea
+                    className="input text-xs"
+                    rows={2}
+                    placeholder={`Describe what to add or change — e.g. "add a potted plant in the corner, and a rug under the coffee table"`}
+                    value={addToImageText}
+                    onChange={(e) => setAddToImageText(e.target.value)}
+                    autoFocus
+                  />
+                  <button
+                    className="btn-amber w-full text-xs"
+                    onClick={() => handleAddToImage(r)}
+                    disabled={!addToImageText.trim() || addingToImage === r.id || isRunning(`room-image-add:${r.id}`)}
+                  >
+                    {addingToImage === r.id || isRunning(`room-image-add:${r.id}`) ? "Updating…" : "Update image"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

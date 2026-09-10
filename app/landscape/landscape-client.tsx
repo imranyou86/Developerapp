@@ -7,9 +7,14 @@ import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
-import { LANDSCAPE_COMPONENTS, LANDSCAPE_STYLES, buildLandscapePrompt } from "@/lib/landscapePrompt";
-import { saveLandscapeDesign, deleteLandscapeDesign } from "@/app/landscape/actions";
-import type { LandscapeComponentSelection, LandscapeDesign } from "@/lib/types";
+import { buildLandscapePrompt } from "@/lib/landscapePrompt";
+import { describeLayout } from "@/lib/layoutDescription";
+import { LayoutEditor, clampItemsToArea } from "@/components/LayoutEditor";
+import { LANDSCAPE_CATALOG } from "@/lib/landscapeCatalog";
+import { FeetInchesInput } from "@/components/FeetInchesInput";
+import { formatFeetInches } from "@/lib/feetInches";
+import { saveLandscapeDesign, deleteLandscapeDesign, updateLandscapeDesignImage } from "@/app/landscape/actions";
+import type { LandscapeDesign, PlacedFixture } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 export function LandscapeClient({ projectId, initialDesigns }: { projectId: string | null; initialDesigns: LandscapeDesign[] }) {
@@ -26,10 +31,25 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [style, setStyle] = useState<string>(LANDSCAPE_STYLES[0]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [details, setDetails] = useState<Record<string, string>>({});
+  const [style, setStyle] = useState<string>("");
+  const [yardWidth, setYardWidth] = useState<number | null>(null);
+  const [yardDepth, setYardDepth] = useState<number | null>(null);
+  const [layout, setLayout] = useState<PlacedFixture[]>([]);
   const [notes, setNotes] = useState("");
+  const [promptDraft, setPromptDraft] = useState("");
+  const [promptEdited, setPromptEdited] = useState(false);
+
+  const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
+  const [addToImageText, setAddToImageText] = useState("");
+  const [addingToImage, setAddingToImage] = useState<string | null>(null);
+
+  const hasYardDims = yardWidth != null && yardDepth != null && yardWidth > 0 && yardDepth > 0;
+  const numYardWidth = yardWidth ?? 0;
+  const numYardDepth = yardDepth ?? 0;
+  const layoutDescription = hasYardDims
+    ? describeLayout(layout, numYardWidth, numYardDepth, { sideLabel: "side", elementNoun: "landscape elements" })
+    : "";
+  const autoPrompt = buildLandscapePrompt({ style: style.trim() || "unspecified", layoutDescription, notes });
 
   useEffect(() => {
     return () => {
@@ -37,19 +57,23 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
     };
   }, [photoPreview]);
 
+  // Keep placed items inside the yard whenever its dimensions change.
+  useEffect(() => {
+    if (hasYardDims) setLayout((prev) => clampItemsToArea(prev, numYardWidth, numYardDepth));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numYardWidth, numYardDepth]);
+
+  // Tracks the auto-composed prompt live as the form changes, unless the
+  // user has typed their own override.
+  useEffect(() => {
+    if (!promptEdited) setPromptDraft(autoPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrompt, promptEdited]);
+
   function handleFileChange(file: File | null) {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoFile(file);
     setPhotoPreview(file ? URL.createObjectURL(file) : null);
-  }
-
-  function toggleComponent(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
   async function uploadToStorage(blob: Blob, ext: string, suffix: string): Promise<string> {
@@ -78,22 +102,19 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
       notify("error", "Upload a photo of the house's exterior first.");
       return;
     }
-    if (selectedIds.size === 0 && !notes.trim()) {
-      notify("error", "Pick at least one landscape component, or describe what to add in the notes.");
+    if (!style.trim()) {
+      notify("error", "Enter a style.");
       return;
     }
 
-    const components: LandscapeComponentSelection[] = LANDSCAPE_COMPONENTS.filter((c) => selectedIds.has(c.id)).map((c) => ({
-      id: c.id,
-      label: c.label,
-      detail: details[c.id] ?? "",
-    }));
+    const prompt = promptDraft.trim() || autoPrompt;
+    const w = yardWidth;
+    const d = yardDepth;
 
     setSubmitting(true);
     try {
       await run(taskKey, `Designing landscape — ${style}…`, async () => {
         const originalUrl = await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original");
-        const prompt = buildLandscapePrompt({ style, components, notes });
 
         // Always an image edit (never a from-scratch generation) — the
         // whole point of Landscape is redesigning this exact house's yard,
@@ -113,12 +134,14 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
         const generatedUrl = await uploadToStorage(blob, "png", "design");
 
         const saveRes = await saveLandscapeDesign(projectId, {
-          style,
-          components,
+          style: style.trim(),
           notes: notes.trim() || null,
           originalPhotoUrl: originalUrl,
           generatedImageUrl: generatedUrl,
           prompt,
+          layout,
+          yardWidth: w,
+          yardDepth: d,
         });
         if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save design.");
 
@@ -126,12 +149,15 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
           {
             id: saveRes.id!,
             project_id: projectId,
-            style,
-            components,
+            style: style.trim(),
+            components: [],
             notes: notes.trim() || null,
             original_photo_url: originalUrl,
             generated_image_url: generatedUrl,
             prompt,
+            layout,
+            yard_width: w,
+            yard_depth: d,
             created_at: new Date().toISOString(),
           },
           ...prev,
@@ -139,14 +165,54 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
         notify("success", "Landscape designed.");
         handleFileChange(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
-        setSelectedIds(new Set());
-        setDetails({});
         setNotes("");
+        setPromptEdited(false);
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Landscape generation failed.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleAddToImage(design: LandscapeDesign) {
+    if (!addToImageText.trim()) return;
+    setAddingToImage(design.id);
+    const taskKey2 = `landscape-add:${design.id}`;
+    try {
+      await run(taskKey2, `Adding to "${design.style}" landscape image…`, async () => {
+        const res = await fetchWithRetry("/api/gemini/edit-room-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: design.generated_image_url, prompt: addToImageText.trim() }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Image edit failed.");
+
+        const byteChars = atob(json.base64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
+        const newUrl = await uploadToStorage(blob, "png", "design");
+
+        const updateRes = await updateLandscapeDesignImage(projectId, design.id, {
+          style: design.style,
+          generatedImageUrl: newUrl,
+          prompt: addToImageText.trim(),
+        });
+        if (!updateRes.ok) throw new Error(updateRes.error ?? "Could not save the updated image.");
+
+        setDesigns((prev) =>
+          prev.map((d) => (d.id === design.id ? { ...d, generated_image_url: newUrl, prompt: addToImageText.trim() } : d))
+        );
+        notify("success", "Image updated.");
+        setAddToImagePromptFor(null);
+        setAddToImageText("");
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Image edit failed.");
+    } finally {
+      setAddingToImage(null);
     }
   }
 
@@ -184,7 +250,7 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
         <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Design the landscape</h2>
         <p className="mb-4 text-xs text-blueprint/50">
           Upload a photo of the house from the outside — Gemini redesigns that actual photo&apos;s yard, keeping the
-          house itself unchanged. Pick which components to add below, then generate.
+          house itself unchanged. Optionally lay out yard elements below, then generate.
         </p>
 
         <form onSubmit={handleGenerate} className="space-y-4">
@@ -207,38 +273,30 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
           <div>
             <label className="label">Style</label>
             <input className="input" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. Modern Minimalist" />
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {LANDSCAPE_STYLES.map((s) => (
-                <button key={s} type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setStyle(s)}>
-                  {s}
-                </button>
-              ))}
+          </div>
+
+          <div>
+            <label className="label">Yard sizing (optional, for the layout editor)</label>
+            <div className="grid grid-cols-2 gap-2">
+              <FeetInchesInput value={yardWidth} onChange={setYardWidth} placeholder={`Width, e.g. 40' 0"`} />
+              <FeetInchesInput value={yardDepth} onChange={setYardDepth} placeholder={`Depth, e.g. 30' 0"`} />
             </div>
           </div>
 
           <div>
-            <label className="label">Components to add</label>
-            <div className="space-y-2">
-              {LANDSCAPE_COMPONENTS.map((c) => {
-                const checked = selectedIds.has(c.id);
-                return (
-                  <div key={c.id} className="rounded-lg border border-blueprint/10 p-2.5">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={checked} onChange={() => toggleComponent(c.id)} />
-                      <span className="font-medium text-blueprint-dark">{c.label}</span>
-                    </label>
-                    {checked && (
-                      <input
-                        className="input mt-2 text-xs"
-                        placeholder={`Optional details — e.g. size, placement, material…`}
-                        value={details[c.id] ?? ""}
-                        onChange={(e) => setDetails((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <label className="label">Yard layout (optional)</label>
+            {hasYardDims ? (
+              <LayoutEditor
+                catalog={LANDSCAPE_CATALOG}
+                areaWidth={numYardWidth}
+                areaDepth={numYardDepth}
+                areaNoun="yard"
+                items={layout}
+                onChange={setLayout}
+              />
+            ) : (
+              <p className="text-xs text-blueprint/40">Enter yard dimensions above to lay out elements like a pool, deck, or patio.</p>
+            )}
           </div>
 
           <div>
@@ -249,6 +307,26 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Anything else to add — fencing, lighting, pavers, plantings…"
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="label mb-0">Image prompt — edit before generating, or write your own</label>
+              {promptEdited && (
+                <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setPromptEdited(false)}>
+                  Reset to auto-generated
+                </button>
+              )}
+            </div>
+            <textarea
+              className="input font-mono text-xs"
+              rows={5}
+              value={promptDraft}
+              onChange={(e) => {
+                setPromptDraft(e.target.value);
+                setPromptEdited(true);
+              }}
             />
           </div>
 
@@ -277,8 +355,11 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
                   Delete
                 </button>
               </div>
-              {d.components.length > 0 && (
-                <p className="mb-2 text-xs text-blueprint/50">{d.components.map((c) => c.label).join(", ")}</p>
+              {(d.yard_width || d.layout.length > 0) && (
+                <p className="mb-2 text-xs text-blueprint/50">
+                  {d.yard_width && d.yard_depth ? `${formatFeetInches(d.yard_width)} × ${formatFeetInches(d.yard_depth)} — ` : ""}
+                  {d.layout.length > 0 ? `${d.layout.length} element${d.layout.length === 1 ? "" : "s"} laid out` : ""}
+                </p>
               )}
               <details className="text-xs">
                 <summary className="cursor-pointer text-amber-dark">Before photo &amp; prompt</summary>
@@ -290,9 +371,35 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
                   Copy prompt
                 </button>
               </details>
-              <button className="btn-ghost mt-2 w-full text-xs" onClick={() => handleSaveImage(d.generated_image_url, `landscape-${d.style}`)}>
-                Save image
-              </button>
+              <div className="mt-2 flex gap-2">
+                <button className="btn-ghost flex-1 text-xs" onClick={() => handleSaveImage(d.generated_image_url, `landscape-${d.style}`)}>
+                  Save image
+                </button>
+                <button
+                  className="btn-outline flex-1 text-xs"
+                  onClick={() => setAddToImagePromptFor(addToImagePromptFor === d.id ? null : d.id)}
+                >
+                  Add to this image
+                </button>
+              </div>
+              {addToImagePromptFor === d.id && (
+                <div className="mt-2 space-y-1.5">
+                  <textarea
+                    className="input text-xs"
+                    rows={3}
+                    placeholder='Describe what to add or change — e.g. "add string lights over the patio, and a row of potted plants along the fence"'
+                    value={addToImageText}
+                    onChange={(e) => setAddToImageText(e.target.value)}
+                  />
+                  <button
+                    className="btn-amber w-full text-xs"
+                    disabled={!addToImageText.trim() || addingToImage === d.id}
+                    onClick={() => handleAddToImage(d)}
+                  >
+                    {addingToImage === d.id ? "Updating…" : "Update image"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

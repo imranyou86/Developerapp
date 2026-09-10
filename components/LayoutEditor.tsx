@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getFixturesForRoomType, type FixtureType } from "@/lib/fixtureCatalog";
+import type { FixtureType } from "@/lib/fixtureCatalog";
 import { formatFeetInches } from "@/lib/feetInches";
 import type { PlacedFixture } from "@/lib/types";
 
@@ -27,7 +27,7 @@ const fmt = formatFeetInches;
 
 // Converts a pointer event's screen position into room-relative feet, using
 // the SVG's actual rendered box and its viewBox (which includes MARGIN on
-// each side for the dimension rulers, so it isn't simply roomWidth/roomDepth).
+// each side for the dimension rulers, so it isn't simply areaWidth/areaDepth).
 function pointToFeet(svg: SVGSVGElement, clientX: number, clientY: number, viewW: number, viewH: number) {
   const rect = svg.getBoundingClientRect();
   return {
@@ -39,14 +39,14 @@ function pointToFeet(svg: SVGSVGElement, clientX: number, clientY: number, viewW
 // Keeps placed items inside the room after its dimensions change (e.g.
 // switching which pre-added room is selected, or editing manual sizing) —
 // called from the parent, not internally, since the parent owns `items`.
-export function clampItemsToRoom(items: PlacedFixture[], roomWidth: number, roomDepth: number): PlacedFixture[] {
+export function clampItemsToArea(items: PlacedFixture[], areaWidth: number, areaDepth: number): PlacedFixture[] {
   return items.map((it) => {
     const w = it.rotated ? it.depth : it.width;
     const d = it.rotated ? it.width : it.depth;
     return {
       ...it,
-      x: clamp(it.x, 0, Math.max(0, roomWidth - w)),
-      y: clamp(it.y, 0, Math.max(0, roomDepth - d)),
+      x: clamp(it.x, 0, Math.max(0, areaWidth - w)),
+      y: clamp(it.y, 0, Math.max(0, areaDepth - d)),
     };
   });
 }
@@ -97,16 +97,21 @@ function DimensionLine({
   );
 }
 
-export function RoomLayoutEditor({
-  roomType,
-  roomWidth,
-  roomDepth,
+export function LayoutEditor({
+  catalog,
+  areaWidth,
+  areaDepth,
+  areaNoun = "room",
   items,
   onChange,
 }: {
-  roomType: string;
-  roomWidth: number;
-  roomDepth: number;
+  catalog: FixtureType[];
+  areaWidth: number;
+  areaDepth: number;
+  // Swaps "room"/"onto the room"/etc in the helper copy for a different
+  // domain (e.g. "yard" for Landscape) — purely cosmetic, doesn't affect
+  // behavior, defaulting to Interior Design's original wording.
+  areaNoun?: string;
   items: PlacedFixture[];
   onChange: (items: PlacedFixture[]) => void;
 }) {
@@ -115,13 +120,13 @@ export function RoomLayoutEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const fixtures = getFixturesForRoomType(roomType);
+  const fixtures = catalog;
   const selected = items.find((it) => it.id === selectedId) ?? null;
-  const viewW = roomWidth + MARGIN * 2;
-  const viewH = roomDepth + MARGIN * 2;
+  const viewW = areaWidth + MARGIN * 2;
+  const viewH = areaDepth + MARGIN * 2;
   // Scale the resize/rotate touch targets with room size so they stay
   // comfortably grabbable in both a tiny closet and a large great room.
-  const handleSize = clamp(Math.max(roomWidth, roomDepth) * 0.035, 0.28, 0.6);
+  const handleSize = clamp(Math.max(areaWidth, areaDepth) * 0.035, 0.28, 0.6);
 
   function footprint(item: PlacedFixture) {
     return item.rotated ? { w: item.depth, d: item.width } : { w: item.width, d: item.depth };
@@ -135,8 +140,8 @@ export function RoomLayoutEditor({
   }
 
   function addItem(type: FixtureType, xCenter: number, yCenter: number) {
-    const x = snap(clamp(xCenter - type.width / 2, 0, Math.max(0, roomWidth - type.width)));
-    const y = snap(clamp(yCenter - type.depth / 2, 0, Math.max(0, roomDepth - type.depth)));
+    const x = snap(clamp(xCenter - type.width / 2, 0, Math.max(0, areaWidth - type.width)));
+    const y = snap(clamp(yCenter - type.depth / 2, 0, Math.max(0, areaDepth - type.depth)));
     const item: PlacedFixture = {
       id: crypto.randomUUID(),
       typeId: type.id,
@@ -216,8 +221,8 @@ export function RoomLayoutEditor({
     function onMove(ev: PointerEvent) {
       moved = true;
       const p = pointToFeet(svg!, ev.clientX, ev.clientY, viewW, viewH);
-      finalX = clamp(p.x - grabDx, 0, Math.max(0, roomWidth - w));
-      finalY = clamp(p.y - grabDy, 0, Math.max(0, roomDepth - d));
+      finalX = clamp(p.x - grabDx, 0, Math.max(0, areaWidth - w));
+      finalY = clamp(p.y - grabDy, 0, Math.max(0, areaDepth - d));
       target.setAttribute("transform", `translate(${finalX - item.x}, ${finalY - item.y})`);
     }
     function onUp() {
@@ -262,8 +267,8 @@ export function RoomLayoutEditor({
       const p = pointToFeet(svg!, ev.clientX, ev.clientY, viewW, viewH);
       const rawW = p.x - grabDx - item.x;
       const rawD = p.y - grabDy - item.y;
-      finalW = clamp(rawW, MIN_SIZE, Math.max(MIN_SIZE, roomWidth - item.x));
-      finalD = clamp(rawD, MIN_SIZE, Math.max(MIN_SIZE, roomDepth - item.y));
+      finalW = clamp(rawW, MIN_SIZE, Math.max(MIN_SIZE, areaWidth - item.x));
+      finalD = clamp(rawD, MIN_SIZE, Math.max(MIN_SIZE, areaDepth - item.y));
       if (!refs) return;
       refs.rect.setAttribute("width", String(finalW));
       refs.rect.setAttribute("height", String(finalD));
@@ -300,8 +305,8 @@ export function RoomLayoutEditor({
     // (footprint's width/depth swap) — reclamp immediately after.
     const rotatedFootprintW = d;
     const rotatedFootprintD = w;
-    const x = clamp(selected.x, 0, Math.max(0, roomWidth - rotatedFootprintW));
-    const y = clamp(selected.y, 0, Math.max(0, roomDepth - rotatedFootprintD));
+    const x = clamp(selected.x, 0, Math.max(0, areaWidth - rotatedFootprintW));
+    const y = clamp(selected.y, 0, Math.max(0, areaDepth - rotatedFootprintD));
     onChange(items.map((it) => (it.id === selected.id ? { ...it, rotated: !it.rotated, x, y } : it)));
   }
 
@@ -369,9 +374,10 @@ export function RoomLayoutEditor({
         </button>
       </div>
       <p className="mb-2 text-xs text-blueprint/40">
-        Drag a fixture onto the room, drag it to reposition, or drag its bottom-right corner to resize. Positions
+        Drag an item onto the {areaNoun}, drag it to reposition, or drag its bottom-right corner to resize. Positions
         and sizes snap to the nearest inch and are shown in feet-inches (e.g. 4&apos;6&quot;), to scale with the
-        room.
+        {" "}
+        {areaNoun}.
       </p>
 
       <svg
@@ -381,17 +387,17 @@ export function RoomLayoutEditor({
         style={{ maxWidth: expanded ? 1100 : 560, aspectRatio: `${viewW} / ${viewH}` }}
         onPointerDown={() => setSelectedId(null)}
       >
-        <rect x={0} y={0} width={roomWidth} height={roomDepth} fill="#FAFAF7" stroke="#3A3A38" strokeWidth={0.04} />
+        <rect x={0} y={0} width={areaWidth} height={areaDepth} fill="#FAFAF7" stroke="#3A3A38" strokeWidth={0.04} />
 
-        {Array.from({ length: Math.floor(roomWidth / GRID_SPACING) + 1 }).map((_, i) => (
-          <line key={`v${i}`} x1={i * GRID_SPACING} y1={0} x2={i * GRID_SPACING} y2={roomDepth} stroke="#EDE7DD" strokeWidth={0.02} />
+        {Array.from({ length: Math.floor(areaWidth / GRID_SPACING) + 1 }).map((_, i) => (
+          <line key={`v${i}`} x1={i * GRID_SPACING} y1={0} x2={i * GRID_SPACING} y2={areaDepth} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
-        {Array.from({ length: Math.floor(roomDepth / GRID_SPACING) + 1 }).map((_, i) => (
-          <line key={`h${i}`} x1={0} y1={i * GRID_SPACING} x2={roomWidth} y2={i * GRID_SPACING} stroke="#EDE7DD" strokeWidth={0.02} />
+        {Array.from({ length: Math.floor(areaDepth / GRID_SPACING) + 1 }).map((_, i) => (
+          <line key={`h${i}`} x1={0} y1={i * GRID_SPACING} x2={areaWidth} y2={i * GRID_SPACING} stroke="#EDE7DD" strokeWidth={0.02} />
         ))}
 
-        <DimensionLine x1={0} y1={-MARGIN * 0.55} x2={roomWidth} y2={-MARGIN * 0.55} label={fmt(roomWidth)} />
-        <DimensionLine x1={-MARGIN * 0.55} y1={0} x2={-MARGIN * 0.55} y2={roomDepth} label={fmt(roomDepth)} vertical />
+        <DimensionLine x1={0} y1={-MARGIN * 0.55} x2={areaWidth} y2={-MARGIN * 0.55} label={fmt(areaWidth)} />
+        <DimensionLine x1={-MARGIN * 0.55} y1={0} x2={-MARGIN * 0.55} y2={areaDepth} label={fmt(areaDepth)} vertical />
 
         {items.map((item) => {
           const { w, d } = footprint(item);

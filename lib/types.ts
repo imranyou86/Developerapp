@@ -231,6 +231,9 @@ export interface LandscapeDesign {
   original_photo_url: string;
   generated_image_url: string;
   prompt: string;
+  layout: PlacedFixture[];
+  yard_width: number | null;
+  yard_depth: number | null;
   created_at: string;
 }
 

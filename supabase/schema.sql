@@ -181,6 +181,9 @@ create table if not exists landscape_designs (
   original_photo_url text not null,
   generated_image_url text not null,
   prompt text not null,
+  layout jsonb not null default '[]'::jsonb,
+  yard_width numeric,
+  yard_depth numeric,
   created_at timestamptz not null default now()
 );
 

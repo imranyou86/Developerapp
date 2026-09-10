@@ -72,6 +72,36 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
   return { ok: true, id: data.id };
 }
 
+// "Add to this image" — a follow-up edit pass chained onto the CURRENTLY
+// generated image (not the original before-photo), so edits stack. Re-uses
+// the design row's existing source_id when re-recording the project file so
+// the Files Library entry is replaced in place, not duplicated.
+export async function updateInteriorDesignImage(
+  projectId: string,
+  designId: string,
+  input: { roomType: string; style: string; generatedImageUrl: string; prompt: string }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("interior_designs")
+    .update({ generated_image_url: input.generatedImageUrl, prompt: input.prompt })
+    .eq("id", designId);
+  if (error) return { ok: false, error: error.message };
+
+  const label = `${input.roomType} — ${input.style}`;
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl: input.generatedImageUrl,
+    fileName: `${label} (design)`,
+    category: "interior_design",
+    sourceTable: "interior_designs",
+    sourceId: designId,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: designId };
+}
+
 export async function deleteInteriorDesign(projectId: string, designId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("interior_designs").delete().eq("id", designId);

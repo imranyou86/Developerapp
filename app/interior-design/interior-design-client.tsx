@@ -7,15 +7,15 @@ import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
-import { STYLE_PALETTES } from "@/lib/styles";
 import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes";
-import { buildInteriorDesignPrompt, describeLayout } from "@/lib/interiorDesignPrompt";
-import { RoomLayoutEditor, clampItemsToRoom } from "@/app/interior-design/room-layout-editor";
+import { buildInteriorDesignPrompt } from "@/lib/interiorDesignPrompt";
+import { describeLayout } from "@/lib/layoutDescription";
+import { LayoutEditor, clampItemsToArea } from "@/components/LayoutEditor";
 import { FeetInchesInput } from "@/components/FeetInchesInput";
 import { formatFeetInches } from "@/lib/feetInches";
 import { stripLeadingZero } from "@/lib/numberInput";
 import { getFixturesForRoomType } from "@/lib/fixtureCatalog";
-import { saveInteriorDesign, deleteInteriorDesign } from "@/app/interior-design/actions";
+import { saveInteriorDesign, deleteInteriorDesign, updateInteriorDesignImage } from "@/app/interior-design/actions";
 import type { InteriorDesign, PlacedFixture } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
@@ -62,15 +62,31 @@ export function InteriorDesignClient({
   const [roomSource, setRoomSource] = useState<"existing" | "manual">(rooms.length > 0 ? "existing" : "manual");
   const [selectedRoomId, setSelectedRoomId] = useState<string>(rooms[0]?.id ?? "");
   const [roomType, setRoomType] = useState<RoomTypeOption>(rooms[0] ? matchRoomType(rooms[0].type) : "Bedroom");
-  const [style, setStyle] = useState<string>(STYLE_PALETTES[0].name);
+  const [style, setStyle] = useState<string>("");
   const [width, setWidth] = useState<number | null>(rooms[0]?.width ?? null);
   const [depth, setDepth] = useState<number | null>(rooms[0]?.depth ?? null);
   const [sqft, setSqft] = useState<string>("");
   const [layout, setLayout] = useState<PlacedFixture[]>([]);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [promptEdited, setPromptEdited] = useState(false);
+
+  const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
+  const [addToImageText, setAddToImageText] = useState("");
+  const [addingToImage, setAddingToImage] = useState<string | null>(null);
 
   const hasRoomDims = width != null && depth != null && width > 0 && depth > 0;
   const numWidth = width ?? 0;
   const numDepth = depth ?? 0;
+  const layoutDescription = hasRoomDims ? describeLayout(layout, numWidth, numDepth) : "";
+  const autoPrompt = buildInteriorDesignPrompt({
+    roomType,
+    style: style.trim() || "unspecified",
+    width,
+    depth,
+    sqft: sqft ? Number(sqft) : null,
+    hasPhoto: !!photoFile,
+    layoutDescription,
+  });
 
   useEffect(() => {
     if (hasRoomDims) setSqft(String(Math.round(numWidth * numDepth)));
@@ -80,9 +96,17 @@ export function InteriorDesignClient({
   // Keep placed fixtures inside the room whenever its dimensions change
   // (switching the selected pre-added room, or editing manual sizing).
   useEffect(() => {
-    if (hasRoomDims) setLayout((prev) => clampItemsToRoom(prev, numWidth, numDepth));
+    if (hasRoomDims) setLayout((prev) => clampItemsToArea(prev, numWidth, numDepth));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [numWidth, numDepth]);
+
+  // The prompt textarea tracks the auto-composed prompt live as the form
+  // changes, unless the user has typed their own override — a manual edit
+  // should never get silently clobbered by, say, dragging a fixture.
+  useEffect(() => {
+    if (!promptEdited) setPromptDraft(autoPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrompt, promptEdited]);
 
   useEffect(() => {
     return () => {
@@ -158,7 +182,7 @@ export function InteriorDesignClient({
           return;
         }
 
-        setLayout(clampItemsToRoom(suggested, numWidth, numDepth));
+        setLayout(clampItemsToArea(suggested, numWidth, numDepth));
         notify(
           "success",
           json.found_on_plan
@@ -204,7 +228,7 @@ export function InteriorDesignClient({
     const d = depth;
     const s = sqft ? Number(sqft) : null;
     const roomId = roomSource === "existing" && selectedRoomId ? selectedRoomId : null;
-    const layoutDescription = hasRoomDims ? describeLayout(layout, numWidth, numDepth) : "";
+    const prompt = promptDraft.trim() || autoPrompt;
 
     setSubmitting(true);
     try {
@@ -212,16 +236,6 @@ export function InteriorDesignClient({
         const originalUrl = photoFile
           ? await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original")
           : null;
-
-        const prompt = buildInteriorDesignPrompt({
-          roomType,
-          style: style.trim(),
-          width: w,
-          depth: d,
-          sqft: s,
-          hasPhoto: !!originalUrl,
-          layoutDescription,
-        });
 
         const res = originalUrl
           ? await fetchWithRetry("/api/gemini/edit-room-image", {
@@ -278,11 +292,54 @@ export function InteriorDesignClient({
         notify("success", "Room designed.");
         handleFileChange(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
+        setPromptEdited(false);
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Design generation failed.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleAddToImage(design: InteriorDesign) {
+    if (!addToImageText.trim()) return;
+    setAddingToImage(design.id);
+    const taskKey2 = `interior-design-add:${design.id}`;
+    try {
+      await run(taskKey2, `Adding to "${design.room_type} — ${design.style}" image…`, async () => {
+        const res = await fetchWithRetry("/api/gemini/edit-room-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: design.generated_image_url, prompt: addToImageText.trim() }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Image edit failed.");
+
+        const byteChars = atob(json.base64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
+        const newUrl = await uploadToStorage(blob, "png", "design");
+
+        const updateRes = await updateInteriorDesignImage(projectId, design.id, {
+          roomType: design.room_type,
+          style: design.style,
+          generatedImageUrl: newUrl,
+          prompt: addToImageText.trim(),
+        });
+        if (!updateRes.ok) throw new Error(updateRes.error ?? "Could not save the updated image.");
+
+        setDesigns((prev) =>
+          prev.map((d) => (d.id === design.id ? { ...d, generated_image_url: newUrl, prompt: addToImageText.trim() } : d))
+        );
+        notify("success", "Image updated.");
+        setAddToImagePromptFor(null);
+        setAddToImageText("");
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Image edit failed.");
+    } finally {
+      setAddingToImage(null);
     }
   }
 
@@ -355,18 +412,6 @@ export function InteriorDesignClient({
             <div>
               <label className="label">Style</label>
               <input className="input" value={style} onChange={(e) => setStyle(e.target.value)} placeholder="e.g. Modern Farmhouse" />
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {STYLE_PALETTES.map((p) => (
-                  <button
-                    key={p.name}
-                    type="button"
-                    className="btn-ghost px-2 py-1 text-xs"
-                    onClick={() => setStyle(p.name)}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
 
@@ -431,16 +476,40 @@ export function InteriorDesignClient({
               )}
             </div>
             {hasRoomDims ? (
-              <RoomLayoutEditor
-                roomType={roomType}
-                roomWidth={numWidth}
-                roomDepth={numDepth}
+              <LayoutEditor
+                catalog={getFixturesForRoomType(roomType)}
+                areaWidth={numWidth}
+                areaDepth={numDepth}
                 items={layout}
                 onChange={setLayout}
               />
             ) : (
               <p className="text-xs text-blueprint/40">Enter room dimensions above to lay out fixtures and furniture.</p>
             )}
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="label mb-0">Image prompt — edit before generating, or write your own</label>
+              {promptEdited && (
+                <button
+                  type="button"
+                  className="btn-ghost px-2 py-1 text-xs"
+                  onClick={() => setPromptEdited(false)}
+                >
+                  Reset to auto-generated
+                </button>
+              )}
+            </div>
+            <textarea
+              className="input font-mono text-xs"
+              rows={5}
+              value={promptDraft}
+              onChange={(e) => {
+                setPromptDraft(e.target.value);
+                setPromptEdited(true);
+              }}
+            />
           </div>
 
           <button type="submit" className="btn-amber w-full" disabled={generating}>
@@ -489,12 +558,38 @@ export function InteriorDesignClient({
                   Copy prompt
                 </button>
               </details>
-              <button
-                className="btn-ghost mt-2 w-full text-xs"
-                onClick={() => handleSaveImage(d.generated_image_url, `${d.room_type}-${d.style}`)}
-              >
-                Save image
-              </button>
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="btn-ghost flex-1 text-xs"
+                  onClick={() => handleSaveImage(d.generated_image_url, `${d.room_type}-${d.style}`)}
+                >
+                  Save image
+                </button>
+                <button
+                  className="btn-outline flex-1 text-xs"
+                  onClick={() => setAddToImagePromptFor(addToImagePromptFor === d.id ? null : d.id)}
+                >
+                  Add to this image
+                </button>
+              </div>
+              {addToImagePromptFor === d.id && (
+                <div className="mt-2 space-y-1.5">
+                  <textarea
+                    className="input text-xs"
+                    rows={3}
+                    placeholder='Describe what to add or change — e.g. "add a potted plant in the corner, and a rug under the coffee table"'
+                    value={addToImageText}
+                    onChange={(e) => setAddToImageText(e.target.value)}
+                  />
+                  <button
+                    className="btn-amber w-full text-xs"
+                    disabled={!addToImageText.trim() || addingToImage === d.id}
+                    onClick={() => handleAddToImage(d)}
+                  >
+                    {addingToImage === d.id ? "Updating…" : "Update image"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
