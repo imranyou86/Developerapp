@@ -9,8 +9,12 @@ interface CookieToSet {
 
 export async function updateSession(request: NextRequest) {
   // Public, unauthenticated read-only project share pages — no session
-  // lookup needed at all, and never redirected to /login.
-  if (request.nextUrl.pathname.startsWith("/share")) {
+  // lookup needed at all, and never redirected to /login. Same reasoning
+  // for the alert-email unsubscribe link: whoever clicks it from their
+  // inbox is very likely not signed in on that device at all, and
+  // redirecting them to /login instead of just unsubscribing them would
+  // defeat the point of a one-click link.
+  if (request.nextUrl.pathname.startsWith("/share") || request.nextUrl.pathname.startsWith("/api/alerts/unsubscribe")) {
     return NextResponse.next({ request });
   }
 

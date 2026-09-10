@@ -13,6 +13,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/email";
+import { getSiteOrigin } from "@/lib/site";
 
 export async function notifyProjectSubscribers(
   projectId: string,
@@ -21,7 +22,7 @@ export async function notifyProjectSubscribers(
   try {
     const admin = createAdminClient();
     const [{ data: subs }, { data: project }] = await Promise.all([
-      admin.from("project_alert_subscriptions").select("user_id, email").eq("project_id", projectId),
+      admin.from("project_alert_subscriptions").select("id, user_id, email").eq("project_id", projectId),
       admin.from("projects").select("name").eq("id", projectId).maybeSingle(),
     ]);
     if (!subs || subs.length === 0) return;
@@ -30,14 +31,32 @@ export async function notifyProjectSubscribers(
     const recipients = subs.filter((s) => s.user_id !== options.excludeUserId);
     if (recipients.length === 0) return;
 
+    // getSiteOrigin() reads the current request's Host header (via
+    // next/headers), so this only works called from within a live request —
+    // true for every call site today (Server Actions triggered by a user
+    // request). Falls back to a relative-looking note rather than throwing
+    // if that ever changes.
+    let origin: string;
+    try {
+      origin = getSiteOrigin();
+    } catch {
+      origin = "";
+    }
+
     await Promise.all(
-      recipients.map((s) =>
-        sendEmail({
+      recipients.map((s) => {
+        // The subscription row's own id (a random uuid) doubles as the
+        // unsubscribe token — same "unguessable id in a public link"
+        // pattern project_shares/project_invites already use.
+        const unsubscribeLine = origin
+          ? `\n\nNo longer want these emails? Unsubscribe: ${origin}/api/alerts/unsubscribe?sub=${s.id}`
+          : "";
+        return sendEmail({
           to: s.email,
           subject: `${projectName}: ${options.subject}`,
-          text: `${options.body}\n\n— Alaia Homes Dev. Manage your alert subscription from this construction's page.`,
-        }).catch((err) => console.warn(`notifyProjectSubscribers: failed to email ${s.email}:`, err))
-      )
+          text: `${options.body}\n\n— Alaia Homes Dev.${unsubscribeLine}`,
+        }).catch((err) => console.warn(`notifyProjectSubscribers: failed to email ${s.email}:`, err));
+      })
     );
   } catch (err) {
     console.warn("notifyProjectSubscribers failed (non-fatal):", err);
