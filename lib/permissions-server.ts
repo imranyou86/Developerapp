@@ -52,7 +52,12 @@ export async function getAllowedTabSlugs(role: UserRole, tabs: ProjectTabDef[] =
       "tab",
       tabs.map((t) => t.slug)
     );
-  if (!data) return tabs.map((t) => t.slug);
+  // Fail closed, not open: a missing or empty result means this role has no
+  // configured rows (a query error, or a seeding migration that never ran)
+  // — treating that as "nothing disallowed" would silently hand out full
+  // access instead. `data` being `[]` is truthy, so this has to be checked
+  // separately from `!data`.
+  if (!data || data.length === 0) return [];
 
   const disallowed = new Set(data.filter((row) => !row.allowed).map((row) => row.tab));
   return tabs.filter((t) => !disallowed.has(t.slug)).map((t) => t.slug);
