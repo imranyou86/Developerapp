@@ -185,7 +185,7 @@ export function RenderingPanel({
     const taskKey = `room-image:${rendering.id}`;
     try {
       await run(taskKey, `Generating "${room.name}" — ${rendering.style} image…`, async () => {
-        const res = await fetchWithRetry("/api/openai/generate-room-image", {
+        const res = await fetchWithRetry("/api/gemini/generate-room-image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: rendering.image_prompt }),

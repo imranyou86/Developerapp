@@ -13,7 +13,7 @@ export const LANDSCAPE_COMPONENTS: { id: string; label: string }[] = [
 
 export const LANDSCAPE_STYLES = ["Modern Minimalist", "Mediterranean", "Desert / Drought-Tolerant", "Tropical", "Traditional Lawn"];
 
-// Deterministic, template-built prompt for OpenAI's image *edit* endpoint —
+// Deterministic, template-built prompt for Gemini's image *edit* call —
 // same lesson as Interior Design's prompt builder: short, front-loaded, and
 // explicit about what must stay unchanged is what an image model actually
 // follows. Unlike Interior Design, there's no "no photo" branch — the whole

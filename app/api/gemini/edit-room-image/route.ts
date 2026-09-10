@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { enforceRateLimit } from "@/lib/rateLimit";
-import { generateRoomImage } from "@/lib/openai";
+import { editRoomImage } from "@/lib/gemini";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,20 +15,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limited = await enforceRateLimit(user.id, "generate-room-image");
+  const limited = await enforceRateLimit(user.id, "edit-room-image");
   if (limited) return limited;
 
-  const body = (await req.json()) as { prompt?: string };
+  const body = (await req.json()) as { imageUrl?: string; prompt?: string };
+  if (!body.imageUrl) {
+    return NextResponse.json({ error: "Missing room photo." }, { status: 400 });
+  }
   if (!body.prompt || !body.prompt.trim()) {
-    return NextResponse.json({ error: "Missing image prompt." }, { status: 400 });
+    return NextResponse.json({ error: "Missing design prompt." }, { status: 400 });
   }
 
   try {
-    const image = await generateRoomImage(body.prompt);
+    const image = await editRoomImage(body.imageUrl, body.prompt);
     return NextResponse.json({ base64: image.base64, mimeType: image.mimeType });
   } catch (err) {
-    console.error("generate-room-image failed", err);
-    const message = err instanceof Error ? err.message : "Image generation failed.";
+    console.error("edit-room-image failed", err);
+    const message = err instanceof Error ? err.message : "Image design failed.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

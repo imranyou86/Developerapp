@@ -52,7 +52,7 @@ export function LandscapeSections({
       {tab === "construction" ? (
         <>
           <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction this design is for — upload a photo of the house&apos;s exterior and OpenAI will
+            Pick which construction this design is for — upload a photo of the house&apos;s exterior and Gemini will
             redesign the actual yard around it.
           </p>
           {projectList.length === 0 ? (

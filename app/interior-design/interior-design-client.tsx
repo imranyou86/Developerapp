@@ -224,12 +224,12 @@ export function InteriorDesignClient({
         });
 
         const res = originalUrl
-          ? await fetchWithRetry("/api/openai/edit-room-image", {
+          ? await fetchWithRetry("/api/gemini/edit-room-image", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ imageUrl: originalUrl, prompt }),
             })
-          : await fetchWithRetry("/api/openai/generate-room-image", {
+          : await fetchWithRetry("/api/gemini/generate-room-image", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ prompt }),
@@ -319,7 +319,7 @@ export function InteriorDesignClient({
       <div className="card p-4">
         <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Design a room</h2>
         <p className="mb-4 text-xs text-blueprint/50">
-          Optionally upload a photo of an empty or framed-out room — OpenAI will redesign that actual photo, same
+          Optionally upload a photo of an empty or framed-out room — Gemini will redesign that actual photo, same
           architecture and layout. Without a photo, it generates a new room from scratch using the style, room
           type, and the layout you lay out below.
         </p>

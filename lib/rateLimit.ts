@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Cost/abuse guard for the paid AI routes (app/api/claude/*, app/api/openai/*,
+// Cost/abuse guard for the paid AI routes (app/api/claude/*, app/api/gemini/*,
 // and the house-book PDF's AI closing note) — nothing capped how many times
 // a signed-in user could call an expensive route (image generation,
 // web-search-grounded estimates), so a buggy client or a malicious user

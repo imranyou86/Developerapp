@@ -37,7 +37,7 @@ NEXT_PUBLIC_SUPABASE_URL=        # Project Settings -> API -> Project URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Project Settings -> API -> anon public key
 SUPABASE_SERVICE_ROLE_KEY=       # Project Settings -> API -> service_role key
 ANTHROPIC_API_KEY=               # console.anthropic.com -> API keys
-OPENAI_API_KEY=                  # platform.openai.com -> API keys (optional, Rooms tab image generation only)
+GEMINI_API_KEY=                  # aistudio.google.com/apikey (optional, Rooms/Interior Design/Landscape image generation only)
 RESEND_API_KEY=                  # resend.com -> API keys (optional, email alerts only)
 ALERT_FROM_EMAIL=                # optional, needs a Resend-verified domain — see .env.example
 ```
@@ -349,11 +349,11 @@ yet; each one only adds what a given feature needed.
   entirely client-side from SVG (`lib/illustration.ts`), no AI call needed.
   Claude writes a short design concept plus a concise (40-60 word,
   front-loaded) image-generation prompt — image models follow short concrete
-  prompts much better than long descriptive paragraphs. If `OPENAI_API_KEY`
-  is set, "Generate image (AI)" calls OpenAI's image API (`lib/openai.ts`)
+  prompts much better than long descriptive paragraphs. If `GEMINI_API_KEY`
+  is set, "Generate image (AI)" calls Google's Gemini API (`lib/gemini.ts`)
   with that prompt and uploads the result straight into the rendering,
   replacing the illustration; without that key, copy the same prompt into
-  ChatGPT/Midjourney by hand and upload the result instead — the manual path
+  an image tool by hand and upload the result instead — the manual path
   always works, the button is a convenience on top of it.
   - **Style search, not a locked list** — style used to be 5 fixed preset
     buttons (`lib/styles.ts`'s `STYLE_PALETTES`), each with its own baked-in
@@ -527,11 +527,11 @@ yet; each one only adds what a given feature needed.
     precise multi-object spatial instructions, especially on the
     photo-edit path where it also has to preserve the existing photo. The
     uploaded photo is still optional: with one, it's still
-    OpenAI's image *edit* endpoint (`editRoomImage` in `lib/openai.ts`,
-    POST `/api/openai/edit-room-image`) — image-to-image seeded with the
+    Gemini's image *edit* call (`editRoomImage` in `lib/gemini.ts`,
+    POST `/api/gemini/edit-room-image`) — image-to-image seeded with the
     real photo so the actual architecture/windows carry through; without
     one, it falls back to the Rooms tab's existing text-to-image endpoint
-    (`generateRoomImage`, POST `/api/openai/generate-room-image`) and
+    (`generateRoomImage`, POST `/api/gemini/generate-room-image`) and
     generates the room from scratch using the room type, style, and
     layout description alone.
   - Every past design for a project is kept (not overwritten) in a
@@ -546,7 +546,7 @@ yet; each one only adds what a given feature needed.
     you start (pick the construction up front, same as picking a deal in
     Buyers Guide) — and it's gated by the same tab_permissions row
     (`interior-design`), just reclassified from `PROJECT_TABS` to
-    `TOP_LEVEL_TABS` in `lib/permissions.ts`. Requires `OPENAI_API_KEY`
+    `TOP_LEVEL_TABS` in `lib/permissions.ts`. Requires `GEMINI_API_KEY`
     like the Rooms tab's image generation does.
 - **Construction Cost** (top-level, next to Interior Design — its own
   section, not folded into Interior Design's page — gated by the same
@@ -609,7 +609,7 @@ yet; each one only adds what a given feature needed.
   photo of the house's exterior, check off which components to add (Grass /
   Lawn, Deck, Pool, Concrete / Patio work — each with an optional freeform
   detail, e.g. "wood deck, 12x16 ft along the back"), pick a style, and
-  OpenAI's image-*edit* endpoint (`editRoomImage`, reused as-is from
+  Gemini's image-*edit* call (`editRoomImage`, reused as-is from
   Interior Design — it only cares about an image + a prompt, not what
   feature is calling it) redesigns that actual photo's yard in place. Unlike
   Interior Design there's no from-scratch path — a photo is always required,
@@ -715,7 +715,7 @@ yet; each one only adds what a given feature needed.
   deliberate scope limit on the policy, not a workaround for a bug. Whoever
   caused the change is excluded from the send. Actually sending mail is a
   thin `fetch` wrapper around Resend's REST API (`lib/email.ts`, no SDK —
-  same style as `lib/anthropic.ts`/`lib/openai.ts`) gated behind
+  same style as `lib/anthropic.ts`/`lib/gemini.ts`) gated behind
   `RESEND_API_KEY`; every call site wraps dispatch in a try/catch that only
   ever logs a failure (a bad key, Resend being down, a bounced address)
   rather than surfacing it to the user or rolling back the action that
@@ -1303,13 +1303,13 @@ yet; each one only adds what a given feature needed.
   everything, which is a safe no-op for anything already applied by hand.
   Still requires a one-time `DATABASE_URL` (see `.env.example`) and doesn't
   replace `supabase/schema.sql` for a brand-new project.
-- **Rate limiting on the paid AI/OpenAI routes** (`lib/rateLimit.ts`,
+- **Rate limiting on the paid AI/image-gen routes** (`lib/rateLimit.ts`,
   migration `036_api_rate_limits.sql`) — nothing previously capped how many
   times a signed-in user could call an expensive route (image generation,
   web-search-grounded estimates), so a buggy client or a bad actor could
   run up real API bills with no limit. `enforceRateLimit(userId, route)`
   is a two-line guard dropped into every `app/api/claude/*` and
-  `app/api/openai/*` route (plus the House Book PDF's AI closing note)
+  `app/api/gemini/*` route (plus the House Book PDF's AI closing note)
   right after the existing `auth.getUser()` check; it counts each user's
   hits per route in a rolling hour window via the service-role admin
   client (backed by a table, not in-memory state, since serverless route
@@ -1414,3 +1414,26 @@ yet; each one only adds what a given feature needed.
   are naturally bounded by the physical scope of one house or how many
   constructions a single account manages, not a realistic growth risk the
   way an ever-accumulating chat thread or file library is.
+- **Room/exterior image generation moved from OpenAI to Google Gemini**
+  (`lib/gemini.ts`, replacing `lib/openai.ts`) — swapped `gpt-image-1` for
+  Gemini 3.1 Flash Image ("Nano Banana 2"): stronger photorealism and
+  edit-consistency (preserving a real room/house photo's architecture
+  while restyling it) at a lower per-image cost. Same two functions, same
+  signatures (`generateRoomImage(prompt)`, `editRoomImage(imageUrl,
+  prompt)`, both still returning `{ base64, mimeType: "image/png" }`), so
+  every caller — the Rooms tab's "Generate image", Interior Design's
+  photo-optional room design, Landscape's required-photo yard redesign —
+  needed no changes beyond the import path. Under the hood this is a
+  `generateContent` call (`POST .../models/gemini-3.1-flash-image:generateContent`,
+  auth via an `x-goog-api-key` header) with `responseModalities: ["TEXT",
+  "IMAGE"]`; editing sends the source photo as an `inlineData` part
+  alongside the text instruction rather than using a separate edit
+  endpoint the way OpenAI's API did. The API routes moved with it —
+  `app/api/openai/{generate,edit}-room-image` are now
+  `app/api/gemini/{generate,edit}-room-image` — and the env var is
+  `GEMINI_API_KEY` (get one at aistudio.google.com/apikey), not
+  `OPENAI_API_KEY`. The prompt-building logic itself
+  (`lib/interiorDesignPrompt.ts`, `lib/landscapePrompt.ts`, the Rooms tab's
+  Claude-written prompt) didn't need to change — both providers take a
+  plain natural-language instruction, no provider-specific prompt syntax
+  was in play.

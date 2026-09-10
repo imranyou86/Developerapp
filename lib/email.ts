@@ -1,6 +1,6 @@
 // Server-only. Thin wrapper around Resend's REST API (https://resend.com) —
 // no SDK, matching this app's other external-API wrappers (lib/anthropic.ts,
-// lib/openai.ts): plain fetch, one function, throws with the response body
+// lib/gemini.ts): plain fetch, one function, throws with the response body
 // attached on failure. RESEND_API_KEY is read only here; never import this
 // from a Client Component.
 

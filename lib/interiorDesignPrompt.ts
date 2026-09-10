@@ -42,7 +42,7 @@ export function describeLayout(items: PlacedFixture[], roomWidth: number, roomDe
   return `FIXTURE PLACEMENT — follow this exactly, to scale within the room, and do not add any other furniture or fixtures beyond this list:\n${lines.join("\n")}`;
 }
 
-// Deterministic, template-built prompt for OpenAI's image call — no Claude
+// Deterministic, template-built prompt for Gemini's image call — no Claude
 // round-trip needed, and short/front-loaded prompts are what image models
 // actually follow well (the same lesson learned building the Rooms tab's
 // "Generate image" prompt). The explicit placement list is given early and

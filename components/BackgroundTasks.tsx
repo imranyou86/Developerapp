@@ -18,7 +18,7 @@ const BackgroundTasksContext = createContext<BackgroundTasksContextValue | null>
 
 // Mounted once in the root layout, so it survives client-side navigation
 // between tabs (only the page content below a layout unmounts on route
-// change, not the layout itself). An upload or a Claude/OpenAI call kicked
+// change, not the layout itself). An upload or a Claude/Gemini call kicked
 // off from a tab keeps running to completion even if you switch away — the
 // fetch isn't tied to that page component's lifecycle — but the page's own
 // `uploading`/`searching` state resets on remount, so there was previously

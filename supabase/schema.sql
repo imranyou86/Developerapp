@@ -140,7 +140,7 @@ create table if not exists renderings (
 );
 
 -- Interior Design tab: an optional photo of an empty/framed room (edited in
--- place by OpenAI's image-edit API) or, with no photo, a from-scratch
+-- place by Gemini's image-edit call) or, with no photo, a from-scratch
 -- generation — either way given a style + room type + sizing + a 2D
 -- fixture/furniture layout laid out in the UI (array of {id, typeId,
 -- label, x, y, width, depth, rotated}, in feet from the room's top-left).
@@ -163,7 +163,7 @@ create table if not exists interior_designs (
 );
 
 -- Landscape tab (top-level, alongside Construction Cost): a required photo
--- of the house's exterior, edited in place by OpenAI's image-edit API —
+-- of the house's exterior, edited in place by Gemini's image-edit call —
 -- unlike Interior Design there's no from-scratch path, since the whole
 -- point is redesigning THIS house's actual yard. components is the checked
 -- list of landscape elements (array of {id, label, detail}), e.g. grass,

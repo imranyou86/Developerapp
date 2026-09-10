@@ -98,7 +98,7 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
         // Always an image edit (never a from-scratch generation) — the
         // whole point of Landscape is redesigning this exact house's yard,
         // so a photo is required upstream rather than optional.
-        const res = await fetchWithRetry("/api/openai/edit-room-image", {
+        const res = await fetchWithRetry("/api/gemini/edit-room-image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ imageUrl: originalUrl, prompt }),
@@ -183,7 +183,7 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
       <div className="card p-4">
         <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Design the landscape</h2>
         <p className="mb-4 text-xs text-blueprint/50">
-          Upload a photo of the house from the outside — OpenAI redesigns that actual photo&apos;s yard, keeping the
+          Upload a photo of the house from the outside — Gemini redesigns that actual photo&apos;s yard, keeping the
           house itself unchanged. Pick which components to add below, then generate.
         </p>
 
