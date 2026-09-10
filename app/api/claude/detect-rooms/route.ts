@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import { enforceRateLimit } from "@/lib/rateLimit";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
@@ -75,6 +76,9 @@ export async function POST(req: Request) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const limited = await enforceRateLimit(user.id, "detect-rooms");
+  if (limited) return limited;
 
   const body = (await req.json()) as { pages?: PlanPageInput[] };
   const pages = body.pages ?? [];
