@@ -60,14 +60,28 @@ directly, many listing sites block direct requests. Instead:
    other aggregators (Redfin, Realtor.com, Homes.com), or county assessor records (best for lot
    size/year built specifically).
 
+CRITICAL — list_price must be a real price, never an automated valuation. Sites show two very
+different kinds of numbers for a property: (a) an actual price a human set — a current asking
+price, or a real closed sale price from public records — and (b) an automated computer-generated
+value estimate, e.g. Zillow's "Zestimate", Trulia's "Estimated Value"/"Trulia Estimate", Redfin's
+"Redfin Estimate", or similar "estimated value" figures on any other aggregator. Type (b) is NOT a
+price and must NEVER be put in list_price, no matter how confident-looking or how close it is to
+what the true price might be — these are computed valuations, not what anyone is actually asking
+or paid. If a page's only number for this address is an automated estimate (this is common for a
+property that isn't currently for sale), that does not count as "finding a price" — treat it the
+same as finding no price at all for the list_price field.
+
 Return:
 - address, city, state, zip_code — parsed from the URL and/or confirmed via search
-- list_price — the current asking price if actively listed, preferring the most recent/current
+- list_price — the current REAL asking price if actively listed, preferring the most recent/current
   figure per the staleness guidance above. If search results show the listing as recently
-  sold/pending/off-market instead, still return that last known asking (or sale) price and say so
-  in source/confidence — a recent figure is far more useful for evaluating this deal than a blank
-  field. Only use null if you genuinely find no price for this address after searching more than
-  once.
+  sold/pending/off-market instead, still return that last known REAL asking (or actual closed sale)
+  price and say so in source/confidence — a recent figure is far more useful for evaluating this
+  deal than a blank field. Use null if the property is not currently listed and you can't find a
+  past REAL asking or sale price (an automated estimate is not a substitute — see above) — in that
+  case put the estimate and its source in the source field instead, clearly labeled as an estimate
+  (e.g. "Not currently listed; Trulia estimated value $1,704,300"), so it's visible without being
+  mistaken for a real price.
 - beds, baths, sqft — from whatever listing data you found
 - lot_size — in square feet (convert from acres if needed: 1 acre = 43,560 sqft), prefer county
   assessor records
@@ -75,9 +89,13 @@ Return:
 - confidence: "high" (address confirmed and current listing details found from a live source, with
   no conflicting price seen), "medium" (address confirmed but some fields estimated/older data, or
   the listing is pending/sold so the price is a last-known figure), "low" (had to guess at the
-  address itself, found very little, OR sources gave meaningfully different prices you couldn't
-  reconcile — see the disagreement rule above)
-- source: the site(s) you found the details on, or null
+  address itself, found very little, only an automated estimate turned up, OR sources gave
+  meaningfully different prices you couldn't reconcile — see the disagreement rule above)
+- source: the site(s) you found the details on, or null. If web_search turned up nothing beyond an
+  old sale or an automated estimate for a currently-listed-looking address (e.g. a brand-new
+  listing minutes or hours old isn't indexed yet — this happens), say exactly that here (e.g. "No
+  active listing found in search — may be too new to be indexed; check the pasted URL directly"),
+  so whoever's reviewing knows to verify the price by hand rather than trust a guess.
 
 Be honest about what you found and its recency, but don't default to null just because you're not
 100% certain a listing is still active — a recently-known price with a note beats a blank field.
