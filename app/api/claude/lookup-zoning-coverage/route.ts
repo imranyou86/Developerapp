@@ -20,9 +20,17 @@ interface ZoningCoverageResult {
 const SYSTEM_PROMPT = `You are a Los Angeles zoning researcher. Given an LAMC (Los Angeles
 Municipal Code) residential zone code and (when provided) a lot size in square feet, find the
 maximum buildable amount — expressed as a lot coverage percentage, building footprint as a
-percentage of lot area — permitted on that lot. Prefer official sources: LA City Planning
-(planning.lacity.org), the LAMC itself, or well-sourced professional summaries (architects/zoning
-consultants) over generic articles.
+percentage of lot area — permitted on that lot.
+
+Your search is restricted to official sources only: LA City Planning (planning.lacity.gov — note
+the .gov, not .org, which is not the department's real site), the LAMC text itself
+(codelibrary.amlegal.com), and LA Dept. of Building & Safety code guides (ladbs.org). Generic
+real-estate or blog summaries are not in scope for this search, on purpose — they're a common
+source of stale or oversimplified numbers, which is exactly what you need to avoid here. Read the
+actual current ordinance text/table on one of these sites rather than a third-party's paraphrase of
+it; if a professional summary PDF from ladbs.org shows worked examples, that's fine to use since
+it's an official city source, but don't stop there without confirming against the LAMC/planning.gov
+text itself when the two could disagree.
 
 Critical nuance — read carefully: LA's single-family zones (R1 and its variants, RS, RE9-RE40,
 RW1, RZ zones) are NOT a flat lot-coverage percentage. They're governed by the Residential Floor
@@ -103,10 +111,27 @@ export async function POST(req: Request) {
       max_tokens: 1200,
       system: SYSTEM_PROMPT,
       thinking: { type: "adaptive" },
-      output_config: { effort: "low" },
+      // Medium, not low — this isn't a plain lookup, it's finding a specific
+      // ordinance table/formula and doing the sliding-scale computation for
+      // this exact lot size, and "low" effort was prone to shortcutting to a
+      // generic/wrong percentage instead of doing that work (the reported
+      // bug here).
+      output_config: { effort: "medium" },
       // Basic search tool, not the sandboxed 20260209 variant — that one
       // took 60-90s+ in testing, well past a serverless function's timeout.
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+      // Restricted to official sources only (see SYSTEM_PROMPT) — random
+      // real-estate/blog summaries of LA zoning percentages are exactly what
+      // was producing wrong numbers. max_uses bumped since a few more
+      // searches are needed to land on the right page within this narrower
+      // set of domains.
+      tools: [
+        {
+          type: "web_search_20250305",
+          name: "web_search",
+          max_uses: 5,
+          allowed_domains: ["planning.lacity.gov", "codelibrary.amlegal.com", "ladbs.org"],
+        },
+      ],
       messages: [{ role: "user", content: `Find the max buildable lot coverage % for this LA zone and lot:\n\n${query}` }],
     });
 
