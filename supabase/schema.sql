@@ -281,6 +281,28 @@ create table if not exists payment_schedule_items (
   paid boolean not null default false
 );
 
+-- Bank Transactions tab: rows imported from a bank-exported CSV (parsed
+-- client-side, lib/bankCsv.ts — deterministic, no AI call needed for
+-- structured tabular data), each optionally linked to a bid so "how much
+-- has actually been paid toward this bid" can be tracked.
+create table if not exists bank_transactions (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  bid_id uuid references bids (id) on delete set null,
+  txn_date date not null,
+  description text not null,
+  amount numeric not null,
+  type text not null check (type in ('debit', 'credit')),
+  source_file_name text,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+-- Re-importing the same statement (overlapping date ranges are common)
+-- silently no-ops instead of duplicating rows — see the ignoreDuplicates
+-- upsert in app/projects/[id]/bank-transactions/actions.ts.
+create unique index if not exists idx_bank_transactions_dedupe on bank_transactions (project_id, txn_date, description, amount, type);
+
 -- Public read-only share links. Anonymous visitors never query this table
 -- (or any project table) directly — the /share/[token] page looks it up
 -- server-side with the service-role key, so no RLS policy grants anon access.
@@ -390,7 +412,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -596,6 +618,8 @@ create index if not exists idx_project_subcontractors_sub on project_subcontract
 create index if not exists idx_certificate_of_occupancy_checks_project on certificate_of_occupancy_checks (project_id);
 create index if not exists idx_api_rate_limit_hits_user_route on api_rate_limit_hits (user_id, route, created_at);
 create index if not exists idx_activity_log_project on activity_log (project_id, created_at desc);
+create index if not exists idx_bank_transactions_project on bank_transactions (project_id, txn_date desc);
+create index if not exists idx_bank_transactions_bid on bank_transactions (bid_id);
 
 -- Seed the default tab-visibility matrix. Owner/PM/Developer default to
 -- every tab (including the top-level Buyers Guide, tab='deals'); Contractor
@@ -615,11 +639,11 @@ create index if not exists idx_activity_log_project on activity_log (project_id,
 insert into tab_permissions (role, tab, allowed)
 select r.role, t.tab, case
   when r.role = 'warranty' and t.tab not in ('warranty-request', 'chat') then false
-  when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'deals', 'subcontractors', 'landscape', 'house-book') then false
+  when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'deals', 'subcontractors', 'landscape', 'house-book') then false
   else true
 end
 from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -705,6 +729,7 @@ alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
 alter table api_rate_limit_hits enable row level security;
 alter table activity_log enable row level security;
+alter table bank_transactions enable row level security;
 
 -- security definer so they can be called from other tables' RLS policies
 -- without recursing back through THEIR RLS.
@@ -858,6 +883,10 @@ create policy "bids_member" on bids
 create policy "payment_schedule_items_member" on payment_schedule_items
   for all using (exists (select 1 from bids b where b.id = payment_schedule_items.bid_id and has_project_access(b.project_id)))
   with check (exists (select 1 from bids b where b.id = payment_schedule_items.bid_id and has_project_access(b.project_id)));
+
+create policy "bank_transactions_member" on bank_transactions
+  for all using (has_project_access(bank_transactions.project_id))
+  with check (has_project_access(bank_transactions.project_id));
 
 -- Share links stay owner+developer only. The public /share/[token] page
 -- never queries through the anon key — it looks the token up server-side

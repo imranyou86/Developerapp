@@ -156,6 +156,18 @@ export interface PaymentScheduleItem {
   paid: boolean;
 }
 
+export interface BankTransaction {
+  id: string;
+  project_id: string;
+  bid_id: string | null;
+  txn_date: string;
+  description: string;
+  amount: number;
+  type: "debit" | "credit";
+  source_file_name: string | null;
+  created_at: string;
+}
+
 export interface ProjectShare {
   id: string;
   project_id: string;

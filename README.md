@@ -930,6 +930,60 @@ yet; each one only adds what a given feature needed.
     actions, and fine for a single-admin-editing-at-a-time tool) and
     returns the new total so the client can update its local `bids` state
     immediately rather than waiting on `revalidatePath`.
+- **Bank Transactions tab** (per-project, next to Payments — migration
+  `040_bank_transactions.sql`) — upload a bank-exported CSV of transactions
+  and reconcile them against bids: how much has actually gone out the door,
+  matched to which contractor. Parsing is entirely deterministic
+  (`lib/bankCsv.ts`, unit-tested in `lib/bankCsv.test.ts`) — a CSV is
+  already structured tabular data, unlike a bid PDF or inspection photo, so
+  no AI call is involved; the real problem is that every bank names (and
+  orders) its columns differently. The parser recognizes a single signed
+  Amount column, separate Debit/Credit columns (extra columns like a
+  running balance are ignored), and the common header aliases for each
+  (date/posting date, description/memo/payee, debit/withdrawal,
+  credit/deposit, etc.), plus falls back to Wells Fargo's well-known
+  headerless 5-column layout (Date, Amount, \*, \*, Description) when no
+  header row is recognized. Rows that don't parse (blank lines, footer/
+  subtotal rows) are silently skipped and counted, not treated as errors.
+  - **Import flow** — the file is read client-side (`FileReader`, no
+    upload/storage needed — only the parsed rows are kept, not the
+    original file) into a preview table before committing anything, so a
+    misrecognized column layout is obvious before it's saved. "Import N
+    transactions" then calls `importBankTransactions`
+    (`app/projects/[id]/bank-transactions/actions.ts`), which upserts with
+    `ignoreDuplicates: true` against a unique index on `(project_id,
+    txn_date, description, amount, type)` — re-importing a statement with
+    an overlapping date range (a common habit — "this month plus last
+    month" to be safe) silently skips the transactions already on file
+    instead of duplicating them, and the returned duplicate count is
+    surfaced in the success toast so that's visible rather than silent.
+    "Undo" a whole import at once by its source filename
+    (`deleteBankTransactionsBySource`) rather than deleting rows one at a
+    time if the wrong file gets uploaded.
+  - **Matching to a bid** — each transaction gets an optional `bid_id`
+    (nullable FK, `on delete set null`), settable per-row from a dropdown
+    of that project's non-declined bids. "Auto-match by contractor name"
+    (`autoMatchTransactions`) is a second, cheap deterministic pass (still
+    no AI): an unmatched transaction whose description contains exactly
+    one bid's contractor name gets linked automatically; an ambiguous
+    description (matching more than one contractor, or none) is left for
+    a person to assign by hand rather than guessing wrong. A "Paid vs.
+    bid, by contractor" summary sums matched debit transactions per bid
+    against that bid's `total_amount` to show what's actually been paid
+    and what's left — this is a separate, transaction-grounded number from
+    Payments' planned/checked-off payment schedule, not a replacement for
+    it.
+  - **Filter and select, each with their own running total** — a search-
+    by-description box plus type (paid out/received) and bid filters
+    narrow the table, and a running total (paid out / received / net)
+    for whatever's currently showing updates live as those filters
+    change, with no selection needed. Checking rows (a per-row checkbox,
+    plus a header checkbox that selects/deselects everything currently
+    filtered) shows a second, visually distinct running total scoped to
+    just the checked rows — selection persists across filter changes (so
+    filtering down, selecting a few, then clearing the filter doesn't
+    lose the selection) since it's tracked as its own `Set<string>` of
+    ids rather than derived from the visible rows.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
@@ -1161,10 +1215,11 @@ yet; each one only adds what a given feature needed.
   since Developer is an admin role, not a per-project one — they get full
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
-  which sections each role can see, covering both the 8 per-project tabs
-  (Plan, Rooms, Checklist, Budget, Bids, Payments, Files,
-  Certificate of Occupancy) and the top-level tabs (Buyers Guide/`deals`, Interior
-  Design, Construction Cost, Landscape, Subcontractors) — Finish ID no
+  which sections each role can see, covering both the per-project tabs
+  (Plan, Rooms, Checklist, Budget, Bids, Payments, Bank Transactions, Files,
+  Certificate of Occupancy, House Book, Chat, Warranty Request) and the
+  top-level tabs (Buyers Guide/`deals`, Interior Design, Construction Cost,
+  Landscape, Subcontractors) — Finish ID no
   longer has its own row here since it's nested under Interior Design's
   own permission instead; Developer itself always has
   every tab regardless of that table. Every RLS policy that used to check

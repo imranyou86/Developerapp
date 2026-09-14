@@ -29,6 +29,7 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "budget", label: "Budget" },
   { slug: "bids", label: "Bids" },
   { slug: "payments", label: "Payments" },
+  { slug: "bank-transactions", label: "Bank Transactions" },
   { slug: "files", label: "Files" },
   { slug: "certificate-of-occupancy", label: "Certificate of Occupancy" },
   { slug: "house-book", label: "House Book" },
