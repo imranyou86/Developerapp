@@ -1053,6 +1053,26 @@ yet; each one only adds what a given feature needed.
       ledger — date, description, category, type, amount, in-P&L flag,
       matched bid, source — to that person directly rather than requiring
       them to re-type it from the screen.
+    - **"Generate expense chart"** (`ExpenseBreakdownChart`, opt-in — a
+      button next to the table, off by default) is a concise horizontal bar
+      chart of the same P&L numbers, ranked largest category first, scoped
+      to the same year selector. Built the way the dataviz skill's method
+      works out for this job: the data's job is "compare magnitude across
+      categories," which calls for one fixed hue rather than a per-bar
+      color ramp — coloring each bar darker by its *own* amount would
+      double-encode the length the bar already shows, and fails for nominal
+      (unordered) categories exactly like a value-ramp on nominal data
+      always does. So every bar is the same red (the color "paid out"
+      already wears everywhere else in this tab), and only bar *length* and
+      the direct dollar labels on the axis carry magnitude — no legend
+      needed since there's one series and each bar already names its own
+      category. Marks match the app's existing table conventions: 24px-
+      thick bars, 4px rounded corner at the far end (square at the origin),
+      a light `bg-concrete` track behind each bar so relative length reads
+      at a glance. No new dependency — it's plain flex/div bars sized by
+      `width: %`, not a charting library. The P&L table right below it is
+      this chart's exact table-view twin (identical numbers), so nothing
+      shown in the chart is chart-only.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.

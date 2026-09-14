@@ -85,6 +85,7 @@ export function BankTransactionsClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [addingManual, setAddingManual] = useState(false);
   const [plYear, setPlYear] = useState<"all" | string>("all");
+  const [showExpenseChart, setShowExpenseChart] = useState(false);
 
   const bidsById = new Map(bids.map((b) => [b.id, b.contractor]));
 
@@ -316,6 +317,13 @@ export function BankTransactionsClient({
     totals: totalsOf(plTransactions.filter((t) => (t.category ?? "Uncategorized") === category)),
   }));
   const plGrandTotal = totalsOf(plTransactions);
+  // Expense breakdown chart data — debit side of plRows only, ranked
+  // largest-first. Reuses the same category grouping as the P&L table
+  // (its exact numbers), just rendered as bar length instead of text.
+  const expenseByCategory = plRows
+    .map((row) => ({ category: row.category, amount: row.totals.debit }))
+    .filter((row) => row.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
 
   return (
     <div className="space-y-6">
@@ -482,7 +490,16 @@ export function BankTransactionsClient({
               : "Nothing marked for this year."}
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {expenseByCategory.length > 0 && (
+              <button className="btn-ghost mb-3 px-2 py-1 text-xs" onClick={() => setShowExpenseChart((v) => !v)}>
+                {showExpenseChart ? "Hide expense chart" : "Generate expense chart"}
+              </button>
+            )}
+            {showExpenseChart && expenseByCategory.length > 0 && (
+              <ExpenseBreakdownChart rows={expenseByCategory} total={plGrandTotal.debit} />
+            )}
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-blueprint/10 text-left text-xs uppercase tracking-wide text-blueprint/40">
@@ -511,7 +528,8 @@ export function BankTransactionsClient({
                 </tr>
               </tfoot>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -886,6 +904,51 @@ function ManualEntryModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+// Horizontal bars, ranked largest-first — the read here is "which category
+// dominates spending," so magnitude order does the work; a legend would be
+// redundant since every bar already carries its own category label. One
+// fixed hue (the same red used for "paid out" everywhere else in this tab)
+// rather than a per-bar lightness ramp: ramping each bar's shade by its OWN
+// value would double-encode the length it already shows and (since these
+// categories have no inherent order) fails for the same reason a value-tint
+// on nominal categories always does. Bars are capped at 24px thick with a
+// 4px rounded end away from the baseline, matching every other mark in the
+// app's tables. The P&L table directly below is this chart's exact
+// table-view twin — same numbers, so nothing here is chart-only.
+function ExpenseBreakdownChart({ rows, total }: { rows: { category: string; amount: number }[]; total: number }) {
+  const max = Math.max(...rows.map((r) => r.amount));
+  return (
+    <div className="mb-4 rounded-lg border border-blueprint/10 p-3" role="img" aria-label="Expense breakdown by category, largest first">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-blueprint/40">Expenses by category</span>
+        <span className="text-xs text-blueprint/50">
+          Total: <span className="font-semibold text-red-600">{currency(total)}</span>
+        </span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((r) => {
+          const pct = max > 0 ? (r.amount / max) * 100 : 0;
+          return (
+            <div key={r.category} className="group flex items-center gap-2">
+              <span className="w-36 shrink-0 truncate text-xs text-blueprint/70" title={r.category}>
+                {r.category}
+              </span>
+              <div className="h-6 min-w-0 flex-1 overflow-hidden rounded bg-concrete">
+                <div
+                  className="h-6 rounded-r bg-red-600 transition-colors group-hover:bg-red-700"
+                  style={{ width: `${pct}%` }}
+                  title={`${r.category}: ${currency(r.amount)}`}
+                />
+              </div>
+              <span className="w-20 shrink-0 text-right text-xs font-medium tabular-nums text-blueprint-dark">{currency(r.amount)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
