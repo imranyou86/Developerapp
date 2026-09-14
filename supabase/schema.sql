@@ -289,6 +289,10 @@ create table if not exists payment_schedule_items (
 -- folded into closing that the statement doesn't itemize, etc., for tax-prep
 -- purposes) are just ordinary rows here with source_file_name left null.
 -- `category` groups rows for the Profit & Loss statement (lib/bankCategories.ts).
+-- `include_in_pl` is the actual P&L gate — not every bank-feed debit is a
+-- real expense (a transfer between accounts, a loan principal payment,
+-- etc.), so the P&L only sums rows explicitly marked in (per-row, or a bulk
+-- action over a filtered/selected set), rather than everything imported.
 create table if not exists bank_transactions (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -298,6 +302,7 @@ create table if not exists bank_transactions (
   amount numeric not null,
   type text not null check (type in ('debit', 'credit')),
   category text,
+  include_in_pl boolean not null default false,
   source_file_name text,
   created_by uuid not null references auth.users (id) on delete cascade,
   created_at timestamptz not null default now()

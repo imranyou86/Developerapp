@@ -50,13 +50,26 @@ function splitCsvLine(line: string): string[] {
 }
 
 const DATE_HEADER_ALIASES = ["date", "posting date", "posted date", "transaction date", "post date"];
-const DESCRIPTION_HEADER_ALIASES = ["description", "memo", "payee", "name", "details", "transaction"];
+// "description" listed first and matched with priority below — some banks
+// export both a "Description" column (the actual payee/memo) and a
+// separate "Detail"/"Details" column (a transaction-type code, e.g.
+// "DEBIT"/"ACH_DEBIT"), and "Description" is always the one that matters;
+// "detail(s)" is deliberately NOT in this list so it's never picked up.
+const DESCRIPTION_HEADER_ALIASES = ["description", "payee", "memo", "name", "transaction"];
 const AMOUNT_HEADER_ALIASES = ["amount"];
 const DEBIT_HEADER_ALIASES = ["debit", "withdrawal", "withdrawals", "payment", "debit amount"];
 const CREDIT_HEADER_ALIASES = ["credit", "deposit", "deposits", "credit amount"];
 
+// Matches by alias priority, not leftmost column — checks each alias in
+// order and returns the first one found anywhere in the header row, so a
+// more specific/preferred alias (e.g. "description") always wins over a
+// looser synonym (e.g. "memo") regardless of which column comes first.
 function findColumn(headers: string[], aliases: string[]): number {
-  return headers.findIndex((h) => aliases.includes(h.toLowerCase().trim()));
+  for (const alias of aliases) {
+    const idx = headers.findIndex((h) => h.toLowerCase().trim() === alias);
+    if (idx !== -1) return idx;
+  }
+  return -1;
 }
 
 // Accepts M/D/YYYY, MM/DD/YYYY, YYYY-MM-DD, and M-D-YYYY — the formats

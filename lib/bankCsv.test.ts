@@ -35,6 +35,19 @@ describe("parseBankCsv", () => {
     ]);
   });
 
+  it("prefers a Description column over a Detail/Details column when both are present", () => {
+    const csv = [
+      "Date,Detail,Description,Amount",
+      "01/05/2026,DEBIT,ACME Framing Inc,-1500.00",
+      "01/06/2026,CREDIT,Loan Draw Deposit,2000.00",
+    ].join("\n");
+    const result = parseBankCsv(csv);
+    expect(result.transactions).toEqual([
+      { date: "2026-01-05", description: "ACME Framing Inc", amount: 1500, type: "debit" },
+      { date: "2026-01-06", description: "Loan Draw Deposit", amount: 2000, type: "credit" },
+    ]);
+  });
+
   it("handles quoted descriptions containing commas", () => {
     const csv = ['Date,Description,Amount', '01/01/2026,"Doe, John - Concrete Co.",-300.00'].join("\n");
     const result = parseBankCsv(csv);

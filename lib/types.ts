@@ -165,6 +165,7 @@ export interface BankTransaction {
   amount: number;
   type: "debit" | "credit";
   category: string | null;
+  include_in_pl: boolean;
   source_file_name: string | null;
   created_at: string;
 }

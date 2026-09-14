@@ -50,7 +50,7 @@ export async function importBankTransactions(
       })),
       { onConflict: "project_id,txn_date,description,amount,type", ignoreDuplicates: true }
     )
-    .select("id, project_id, bid_id, txn_date, description, amount, type, category, source_file_name, created_at");
+    .select("id, project_id, bid_id, txn_date, description, amount, type, category, include_in_pl, source_file_name, created_at");
   if (error) return { ok: false, error: error.message };
 
   revalidate(projectId);
@@ -65,7 +65,15 @@ export async function importBankTransactions(
 // is how the UI tells a manual entry apart from an imported one.
 export async function addManualTransaction(
   projectId: string,
-  input: { date: string; description: string; amount: number; type: "debit" | "credit"; category: string | null; bidId: string | null }
+  input: {
+    date: string;
+    description: string;
+    amount: number;
+    type: "debit" | "credit";
+    category: string | null;
+    bidId: string | null;
+    includeInPl: boolean;
+  }
 ): Promise<ActionResult & { transaction?: BankTransaction }> {
   if (!input.description.trim()) return { ok: false, error: "Description is required." };
   if (!input.amount || input.amount <= 0) return { ok: false, error: "Enter a positive amount." };
@@ -86,10 +94,11 @@ export async function addManualTransaction(
       amount: input.amount,
       type: input.type,
       category: input.category,
+      include_in_pl: input.includeInPl,
       source_file_name: null,
       created_by: user.id,
     })
-    .select("id, project_id, bid_id, txn_date, description, amount, type, category, source_file_name, created_at")
+    .select("id, project_id, bid_id, txn_date, description, amount, type, category, include_in_pl, source_file_name, created_at")
     .single();
   if (error) return { ok: false, error: error.message };
 
@@ -108,6 +117,19 @@ export async function assignTransactionBid(projectId: string, transactionId: str
 export async function assignTransactionCategory(projectId: string, transactionId: string, category: string | null): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("bank_transactions").update({ category }).eq("id", transactionId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+// The P&L only sums rows explicitly marked in — this is how a person marks
+// (or unmarks) one or many at once, over whatever set they've selected or
+// filtered down to in the UI, rather than the P&L silently including every
+// imported row regardless of whether it's a real expense/revenue line.
+export async function setTransactionsIncludeInPl(projectId: string, transactionIds: string[], includeInPl: boolean): Promise<ActionResult> {
+  if (transactionIds.length === 0) return { ok: true };
+  const supabase = createClient();
+  const { error } = await supabase.from("bank_transactions").update({ include_in_pl: includeInPl }).in("id", transactionIds);
   if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };

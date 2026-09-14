@@ -15,6 +15,7 @@ import {
   deleteBankTransaction,
   deleteBankTransactionsBySource,
   importBankTransactions,
+  setTransactionsIncludeInPl,
 } from "@/app/projects/[id]/bank-transactions/actions";
 import type { BankTransaction } from "@/lib/types";
 
@@ -67,6 +68,11 @@ export function BankTransactionsClient({
   const [transactions, setTransactions] = useState<BankTransaction[]>(initialTransactions);
   const [preview, setPreview] = useState<{ fileName: string; rows: ParsedBankTransaction[]; skippedRows: number } | null>(null);
   const [previewFilterText, setPreviewFilterText] = useState("");
+  // Indexes into preview.rows to leave OUT of the import — unchecked means
+  // "will be imported", so a fresh preview starts with nothing excluded
+  // (import everything found, as before) and unchecking a row is how you
+  // exclude a one-off personal charge or the like.
+  const [excludedPreviewIndexes, setExcludedPreviewIndexes] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
   const [autoMatching, setAutoMatching] = useState(false);
   const [deleting, setDeleting] = useState<BankTransaction | null>(null);
@@ -94,9 +100,38 @@ export function BankTransactionsClient({
     return true;
   });
 
-  const filteredPreviewRows = preview
-    ? preview.rows.filter((r) => !previewFilterText.trim() || r.description.toLowerCase().includes(previewFilterText.trim().toLowerCase()))
-    : [];
+  // Pairs each preview row with its original index so filtering (which
+  // narrows what's shown) never loses track of which row an exclude
+  // checkbox actually applies to.
+  const previewEntries = preview ? preview.rows.map((row, index) => ({ row, index })) : [];
+  const filteredPreviewEntries = previewEntries.filter(
+    ({ row }) => !previewFilterText.trim() || row.description.toLowerCase().includes(previewFilterText.trim().toLowerCase())
+  );
+  const filteredPreviewIndexes = filteredPreviewEntries.map((e) => e.index);
+  const allFilteredPreviewIncluded =
+    filteredPreviewIndexes.length > 0 && filteredPreviewIndexes.every((i) => !excludedPreviewIndexes.has(i));
+  const includedPreviewRows = preview ? preview.rows.filter((_, i) => !excludedPreviewIndexes.has(i)) : [];
+
+  function togglePreviewExcluded(index: number) {
+    setExcludedPreviewIndexes((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
+  function toggleIncludeAllFilteredPreview() {
+    setExcludedPreviewIndexes((prev) => {
+      const next = new Set(prev);
+      if (allFilteredPreviewIncluded) {
+        filteredPreviewIndexes.forEach((i) => next.add(i));
+      } else {
+        filteredPreviewIndexes.forEach((i) => next.delete(i));
+      }
+      return next;
+    });
+  }
 
   const visibleIds = filteredTransactions.map((t) => t.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -126,6 +161,7 @@ export function BankTransactionsClient({
   function handleFileChange(file: File | null) {
     setPreview(null);
     setPreviewFilterText("");
+    setExcludedPreviewIndexes(new Set());
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -146,18 +182,22 @@ export function BankTransactionsClient({
   }
 
   async function handleImport() {
-    if (!preview) return;
+    if (!preview || includedPreviewRows.length === 0) return;
     setImporting(true);
     try {
-      const res = await importBankTransactions(projectId, preview.rows, preview.fileName);
+      const res = await importBankTransactions(projectId, includedPreviewRows, preview.fileName);
       if (!res.ok) {
         notify("error", res.error ?? "Import failed.");
         return;
       }
       setTransactions((prev) => [...(res.insertedRows ?? []), ...prev]);
+      const excludedNote = excludedPreviewIndexes.size > 0 ? ` (${excludedPreviewIndexes.size} excluded)` : "";
       const skippedNote = preview.skippedRows > 0 ? ` (${preview.skippedRows} row${preview.skippedRows === 1 ? "" : "s"} skipped — unrecognized)` : "";
       const dupeNote = res.duplicates ? `, ${res.duplicates} already on file` : "";
-      notify("success", `Imported ${res.insertedRows?.length ?? 0} transaction${res.insertedRows?.length === 1 ? "" : "s"}${dupeNote}.${skippedNote}`);
+      notify(
+        "success",
+        `Imported ${res.insertedRows?.length ?? 0} transaction${res.insertedRows?.length === 1 ? "" : "s"}${dupeNote}.${excludedNote}${skippedNote}`
+      );
       setPreview(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
@@ -185,14 +225,38 @@ export function BankTransactionsClient({
     }
   }
 
+  async function handleToggleIncludeInPl(txn: BankTransaction) {
+    const next = !txn.include_in_pl;
+    setTransactions((rows) => rows.map((r) => (r.id === txn.id ? { ...r, include_in_pl: next } : r)));
+    const res = await setTransactionsIncludeInPl(projectId, [txn.id], next);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update.");
+      setTransactions((rows) => rows.map((r) => (r.id === txn.id ? { ...r, include_in_pl: !next } : r)));
+    }
+  }
+
+  async function handleBulkSetIncludeInPl(include: boolean) {
+    const ids = selectedTransactions.map((t) => t.id);
+    if (ids.length === 0) return;
+    setTransactions((rows) => rows.map((r) => (ids.includes(r.id) ? { ...r, include_in_pl: include } : r)));
+    const res = await setTransactionsIncludeInPl(projectId, ids, include);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update.");
+      setTransactions((rows) => rows.map((r) => (ids.includes(r.id) ? { ...r, include_in_pl: !include } : r)));
+    } else {
+      notify("success", `${ids.length} transaction${ids.length === 1 ? "" : "s"} ${include ? "added to" : "removed from"} the P&L.`);
+    }
+  }
+
   function handleExportCsv() {
-    const header = ["Date", "Description", "Category", "Type", "Amount", "Bid", "Source"];
+    const header = ["Date", "Description", "Category", "Type", "Amount", "In P&L", "Bid", "Source"];
     const rows = transactions.map((t) => [
       t.txn_date,
       t.description,
       t.category ?? "",
       t.type,
       String(t.amount),
+      t.include_in_pl ? "Yes" : "No",
       t.bid_id ? (bidsById.get(t.bid_id) ?? "") : "",
       t.source_file_name ?? "Manual entry",
     ]);
@@ -236,12 +300,16 @@ export function BankTransactionsClient({
   const unmatchedPaid = debitTransactions.filter((t) => !t.bid_id).reduce((sum, t) => sum + Number(t.amount), 0);
   const importSources = Array.from(new Set(transactions.map((t) => t.source_file_name).filter((n): n is string => !!n)));
 
-  // Profit & Loss — always over the FULL ledger (not the browse filters
-  // above, which are for finding specific rows), scoped to one tax year at
-  // a time so it's comparable year over year, or "All time" for the whole
-  // project's lifetime numbers.
+  // Profit & Loss — only rows explicitly marked include_in_pl (not every
+  // imported/manual row by default — a bank feed's debits aren't all real
+  // expenses, e.g. a transfer between the owner's own accounts), scoped to
+  // one tax year at a time so it's comparable year over year, or "All time"
+  // for the whole project's lifetime numbers. Never limited by the browse
+  // filters above — those are for finding specific rows, not for deciding
+  // what counts as income/expense.
+  const plEligible = transactions.filter((t) => t.include_in_pl);
   const availableYears = Array.from(new Set(transactions.map((t) => t.txn_date.slice(0, 4)))).sort((a, b) => b.localeCompare(a));
-  const plTransactions = plYear === "all" ? transactions : transactions.filter((t) => t.txn_date.startsWith(plYear));
+  const plTransactions = plYear === "all" ? plEligible : plEligible.filter((t) => t.txn_date.startsWith(plYear));
   const plCategories = Array.from(new Set(plTransactions.map((t) => t.category ?? "Uncategorized"))).sort();
   const plRows = plCategories.map((category) => ({
     category,
@@ -281,7 +349,8 @@ export function BankTransactionsClient({
               {preview.skippedRows > 0 && (
                 <span className="text-blueprint/50"> — {preview.skippedRows} row{preview.skippedRows === 1 ? "" : "s"} skipped</span>
               )}
-              . Everything found will be imported — filtering below is just to help you review it.
+              . Everything&apos;s checked to import by default — uncheck a row (or filter down and uncheck a batch)
+              to leave it out, e.g. a personal charge mixed into the statement.
             </p>
 
             <input
@@ -290,16 +359,36 @@ export function BankTransactionsClient({
               value={previewFilterText}
               onChange={(e) => setPreviewFilterText(e.target.value)}
             />
-            <RunningTotals
-              label={`Showing ${filteredPreviewRows.length} of ${preview.rows.length}`}
-              totals={totalsOf(filteredPreviewRows)}
-            />
+            <div className="space-y-2">
+              <RunningTotals
+                label={`Showing ${filteredPreviewEntries.length} of ${preview.rows.length}`}
+                totals={totalsOf(filteredPreviewEntries.map((e) => e.row))}
+              />
+              <RunningTotals
+                label={`${includedPreviewRows.length} of ${preview.rows.length} will be imported`}
+                totals={totalsOf(includedPreviewRows)}
+                emphasize
+              />
+            </div>
 
             <div className="max-h-64 overflow-y-auto rounded-lg border border-blueprint/10">
               <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-blueprint/10 text-left">
+                    <th className="w-6 px-3 py-1.5">
+                      <input type="checkbox" checked={allFilteredPreviewIncluded} onChange={toggleIncludeAllFilteredPreview} />
+                    </th>
+                    <th colSpan={3} className="px-3 py-1.5 font-normal text-blueprint/40">
+                      Check/uncheck all shown
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {filteredPreviewRows.slice(0, 50).map((r, i) => (
-                    <tr key={i} className="border-b border-blueprint/5 last:border-0">
+                  {filteredPreviewEntries.slice(0, 50).map(({ row: r, index }) => (
+                    <tr key={index} className="border-b border-blueprint/5 last:border-0">
+                      <td className="px-3 py-1.5">
+                        <input type="checkbox" checked={!excludedPreviewIndexes.has(index)} onChange={() => togglePreviewExcluded(index)} />
+                      </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-blueprint/60">{formatDate(r.date)}</td>
                       <td className="px-3 py-1.5">{r.description}</td>
                       <td className={`whitespace-nowrap px-3 py-1.5 text-right font-medium ${r.type === "debit" ? "text-red-600" : "text-sage-dark"}`}>
@@ -310,16 +399,16 @@ export function BankTransactionsClient({
                   ))}
                 </tbody>
               </table>
-              {filteredPreviewRows.length > 50 && (
-                <p className="px-3 py-1.5 text-xs text-blueprint/40">…and {filteredPreviewRows.length - 50} more.</p>
+              {filteredPreviewEntries.length > 50 && (
+                <p className="px-3 py-1.5 text-xs text-blueprint/40">…and {filteredPreviewEntries.length - 50} more.</p>
               )}
-              {filteredPreviewRows.length === 0 && (
+              {filteredPreviewEntries.length === 0 && (
                 <p className="px-3 py-1.5 text-xs text-blueprint/40">No rows match that filter.</p>
               )}
             </div>
             <div className="flex gap-2">
-              <button className="btn-amber" disabled={importing} onClick={handleImport}>
-                {importing ? "Importing…" : `Import ${preview.rows.length} transaction${preview.rows.length === 1 ? "" : "s"}`}
+              <button className="btn-amber" disabled={importing || includedPreviewRows.length === 0} onClick={handleImport}>
+                {importing ? "Importing…" : `Import ${includedPreviewRows.length} transaction${includedPreviewRows.length === 1 ? "" : "s"}`}
               </button>
               <button className="btn-ghost" disabled={importing} onClick={() => setPreview(null)}>
                 Cancel
@@ -380,12 +469,18 @@ export function BankTransactionsClient({
           </div>
         </div>
         <p className="mb-3 text-xs text-blueprint/50">
-          Grouped by category from the full ledger (imported and manual entries alike), scoped to the selected year
-          so it&apos;s comparable year over year. This is a computed summary of what&apos;s entered here, not tax
-          advice — confirm categorization and treatment with whoever prepares the return.
+          Only transactions checked &quot;In P&amp;L&quot; below count here — not everything imported. Mark rows one at
+          a time, or select several (filter first to narrow them down) and use &quot;Add selected to P&amp;L&quot;.
+          Grouped by category, scoped to the selected year so it&apos;s comparable year over year. This is a computed
+          summary of what&apos;s marked, not tax advice — confirm categorization and treatment with whoever prepares
+          the return.
         </p>
-        {transactions.length === 0 ? (
-          <p className="text-sm text-blueprint/50">Nothing to summarize yet.</p>
+        {plTransactions.length === 0 ? (
+          <p className="text-sm text-blueprint/50">
+            {plEligible.length === 0
+              ? "Nothing marked for the P&L yet — check \"In P&L\" on rows below, or select some and use \"Add selected to P&L\"."
+              : "Nothing marked for this year."}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -494,7 +589,14 @@ export function BankTransactionsClient({
                   totals={totalsOf(selectedTransactions)}
                   onClear={() => setSelectedIds(new Set())}
                   emphasize
-                />
+                >
+                  <button className="text-amber-dark hover:underline" onClick={() => handleBulkSetIncludeInPl(true)}>
+                    Add selected to P&amp;L
+                  </button>
+                  <button className="text-amber-dark hover:underline" onClick={() => handleBulkSetIncludeInPl(false)}>
+                    Remove selected from P&amp;L
+                  </button>
+                </RunningTotals>
               )}
             </div>
 
@@ -510,6 +612,9 @@ export function BankTransactionsClient({
                     <th className="px-2 py-2 text-right font-medium">Amount</th>
                     <th className="px-2 py-2 font-medium">Category</th>
                     <th className="px-2 py-2 font-medium">Bid</th>
+                    <th className="px-2 py-2 text-center font-medium" title="Counts toward the Profit &amp; Loss statement">
+                      In P&amp;L
+                    </th>
                     <th className="px-2 py-2"></th>
                   </tr>
                 </thead>
@@ -559,6 +664,9 @@ export function BankTransactionsClient({
                             </option>
                           ))}
                         </select>
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        <input type="checkbox" checked={t.include_in_pl} onChange={() => handleToggleIncludeInPl(t)} />
                       </td>
                       <td className="px-2 py-1.5 text-right">
                         <button
@@ -653,7 +761,15 @@ function ManualEntryModal({
 }: {
   bids: BidOption[];
   onClose: () => void;
-  onSave: (input: { date: string; description: string; amount: number; type: "debit" | "credit"; category: string | null; bidId: string | null }) => Promise<void>;
+  onSave: (input: {
+    date: string;
+    description: string;
+    amount: number;
+    type: "debit" | "credit";
+    category: string | null;
+    bidId: string | null;
+    includeInPl: boolean;
+  }) => Promise<void>;
 }) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState("");
@@ -661,6 +777,10 @@ function ManualEntryModal({
   const [type, setType] = useState<"debit" | "credit">("debit");
   const [category, setCategory] = useState("");
   const [bidId, setBidId] = useState("");
+  // Defaults checked, unlike a bulk CSV import — a manual entry is one
+  // deliberate action the person is taking right now, not unreviewed bulk
+  // data, so it's reasonable to assume they mean for it to count.
+  const [includeInPl, setIncludeInPl] = useState(true);
   const [saving, setSaving] = useState(false);
 
   return (
@@ -685,6 +805,7 @@ function ManualEntryModal({
                 type,
                 category: category || null,
                 bidId: bidId || null,
+                includeInPl,
               });
               setSaving(false);
             }}
@@ -746,6 +867,10 @@ function ManualEntryModal({
             </select>
           </div>
         </div>
+        <label className="flex items-center gap-2 text-sm text-blueprint-dark">
+          <input type="checkbox" checked={includeInPl} onChange={(e) => setIncludeInPl(e.target.checked)} />
+          Include in Profit &amp; Loss
+        </label>
         {bids.length > 0 && (
           <div>
             <label className="label">Bid (optional)</label>
@@ -782,11 +907,13 @@ function RunningTotals({
   totals,
   onClear,
   emphasize,
+  children,
 }: {
   label: string;
   totals: Totals;
   onClear?: () => void;
   emphasize?: boolean;
+  children?: React.ReactNode;
 }) {
   return (
     <div
@@ -805,6 +932,7 @@ function RunningTotals({
         <span>
           Net: <span className="font-semibold text-blueprint-dark">{currency(totals.net)}</span>
         </span>
+        {children}
         {onClear && (
           <button className="text-amber-dark hover:underline" onClick={onClear}>
             Clear

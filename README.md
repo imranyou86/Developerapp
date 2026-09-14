@@ -989,36 +989,70 @@ yet; each one only adds what a given feature needed.
     before committing to import benefits from the same narrow-and-check
     as the saved ledger does, but nothing in the preview is filtered OUT
     of the import itself; it's a review aid, not a selection mechanism.
+  - **`lib/bankCsv.ts` matches column headers by alias priority, not
+    leftmost column** — some banks export both a real "Description" column
+    and a separate "Detail"/"Details" column (a transaction-type code like
+    "DEBIT"/"ACH_DEBIT"), and the original leftmost-match logic could pick
+    up "Details" instead of "Description" if it happened to come first in
+    the file. `findColumn` now checks each alias in priority order
+    (`description` first) and returns the first column matching that
+    specific alias, rather than the first column matching *any* alias in
+    header order — so "Description" always wins regardless of column
+    order, and "detail(s)" was removed from the alias list entirely since
+    it's never the column that actually matters. Covered by a regression
+    test (`lib/bankCsv.test.ts`) with both columns present.
+  - **CSV import preview: check/uncheck rows before importing, with its own
+    running total** — everything found is checked by default (matching the
+    original all-or-nothing import), but unchecking a row (or filtering
+    down with the description search and unchecking a batch via the
+    header checkbox) excludes just that row — for a personal charge mixed
+    into an otherwise-business account, say. A second, emphasized running
+    total ("N of M will be imported") tracks the *included* set live and
+    independently of the filter's own total, and only those rows are sent
+    to `importBankTransactions`.
   - **Categories, manual entries, and a Profit & Loss statement** (migration
-    `041_bank_transaction_categories.sql` adds a `category` column) — built
-    for tax prep specifically. Every transaction, imported or not, can be
-    tagged with a category from a small fixed list
-    (`lib/bankCategories.ts`: Land/Acquisition, Materials, Labor/
-    Subcontractors, Permits & Fees, Insurance, Financing/Interest,
-    Utilities, Professional Fees, Selling Costs, Sale Proceeds/Revenue,
-    Loan Proceeds, Other) — fixed rather than free text specifically
-    *because* it's accounting, not a creative field: free text would let
-    "Materials"/"materials"/"material costs" fragment into three separate
-    P&L lines instead of grouping into one. "+ Add manual entry" inserts a
-    row directly (`addManualTransaction`) for anything that never hits a
-    bank statement — a cash payment, a cost folded into a closing statement
-    the bank CSV won't itemize, etc. — with `source_file_name` left null,
-    which is also how the table tells it apart from an imported row (a
-    small "Manual" badge next to the description). The Profit & Loss
-    section groups the *entire* ledger (imported and manual alike — never
-    just what the browse filters above happen to be showing) by category
-    into a Paid out/Received/Net table with a grand total row, scoped to
-    one calendar year at a time via a year dropdown (derived from whatever
-    years actually appear in `txn_date`) or "All time" — so it's directly
-    comparable year over year the way a return needs to be. It's a plain
-    computed summary of what's entered, explicitly not tax advice — the
-    UI says so, since what's capitalized vs. deductible and how a given
-    cost should actually be treated is a question for whoever prepares
-    the return. "Export ledger to CSV" (a client-built CSV, same
-    Blob-download technique used elsewhere in the app) hands the full
-    ledger — date, description, category, type, amount, matched bid,
-    source — to that person directly rather than requiring them to
-    re-type it from the screen.
+    `041_bank_transaction_categories.sql` adds `category`; migration
+    `042_bank_transaction_pl_flag.sql` adds `include_in_pl`) — built for tax
+    prep specifically. Every transaction, imported or not, can be tagged
+    with a category from a small fixed list (`lib/bankCategories.ts`:
+    Land/Acquisition, Materials, Labor/Subcontractors, Permits & Fees,
+    Insurance, Financing/Interest, Utilities, Professional Fees, Selling
+    Costs, Sale Proceeds/Revenue, Loan Proceeds, Other) — fixed rather than
+    free text specifically *because* it's accounting, not a creative field:
+    free text would let "Materials"/"materials"/"material costs" fragment
+    into three separate P&L lines instead of grouping into one. "+ Add
+    manual entry" inserts a row directly (`addManualTransaction`) for
+    anything that never hits a bank statement — a cash payment, a cost
+    folded into a closing statement the bank CSV won't itemize, etc. — with
+    `source_file_name` left null, which is also how the table tells it
+    apart from an imported row (a small "Manual" badge next to the
+    description).
+    - **The P&L only sums rows explicitly marked `include_in_pl`, never
+      "everything imported."** A bank feed's debits aren't all real
+      expenses (a transfer between the owner's own accounts, a loan
+      principal payment) — so nothing counts by default for CSV-imported
+      rows (`include_in_pl` defaults `false`) until a person checks "In
+      P&L" on it. Marking happens per row, or in bulk over whatever's
+      currently selected (the same multi-select checkboxes/running-total
+      mechanism the browse table already has, so filtering down to, say,
+      one category or contractor first and then bulk-marking the result is
+      the normal workflow) via "Add selected to P&L"/"Remove selected from
+      P&L" (`setTransactionsIncludeInPl`). A manual entry defaults to
+      *checked* instead, on the theory that a single deliberate action
+      (unlike unreviewed bulk CSV data) is usually meant to count.
+    - The P&L table itself groups whatever's marked in by category into a
+      Paid out/Received/Net table with a grand total row, scoped to one
+      calendar year at a time via a year dropdown (derived from whatever
+      years actually appear in `txn_date`) or "All time" — so it's directly
+      comparable year over year the way a return needs to be. It's a plain
+      computed summary of what's marked, explicitly not tax advice — the
+      UI says so, since what's capitalized vs. deductible and how a given
+      cost should actually be treated is a question for whoever prepares
+      the return. "Export ledger to CSV" (a client-built CSV, same
+      Blob-download technique used elsewhere in the app) hands the full
+      ledger — date, description, category, type, amount, in-P&L flag,
+      matched bid, source — to that person directly rather than requiring
+      them to re-type it from the screen.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
