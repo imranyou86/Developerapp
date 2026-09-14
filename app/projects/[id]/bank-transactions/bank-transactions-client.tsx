@@ -2,10 +2,15 @@
 
 import { useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { parseBankCsv, type ParsedBankTransaction } from "@/lib/bankCsv";
+import { BANK_TXN_CATEGORIES } from "@/lib/bankCategories";
+import { stripLeadingZero } from "@/lib/numberInput";
 import {
+  addManualTransaction,
   assignTransactionBid,
+  assignTransactionCategory,
   autoMatchTransactions,
   deleteBankTransaction,
   deleteBankTransactionsBySource,
@@ -37,7 +42,9 @@ interface Totals {
   net: number;
 }
 
-function totalsOf(rows: BankTransaction[]): Totals {
+// Works for both already-imported rows (BankTransaction) and freshly-parsed
+// preview rows (ParsedBankTransaction) — both just need amount/type.
+function totalsOf(rows: { amount: number; type: "debit" | "credit" }[]): Totals {
   const debit = rows.filter((r) => r.type === "debit").reduce((s, r) => s + Number(r.amount), 0);
   const credit = rows.filter((r) => r.type === "credit").reduce((s, r) => s + Number(r.amount), 0);
   return { count: rows.length, debit, credit, net: credit - debit };
@@ -59,6 +66,7 @@ export function BankTransactionsClient({
 
   const [transactions, setTransactions] = useState<BankTransaction[]>(initialTransactions);
   const [preview, setPreview] = useState<{ fileName: string; rows: ParsedBankTransaction[]; skippedRows: number } | null>(null);
+  const [previewFilterText, setPreviewFilterText] = useState("");
   const [importing, setImporting] = useState(false);
   const [autoMatching, setAutoMatching] = useState(false);
   const [deleting, setDeleting] = useState<BankTransaction | null>(null);
@@ -67,17 +75,28 @@ export function BankTransactionsClient({
   const [filterText, setFilterText] = useState("");
   const [filterType, setFilterType] = useState<"all" | "debit" | "credit">("all");
   const [filterBid, setFilterBid] = useState<BidFilter>("all");
+  const [filterCategory, setFilterCategory] = useState<"all" | "uncategorized" | string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [addingManual, setAddingManual] = useState(false);
+  const [plYear, setPlYear] = useState<"all" | string>("all");
 
-  const hasActiveFilter = filterText.trim() !== "" || filterType !== "all" || filterBid !== "all";
+  const bidsById = new Map(bids.map((b) => [b.id, b.contractor]));
+
+  const hasActiveFilter = filterText.trim() !== "" || filterType !== "all" || filterBid !== "all" || filterCategory !== "all";
 
   const filteredTransactions = transactions.filter((t) => {
     if (filterType !== "all" && t.type !== filterType) return false;
     if (filterBid === "unmatched" && t.bid_id) return false;
     if (filterBid !== "all" && filterBid !== "unmatched" && t.bid_id !== filterBid) return false;
+    if (filterCategory === "uncategorized" && t.category) return false;
+    if (filterCategory !== "all" && filterCategory !== "uncategorized" && t.category !== filterCategory) return false;
     if (filterText.trim() && !t.description.toLowerCase().includes(filterText.trim().toLowerCase())) return false;
     return true;
   });
+
+  const filteredPreviewRows = preview
+    ? preview.rows.filter((r) => !previewFilterText.trim() || r.description.toLowerCase().includes(previewFilterText.trim().toLowerCase()))
+    : [];
 
   const visibleIds = filteredTransactions.map((t) => t.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -106,6 +125,7 @@ export function BankTransactionsClient({
 
   function handleFileChange(file: File | null) {
     setPreview(null);
+    setPreviewFilterText("");
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -155,6 +175,41 @@ export function BankTransactionsClient({
     }
   }
 
+  async function handleAssignCategory(txn: BankTransaction, category: string | null) {
+    const prev = txn.category;
+    setTransactions((rows) => rows.map((r) => (r.id === txn.id ? { ...r, category } : r)));
+    const res = await assignTransactionCategory(projectId, txn.id, category);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update.");
+      setTransactions((rows) => rows.map((r) => (r.id === txn.id ? { ...r, category: prev } : r)));
+    }
+  }
+
+  function handleExportCsv() {
+    const header = ["Date", "Description", "Category", "Type", "Amount", "Bid", "Source"];
+    const rows = transactions.map((t) => [
+      t.txn_date,
+      t.description,
+      t.category ?? "",
+      t.type,
+      String(t.amount),
+      t.bid_id ? (bidsById.get(t.bid_id) ?? "") : "",
+      t.source_file_name ?? "Manual entry",
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bank-transactions.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleAutoMatch() {
     setAutoMatching(true);
     try {
@@ -181,14 +236,34 @@ export function BankTransactionsClient({
   const unmatchedPaid = debitTransactions.filter((t) => !t.bid_id).reduce((sum, t) => sum + Number(t.amount), 0);
   const importSources = Array.from(new Set(transactions.map((t) => t.source_file_name).filter((n): n is string => !!n)));
 
+  // Profit & Loss — always over the FULL ledger (not the browse filters
+  // above, which are for finding specific rows), scoped to one tax year at
+  // a time so it's comparable year over year, or "All time" for the whole
+  // project's lifetime numbers.
+  const availableYears = Array.from(new Set(transactions.map((t) => t.txn_date.slice(0, 4)))).sort((a, b) => b.localeCompare(a));
+  const plTransactions = plYear === "all" ? transactions : transactions.filter((t) => t.txn_date.startsWith(plYear));
+  const plCategories = Array.from(new Set(plTransactions.map((t) => t.category ?? "Uncategorized"))).sort();
+  const plRows = plCategories.map((category) => ({
+    category,
+    totals: totalsOf(plTransactions.filter((t) => (t.category ?? "Uncategorized") === category)),
+  }));
+  const plGrandTotal = totalsOf(plTransactions);
+
   return (
     <div className="space-y-6">
       <div className="card p-4">
-        <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Import bank transactions</h2>
+        <div className="mb-1 flex flex-wrap items-start justify-between gap-2">
+          <h2 className="text-sm font-semibold text-blueprint-dark">Import bank transactions</h2>
+          <button className="btn-outline px-3 py-1.5 text-xs" onClick={() => setAddingManual(true)}>
+            + Add manual entry
+          </button>
+        </div>
         <p className="mb-4 text-xs text-blueprint/50">
           Upload a CSV exported from your bank — most common formats are recognized automatically (a single signed
           Amount column, separate Debit/Credit columns, or a headerless Wells Fargo-style export). Re-importing an
-          overlapping date range skips transactions already on file rather than duplicating them.
+          overlapping date range skips transactions already on file rather than duplicating them. For costs that
+          never hit the bank statement (a cash payment, closing costs the bank CSV won&apos;t itemize, etc.), use
+          &quot;Add manual entry&quot; instead — it belongs in the same ledger for tax prep.
         </p>
         <input
           ref={fileInputRef}
@@ -206,12 +281,24 @@ export function BankTransactionsClient({
               {preview.skippedRows > 0 && (
                 <span className="text-blueprint/50"> — {preview.skippedRows} row{preview.skippedRows === 1 ? "" : "s"} skipped</span>
               )}
-              .
+              . Everything found will be imported — filtering below is just to help you review it.
             </p>
+
+            <input
+              className="input max-w-xs py-1.5 text-sm"
+              placeholder="Filter by description…"
+              value={previewFilterText}
+              onChange={(e) => setPreviewFilterText(e.target.value)}
+            />
+            <RunningTotals
+              label={`Showing ${filteredPreviewRows.length} of ${preview.rows.length}`}
+              totals={totalsOf(filteredPreviewRows)}
+            />
+
             <div className="max-h-64 overflow-y-auto rounded-lg border border-blueprint/10">
               <table className="w-full text-xs">
                 <tbody>
-                  {preview.rows.slice(0, 50).map((r, i) => (
+                  {filteredPreviewRows.slice(0, 50).map((r, i) => (
                     <tr key={i} className="border-b border-blueprint/5 last:border-0">
                       <td className="whitespace-nowrap px-3 py-1.5 text-blueprint/60">{formatDate(r.date)}</td>
                       <td className="px-3 py-1.5">{r.description}</td>
@@ -223,8 +310,11 @@ export function BankTransactionsClient({
                   ))}
                 </tbody>
               </table>
-              {preview.rows.length > 50 && (
-                <p className="px-3 py-1.5 text-xs text-blueprint/40">…and {preview.rows.length - 50} more.</p>
+              {filteredPreviewRows.length > 50 && (
+                <p className="px-3 py-1.5 text-xs text-blueprint/40">…and {filteredPreviewRows.length - 50} more.</p>
+              )}
+              {filteredPreviewRows.length === 0 && (
+                <p className="px-3 py-1.5 text-xs text-blueprint/40">No rows match that filter.</p>
               )}
             </div>
             <div className="flex gap-2">
@@ -273,6 +363,64 @@ export function BankTransactionsClient({
       )}
 
       <div className="card p-4">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-blueprint-dark">Profit &amp; Loss</h2>
+          <div className="flex items-center gap-2">
+            <select className="input w-auto py-1.5 text-sm" value={plYear} onChange={(e) => setPlYear(e.target.value)}>
+              <option value="all">All time</option>
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+            <button className="btn-ghost px-2 py-1 text-xs" onClick={handleExportCsv}>
+              Export ledger to CSV
+            </button>
+          </div>
+        </div>
+        <p className="mb-3 text-xs text-blueprint/50">
+          Grouped by category from the full ledger (imported and manual entries alike), scoped to the selected year
+          so it&apos;s comparable year over year. This is a computed summary of what&apos;s entered here, not tax
+          advice — confirm categorization and treatment with whoever prepares the return.
+        </p>
+        {transactions.length === 0 ? (
+          <p className="text-sm text-blueprint/50">Nothing to summarize yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-blueprint/10 text-left text-xs uppercase tracking-wide text-blueprint/40">
+                  <th className="px-2 py-2 font-medium">Category</th>
+                  <th className="px-2 py-2 text-right font-medium">Paid out</th>
+                  <th className="px-2 py-2 text-right font-medium">Received</th>
+                  <th className="px-2 py-2 text-right font-medium">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plRows.map((row) => (
+                  <tr key={row.category} className="border-b border-blueprint/5 last:border-0">
+                    <td className="px-2 py-1.5">{row.category}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-red-600">{currency(row.totals.debit)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right text-sage-dark">{currency(row.totals.credit)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right font-medium text-blueprint-dark">{currency(row.totals.net)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-blueprint/20 font-semibold">
+                  <td className="px-2 py-2">Total</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right text-red-600">{currency(plGrandTotal.debit)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right text-sage-dark">{currency(plGrandTotal.credit)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right text-blueprint-dark">{currency(plGrandTotal.net)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-blueprint-dark">All transactions ({transactions.length})</h2>
           {importSources.length > 0 && (
@@ -311,6 +459,15 @@ export function BankTransactionsClient({
                   </option>
                 ))}
               </select>
+              <select className="input w-auto py-1.5 text-sm" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                <option value="all">All categories</option>
+                <option value="uncategorized">Uncategorized</option>
+                {BANK_TXN_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
               {hasActiveFilter && (
                 <button
                   className="btn-ghost px-2 py-1 text-xs"
@@ -318,6 +475,7 @@ export function BankTransactionsClient({
                     setFilterText("");
                     setFilterType("all");
                     setFilterBid("all");
+                    setFilterCategory("all");
                   }}
                 >
                   Clear filters
@@ -350,6 +508,7 @@ export function BankTransactionsClient({
                     <th className="px-2 py-2 font-medium">Date</th>
                     <th className="px-2 py-2 font-medium">Description</th>
                     <th className="px-2 py-2 text-right font-medium">Amount</th>
+                    <th className="px-2 py-2 font-medium">Category</th>
                     <th className="px-2 py-2 font-medium">Bid</th>
                     <th className="px-2 py-2"></th>
                   </tr>
@@ -361,10 +520,31 @@ export function BankTransactionsClient({
                         <input type="checkbox" checked={selectedIds.has(t.id)} onChange={() => toggleSelected(t.id)} />
                       </td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-xs text-blueprint/60">{formatDate(t.txn_date)}</td>
-                      <td className="px-2 py-1.5">{t.description}</td>
+                      <td className="px-2 py-1.5">
+                        {t.description}
+                        {!t.source_file_name && (
+                          <span className="ml-1.5 rounded bg-blueprint/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blueprint/50">
+                            Manual
+                          </span>
+                        )}
+                      </td>
                       <td className={`whitespace-nowrap px-2 py-1.5 text-right font-medium ${t.type === "debit" ? "text-red-600" : "text-sage-dark"}`}>
                         {t.type === "debit" ? "-" : "+"}
                         {currency(t.amount)}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <select
+                          className="input py-1 text-xs"
+                          value={t.category ?? ""}
+                          onChange={(e) => handleAssignCategory(t, e.target.value || null)}
+                        >
+                          <option value="">Uncategorized</option>
+                          {BANK_TXN_CATEGORIES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-2 py-1.5">
                         <select
@@ -445,7 +625,142 @@ export function BankTransactionsClient({
           setUndoingSource(null);
         }}
       />
+
+      {addingManual && (
+        <ManualEntryModal
+          bids={bids}
+          onClose={() => setAddingManual(false)}
+          onSave={async (input) => {
+            const res = await addManualTransaction(projectId, input);
+            if (!res.ok || !res.transaction) {
+              notify("error", res.error ?? "Could not add entry.");
+              return;
+            }
+            setTransactions((prev) => [res.transaction!, ...prev]);
+            notify("success", "Entry added.");
+            setAddingManual(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ManualEntryModal({
+  bids,
+  onClose,
+  onSave,
+}: {
+  bids: BidOption[];
+  onClose: () => void;
+  onSave: (input: { date: string; description: string; amount: number; type: "debit" | "credit"; category: string | null; bidId: string | null }) => Promise<void>;
+}) {
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [type, setType] = useState<"debit" | "credit">("debit");
+  const [category, setCategory] = useState("");
+  const [bidId, setBidId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Add manual entry"
+      footer={
+        <>
+          <button className="btn-outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button
+            className="btn-primary"
+            disabled={saving || !description.trim() || !amount}
+            onClick={async () => {
+              setSaving(true);
+              await onSave({
+                date,
+                description: description.trim(),
+                amount: Number(amount) || 0,
+                type,
+                category: category || null,
+                bidId: bidId || null,
+              });
+              setSaving(false);
+            }}
+          >
+            {saving ? "Saving…" : "Add entry"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-blueprint/50">
+          For a cost or payment that never hits a bank statement — a cash payment, closing costs the bank CSV won&apos;t
+          itemize, etc. It&apos;s added to the same ledger as imported transactions.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Date</label>
+            <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Type</label>
+            <select className="input" value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+              <option value="debit">Paid out</option>
+              <option value="credit">Received</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="label">Description</label>
+          <input
+            className="input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Property acquisition — closing costs"
+            autoFocus
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Amount</label>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(stripLeadingZero(e.target.value))}
+              onFocus={(e) => e.target.select()}
+            />
+          </div>
+          <div>
+            <label className="label">Category (optional)</label>
+            <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Uncategorized</option>
+              {BANK_TXN_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {bids.length > 0 && (
+          <div>
+            <label className="label">Bid (optional)</label>
+            <select className="input" value={bidId} onChange={(e) => setBidId(e.target.value)}>
+              <option value="">Unmatched</option>
+              {bids.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.contractor}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -9,7 +9,7 @@ export default async function BankTransactionsPage({ params }: { params: { id: s
   const [{ data: transactions, error }, { data: bids }] = await Promise.all([
     supabase
       .from("bank_transactions")
-      .select("id, project_id, bid_id, txn_date, description, amount, type, source_file_name, created_at")
+      .select("id, project_id, bid_id, txn_date, description, amount, type, category, source_file_name, created_at")
       .eq("project_id", params.id)
       .order("txn_date", { ascending: false }),
     // Declined bids never received a payment — no point offering them as a

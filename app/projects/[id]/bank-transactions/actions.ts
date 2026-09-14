@@ -50,7 +50,7 @@ export async function importBankTransactions(
       })),
       { onConflict: "project_id,txn_date,description,amount,type", ignoreDuplicates: true }
     )
-    .select("id, project_id, bid_id, txn_date, description, amount, type, source_file_name, created_at");
+    .select("id, project_id, bid_id, txn_date, description, amount, type, category, source_file_name, created_at");
   if (error) return { ok: false, error: error.message };
 
   revalidate(projectId);
@@ -58,9 +58,56 @@ export async function importBankTransactions(
   return { ok: true, insertedRows, duplicates: rows.length - insertedRows.length };
 }
 
+// A row that never hits a bank statement — a cash payment, a cost folded
+// into a closing statement the bank CSV won't itemize, a contributed cost,
+// etc. — for tax-prep purposes these need to be trackable in the same
+// ledger/P&L as imported transactions. source_file_name stays null, which
+// is how the UI tells a manual entry apart from an imported one.
+export async function addManualTransaction(
+  projectId: string,
+  input: { date: string; description: string; amount: number; type: "debit" | "credit"; category: string | null; bidId: string | null }
+): Promise<ActionResult & { transaction?: BankTransaction }> {
+  if (!input.description.trim()) return { ok: false, error: "Description is required." };
+  if (!input.amount || input.amount <= 0) return { ok: false, error: "Enter a positive amount." };
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data, error } = await supabase
+    .from("bank_transactions")
+    .insert({
+      project_id: projectId,
+      bid_id: input.bidId,
+      txn_date: input.date,
+      description: input.description.trim(),
+      amount: input.amount,
+      type: input.type,
+      category: input.category,
+      source_file_name: null,
+      created_by: user.id,
+    })
+    .select("id, project_id, bid_id, txn_date, description, amount, type, category, source_file_name, created_at")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  revalidate(projectId);
+  return { ok: true, transaction: data as BankTransaction };
+}
+
 export async function assignTransactionBid(projectId: string, transactionId: string, bidId: string | null): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("bank_transactions").update({ bid_id: bidId }).eq("id", transactionId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+export async function assignTransactionCategory(projectId: string, transactionId: string, category: string | null): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("bank_transactions").update({ category }).eq("id", transactionId);
   if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };

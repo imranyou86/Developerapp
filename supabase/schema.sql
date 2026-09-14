@@ -284,7 +284,11 @@ create table if not exists payment_schedule_items (
 -- Bank Transactions tab: rows imported from a bank-exported CSV (parsed
 -- client-side, lib/bankCsv.ts — deterministic, no AI call needed for
 -- structured tabular data), each optionally linked to a bid so "how much
--- has actually been paid toward this bid" can be tracked.
+-- has actually been paid toward this bid" can be tracked. Manual entries
+-- (anything that never hits the bank statement — a cash payment, a cost
+-- folded into closing that the statement doesn't itemize, etc., for tax-prep
+-- purposes) are just ordinary rows here with source_file_name left null.
+-- `category` groups rows for the Profit & Loss statement (lib/bankCategories.ts).
 create table if not exists bank_transactions (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -293,6 +297,7 @@ create table if not exists bank_transactions (
   description text not null,
   amount numeric not null,
   type text not null check (type in ('debit', 'credit')),
+  category text,
   source_file_name text,
   created_by uuid not null references auth.users (id) on delete cascade,
   created_at timestamptz not null default now()

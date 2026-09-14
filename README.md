@@ -983,7 +983,42 @@ yet; each one only adds what a given feature needed.
     just the checked rows — selection persists across filter changes (so
     filtering down, selecting a few, then clearing the filter doesn't
     lose the selection) since it's tracked as its own `Set<string>` of
-    ids rather than derived from the visible rows.
+    ids rather than derived from the visible rows. The CSV upload preview
+    (before anything's imported) has its own independent description filter
+    and running total for the same reason — reviewing a big statement
+    before committing to import benefits from the same narrow-and-check
+    as the saved ledger does, but nothing in the preview is filtered OUT
+    of the import itself; it's a review aid, not a selection mechanism.
+  - **Categories, manual entries, and a Profit & Loss statement** (migration
+    `041_bank_transaction_categories.sql` adds a `category` column) — built
+    for tax prep specifically. Every transaction, imported or not, can be
+    tagged with a category from a small fixed list
+    (`lib/bankCategories.ts`: Land/Acquisition, Materials, Labor/
+    Subcontractors, Permits & Fees, Insurance, Financing/Interest,
+    Utilities, Professional Fees, Selling Costs, Sale Proceeds/Revenue,
+    Loan Proceeds, Other) — fixed rather than free text specifically
+    *because* it's accounting, not a creative field: free text would let
+    "Materials"/"materials"/"material costs" fragment into three separate
+    P&L lines instead of grouping into one. "+ Add manual entry" inserts a
+    row directly (`addManualTransaction`) for anything that never hits a
+    bank statement — a cash payment, a cost folded into a closing statement
+    the bank CSV won't itemize, etc. — with `source_file_name` left null,
+    which is also how the table tells it apart from an imported row (a
+    small "Manual" badge next to the description). The Profit & Loss
+    section groups the *entire* ledger (imported and manual alike — never
+    just what the browse filters above happen to be showing) by category
+    into a Paid out/Received/Net table with a grand total row, scoped to
+    one calendar year at a time via a year dropdown (derived from whatever
+    years actually appear in `txn_date`) or "All time" — so it's directly
+    comparable year over year the way a return needs to be. It's a plain
+    computed summary of what's entered, explicitly not tax advice — the
+    UI says so, since what's capitalized vs. deductible and how a given
+    cost should actually be treated is a question for whoever prepares
+    the return. "Export ledger to CSV" (a client-built CSV, same
+    Blob-download technique used elsewhere in the app) hands the full
+    ledger — date, description, category, type, amount, matched bid,
+    source — to that person directly rather than requiring them to
+    re-type it from the screen.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
