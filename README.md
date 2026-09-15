@@ -1015,9 +1015,12 @@ yet; each one only adds what a given feature needed.
     `042_bank_transaction_pl_flag.sql` adds `include_in_pl`) — built for tax
     prep specifically. Every transaction, imported or not, can be tagged
     with a category from a small fixed list (`lib/bankCategories.ts`:
-    Land/Acquisition, Materials, Labor/Subcontractors, Permits & Fees,
-    Insurance, Financing/Interest, Utilities, Professional Fees, Selling
-    Costs, Sale Proceeds/Revenue, Loan Proceeds, Other) — fixed rather than
+    Property Value, Construction Cost, and Property Tax lead the list — the
+    three actually used day to day — followed by Materials, Labor/
+    Subcontractors, Permits & Fees, Insurance, Financing/Interest,
+    Utilities, Professional Fees, Selling Costs, Sale Proceeds/Revenue,
+    Loan Proceeds, Other, for anyone who wants a more granular construction-
+    cost breakdown than one lump line) — fixed rather than
     free text specifically *because* it's accounting, not a creative field:
     free text would let "Materials"/"materials"/"material costs" fragment
     into three separate P&L lines instead of grouping into one. "+ Add

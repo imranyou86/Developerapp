@@ -4,8 +4,16 @@
 // given cost should actually be treated, is a question for whoever prepares
 // the return; this just keeps categorization consistent enough that the P&L
 // groups sensibly instead of fragmenting into near-duplicate free-text labels.
+//
+// The first three are the categories actually used day to day (the
+// property's purchase price, a single lump-sum construction cost, and
+// property tax); Materials/Labor below them stay available for anyone who
+// wants a more granular breakdown of the construction cost instead of one
+// line — both are valid, pick whichever level of detail fits a given entry.
 export const BANK_TXN_CATEGORIES = [
-  "Land / Acquisition",
+  "Property Value",
+  "Construction Cost",
+  "Property Tax",
   "Materials",
   "Labor / Subcontractors",
   "Permits & Fees",
