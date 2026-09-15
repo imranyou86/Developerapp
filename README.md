@@ -974,10 +974,14 @@ yet; each one only adds what a given feature needed.
     Payments' planned/checked-off payment schedule, not a replacement for
     it.
   - **Filter and select, each with their own running total** — a search-
-    by-description box plus type (paid out/received) and bid filters
-    narrow the table, and a running total (paid out / received / net)
-    for whatever's currently showing updates live as those filters
-    change, with no selection needed. Checking rows (a per-row checkbox,
+    by-description box plus type (paid out/received), bid, category, and
+    "In P&L" / "Not in P&L" filters narrow the table, and a running total
+    (paid out / received / net) for whatever's currently showing updates
+    live as those filters change, with no selection needed. The category
+    filter (all / uncategorized / a specific category) and the P&L-status
+    filter compose with the rest, so "everything tagged Construction Cost
+    that isn't in the P&L yet" is one combination of dropdowns, not a
+    separate view. Checking rows (a per-row checkbox,
     plus a header checkbox that selects/deselects everything currently
     filtered) shows a second, visually distinct running total scoped to
     just the checked rows — selection persists across filter changes (so

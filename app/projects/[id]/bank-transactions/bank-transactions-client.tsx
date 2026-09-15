@@ -83,6 +83,7 @@ export function BankTransactionsClient({
   const [filterType, setFilterType] = useState<"all" | "debit" | "credit">("all");
   const [filterBid, setFilterBid] = useState<BidFilter>("all");
   const [filterCategory, setFilterCategory] = useState<"all" | "uncategorized" | string>("all");
+  const [filterInPl, setFilterInPl] = useState<"all" | "yes" | "no">("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [addingManual, setAddingManual] = useState(false);
   const [plYear, setPlYear] = useState<"all" | string>("all");
@@ -90,7 +91,8 @@ export function BankTransactionsClient({
 
   const bidsById = new Map(bids.map((b) => [b.id, b.contractor]));
 
-  const hasActiveFilter = filterText.trim() !== "" || filterType !== "all" || filterBid !== "all" || filterCategory !== "all";
+  const hasActiveFilter =
+    filterText.trim() !== "" || filterType !== "all" || filterBid !== "all" || filterCategory !== "all" || filterInPl !== "all";
 
   const filteredTransactions = transactions.filter((t) => {
     if (filterType !== "all" && t.type !== filterType) return false;
@@ -98,6 +100,8 @@ export function BankTransactionsClient({
     if (filterBid !== "all" && filterBid !== "unmatched" && t.bid_id !== filterBid) return false;
     if (filterCategory === "uncategorized" && t.category) return false;
     if (filterCategory !== "all" && filterCategory !== "uncategorized" && t.category !== filterCategory) return false;
+    if (filterInPl === "yes" && !t.include_in_pl) return false;
+    if (filterInPl === "no" && t.include_in_pl) return false;
     if (filterText.trim() && !t.description.toLowerCase().includes(filterText.trim().toLowerCase())) return false;
     return true;
   });
@@ -596,6 +600,11 @@ export function BankTransactionsClient({
                   </option>
                 ))}
               </select>
+              <select className="input w-auto py-1.5 text-sm" value={filterInPl} onChange={(e) => setFilterInPl(e.target.value as typeof filterInPl)}>
+                <option value="all">All P&amp;L status</option>
+                <option value="yes">In P&amp;L</option>
+                <option value="no">Not in P&amp;L</option>
+              </select>
               {hasActiveFilter && (
                 <button
                   className="btn-ghost px-2 py-1 text-xs"
@@ -604,6 +613,7 @@ export function BankTransactionsClient({
                     setFilterType("all");
                     setFilterBid("all");
                     setFilterCategory("all");
+                    setFilterInPl("all");
                   }}
                 >
                   Clear filters
