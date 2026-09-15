@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { parseBankCsv, type ParsedBankTransaction } from "@/lib/bankCsv";
 import { BANK_TXN_CATEGORIES } from "@/lib/bankCategories";
 import { stripLeadingZero } from "@/lib/numberInput";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import {
   addManualTransaction,
   assignTransactionBid,
@@ -88,6 +89,7 @@ export function BankTransactionsClient({
   const [addingManual, setAddingManual] = useState(false);
   const [plYear, setPlYear] = useState<"all" | string>("all");
   const [showExpenseChart, setShowExpenseChart] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const bidsById = new Map(bids.map((b) => [b.id, b.contractor]));
 
@@ -292,6 +294,35 @@ export function BankTransactionsClient({
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleExportPdf() {
+    setGeneratingPdf(true);
+    try {
+      const res = await fetchWithRetry(`/api/projects/${projectId}/bank-transactions/pnl-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: plYear }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? "Could not generate the PDF.");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bank-transactions-pnl-${plYear}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("success", "P&L PDF generated.");
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not generate the PDF.");
+    } finally {
+      setGeneratingPdf(false);
+    }
   }
 
   async function handleAutoMatch() {
@@ -510,11 +541,16 @@ export function BankTransactionsClient({
           </p>
         ) : (
           <>
-            {expenseByCategory.length > 0 && (
-              <button className="btn-ghost mb-3 px-2 py-1 text-xs" onClick={() => setShowExpenseChart((v) => !v)}>
-                {showExpenseChart ? "Hide expense chart" : "Generate expense chart"}
+            <div className="mb-3 flex flex-wrap gap-2">
+              {expenseByCategory.length > 0 && (
+                <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setShowExpenseChart((v) => !v)}>
+                  {showExpenseChart ? "Hide expense chart" : "Generate expense chart"}
+                </button>
+              )}
+              <button className="btn-outline px-2 py-1 text-xs" disabled={generatingPdf} onClick={handleExportPdf}>
+                {generatingPdf ? "Generating…" : "Export detailed PDF for CPA"}
               </button>
-            )}
+            </div>
             {showExpenseChart && expenseByCategory.length > 0 && (
               <ExpenseBreakdownChart rows={expenseByCategory} total={plGrandTotal.debit} />
             )}

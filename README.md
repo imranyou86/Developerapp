@@ -1086,6 +1086,35 @@ yet; each one only adds what a given feature needed.
       `width: %`, not a charting library. The P&L table right below it is
       this chart's exact table-view twin (identical numbers), so nothing
       shown in the chart is chart-only.
+    - **"Export detailed PDF for CPA"** (`lib/bankTransactionsPdf.tsx` +
+      `app/api/projects/[id]/bank-transactions/pnl-pdf/route.ts`) turns the
+      same P&L numbers into a print-ready document instead of a screen the
+      preparer has to transcribe from. It's a route handler, not a server
+      action, since it streams back a `Content-Type: application/pdf` blob
+      (same `@react-pdf/renderer` + base-14-font-only approach as the House
+      Book PDF, including the identical literal-subpath-import workaround
+      for pdfkit's standard fonts — see the comment in `lib/houseBookPdf.tsx`
+      for why that trick is needed at all). The route re-queries
+      `bank_transactions` itself scoped to `project_id` and
+      `include_in_pl = true` (and to the requested year, if any) rather than
+      trusting a client-computed list — the same reasoning as the House
+      Book route re-scoping every id list it's handed. The PDF has two
+      pages: a summary page (total expenses/revenue/net as three stat
+      tiles, the same expense-breakdown bar chart re-rendered as PDF
+      `View`s at the same red-on-`#eef1f3`-track styling as the on-screen
+      chart, and the category summary table) and a detail page listing
+      every underlying transaction — date, description, matched
+      contractor, source (a file name, or "Manual entry" for an audit
+      trail), and signed amount — grouped by category with a per-category
+      subtotal and a grand total, in the same category order as the
+      summary table above it so the two pages never disagree. This is
+      deliberately the app's own accounting colors (the red/sage/blueprint
+      already used for paid-out/received/net everywhere in this tab) rather
+      than the House Book's decorative gold-and-navy "keepsake" palette,
+      since a P&L handed to a CPA is a working document, not a memento. The
+      button lives right next to "Generate expense chart" and is scoped to
+      whatever year is currently selected — "All time" or a specific year —
+      so the exported PDF always matches what's on screen.
 - **In-app modals** — `window.prompt()`/`confirm()` are avoided everywhere
   in favor of the `Modal`/`ConfirmDialog` components, since those browser
   APIs are blocked in sandboxed/iframe contexts.
