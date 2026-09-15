@@ -1042,7 +1042,13 @@ yet; each one only adds what a given feature needed.
       the normal workflow) via "Add selected to P&L"/"Remove selected from
       P&L" (`setTransactionsIncludeInPl`). A manual entry defaults to
       *checked* instead, on the theory that a single deliberate action
-      (unlike unreviewed bulk CSV data) is usually meant to count.
+      (unlike unreviewed bulk CSV data) is usually meant to count. The same
+      selected-rows bar carries a "Set category…" dropdown
+      (`setTransactionsCategory`) for bulk-categorizing that same
+      filter-then-select batch in one action, instead of picking a category
+      from each row's own dropdown one at a time — e.g. filter to one
+      contractor's transactions, select all, and tag every one
+      "Construction Cost" in a single pick.
     - The P&L table itself groups whatever's marked in by category into a
       Paid out/Received/Net table with a grand total row, scoped to one
       calendar year at a time via a year dropdown (derived from whatever

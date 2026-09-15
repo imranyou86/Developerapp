@@ -135,6 +135,19 @@ export async function setTransactionsIncludeInPl(projectId: string, transactionI
   return { ok: true };
 }
 
+// Categorize many rows at once — filter/select down to a batch (e.g. every
+// row from one contractor, or every unmatched debit) and tag them all in
+// one action instead of picking a category from each row's dropdown one
+// at a time.
+export async function setTransactionsCategory(projectId: string, transactionIds: string[], category: string | null): Promise<ActionResult> {
+  if (transactionIds.length === 0) return { ok: true };
+  const supabase = createClient();
+  const { error } = await supabase.from("bank_transactions").update({ category }).in("id", transactionIds);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
 export async function deleteBankTransaction(projectId: string, transactionId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("bank_transactions").delete().eq("id", transactionId);

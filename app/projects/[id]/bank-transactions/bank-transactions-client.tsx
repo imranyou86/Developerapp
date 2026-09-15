@@ -15,6 +15,7 @@ import {
   deleteBankTransaction,
   deleteBankTransactionsBySource,
   importBankTransactions,
+  setTransactionsCategory,
   setTransactionsIncludeInPl,
 } from "@/app/projects/[id]/bank-transactions/actions";
 import type { BankTransaction } from "@/lib/types";
@@ -246,6 +247,20 @@ export function BankTransactionsClient({
       setTransactions((rows) => rows.map((r) => (ids.includes(r.id) ? { ...r, include_in_pl: !include } : r)));
     } else {
       notify("success", `${ids.length} transaction${ids.length === 1 ? "" : "s"} ${include ? "added to" : "removed from"} the P&L.`);
+    }
+  }
+
+  async function handleBulkSetCategory(category: string | null) {
+    const ids = selectedTransactions.map((t) => t.id);
+    if (ids.length === 0) return;
+    const prevByCategory = new Map(selectedTransactions.map((t) => [t.id, t.category]));
+    setTransactions((rows) => rows.map((r) => (ids.includes(r.id) ? { ...r, category } : r)));
+    const res = await setTransactionsCategory(projectId, ids, category);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update.");
+      setTransactions((rows) => rows.map((r) => (prevByCategory.has(r.id) ? { ...r, category: prevByCategory.get(r.id)! } : r)));
+    } else {
+      notify("success", `${ids.length} transaction${ids.length === 1 ? "" : "s"} set to "${category ?? "Uncategorized"}".`);
     }
   }
 
@@ -608,6 +623,25 @@ export function BankTransactionsClient({
                   onClear={() => setSelectedIds(new Set())}
                   emphasize
                 >
+                  <select
+                    className="input w-auto py-0.5 text-xs"
+                    value=""
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__none__") handleBulkSetCategory(null);
+                      else if (value) handleBulkSetCategory(value);
+                    }}
+                  >
+                    <option value="" disabled>
+                      Set category…
+                    </option>
+                    <option value="__none__">Uncategorized</option>
+                    {BANK_TXN_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                   <button className="text-amber-dark hover:underline" onClick={() => handleBulkSetIncludeInPl(true)}>
                     Add selected to P&amp;L
                   </button>
