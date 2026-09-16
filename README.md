@@ -723,6 +723,36 @@ yet; each one only adds what a given feature needed.
   a guarded `do $$ ... if not exists ...` block so re-running it is safe) —
   without that step the table exists and works for sending/reading, but
   nothing streams live.
+  - **Unread-count badge on the Chat tab** (migration
+    `044_project_chat_reads.sql`) — a small solid-fill number
+    (`.badge-count` in `app/globals.css`, deliberately not a translucent
+    `.badge-*` tint like the rest of the app's badges, so it stays legible
+    sitting on top of either the active tab's solid blueprint fill or the
+    inactive tab's transparent one) shown next to "Chat" in
+    `app/projects/[id]/project-tabs.tsx` whenever there are messages the
+    current user hasn't seen yet. Backed by a new `project_chat_reads
+    (project_id, user_id, last_read_at)` table — no row yet means "never
+    read this project's chat," so every existing message counts as unread
+    the first time, same as most chat apps. `ProjectTabs` lives in the
+    per-project layout, so it stays mounted across every tab within one
+    construction (not remounted per page) — that's what lets a single
+    long-lived Realtime subscription (on `project_messages` INSERT,
+    filtered to this project) drive the badge live without a subscription
+    per tab: a message from someone else increments the count when the
+    user isn't currently on the chat page, and either way (own message or
+    already on chat) instead calls `markChatRead`
+    (`app/projects/[id]/chat/actions.ts`, an upsert of `last_read_at =
+    now()`) so a message that arrives while chat is already open never gets
+    counted as unread the next time the user leaves and comes back. A
+    `pathname` **ref** (not state) inside that same effect is what lets it
+    always check "is chat the active tab right now" without having to tear
+    down and resubscribe the channel on every navigation — a second, small
+    effect keyed on the actual `pathname` state separately resets the badge
+    to 0 and marks read the moment the user lands on (or client-navigates
+    into) the chat tab itself, including on the very first server-rendered
+    load if that's the page they opened directly (the initial count itself
+    comes from `app/projects/[id]/layout.tsx`, computed server-side per
+    request so it's correct even before any client code runs).
 - **Email alerts** (migration `033_project_alerts.sql`) — a "🔔 Get alerts" /
   "🔕 Alerts on" toggle in every construction's header (next to Invite/Share,
   `app/projects/[id]/alert-subscribe-button.tsx`) subscribes the signed-in
@@ -1388,6 +1418,55 @@ yet; each one only adds what a given feature needed.
   the result, since the new password is shown back only once — the
   Developer has to relay it to the account owner themselves; there's no
   server-side record of it afterward beyond the hash Supabase stores.
+- **Create account, and per-account tab-permission overrides** (migration
+  `043_user_tab_permissions.sql`) — a **Create account** form on the Admin
+  page (`app/admin/admin-client.tsx`'s `CreateAccountSection`,
+  `app/admin/actions.ts`'s `createAccount`) makes an account directly —
+  email, password, role, and a "Test account" checkbox — skipping the
+  public `/login` sign-up form and its pending-approval queue entirely
+  (role and `status: "approved"` are passed as auth `user_metadata`, which
+  `handle_new_user()`'s trigger already reads when inserting the `profiles`
+  row — the exact same mechanism `invite-actions.ts`'s
+  `inviteUserByEmail` uses to pre-approve an invited account, just with a
+  password set up front here instead of an emailed sign-in link, via
+  `admin.auth.admin.createUser({ email_confirm: true, ... })` so it can be
+  signed into immediately). Two use cases in one form: a throwaway **test
+  account** to see exactly what a role looks like from the inside (as
+  opposed to the Developer's own "Preview as another role," which only
+  simulates a role in the abstract for the Developer's own session — a real
+  second account is the only way to see what warranty-request notification
+  emails, chat as a non-owner, etc. actually look like), or a real account
+  handed to a specific person. "Test account" just sets `profiles.is_test`
+  — a label (a small "Test" badge next to that row in the Users list below)
+  with no effect on access or behavior, there purely so throwaway accounts
+  are easy to tell apart from real ones at a glance.
+  - **Per-account permission overrides** — every user row also gets a
+    **Permissions** button (badge-counted when it has any overrides set)
+    opening `UserPermissionsModal`: every tab from `ALL_TABS`, each with a
+    Default/Allowed/Blocked selector, auto-saving on change
+    (`updateUserTabPermission`) the same way the role-wide matrix above
+    auto-saves its own checkboxes. "Default" defers to whatever that role's
+    row in the Tab permissions matrix says; "Allowed"/"Blocked" pins this
+    one tab for this one account regardless of future changes to that
+    matrix or what every other account of the same role sees — this is
+    what actually answers "specific permissions for this account," letting
+    a test account try a narrower or wider slice of a role's tabs (or a
+    real person get one extra/fewer tab) without touching the shared
+    matrix everyone else of that role relies on. Backed by a new
+    `user_tab_permissions (user_id, tab, allowed)` table —
+    `getAllowedTabSlugs` (`lib/permissions-server.ts`) now takes an
+    optional `userId` and, when passed (every call site passes the real
+    signed-in user's own id — not a Developer's previewed role, since
+    per-user overrides only matter to the actual account they're set on),
+    computes the role's own baseline exactly as before, then layers any
+    per-tab override from `user_tab_permissions` on top *of that baseline*
+    rather than recomputing the whole allow/deny decision from a merged
+    dataset — this matters specifically so a single override for one tab
+    can never accidentally flip the existing "role has zero configured
+    rows → deny everything" fail-closed guard open for every *other* tab
+    the account wasn't explicitly granted. A Developer account is
+    unaffected by any of this and always has every tab, same invariant as
+    the role matrix.
 - **Preview as another role** — a "Preview as another role" picker on the
   **Admin** page (`app/admin/admin-client.tsx`'s `PreviewRoleSection`),
   visible only to a real Developer account, lets you browse the rest of

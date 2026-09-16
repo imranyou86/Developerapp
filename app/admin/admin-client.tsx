@@ -4,7 +4,15 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
-import { updateTabPermission, updateUserRole, updateUserStatus, deleteUser, resetUserPassword } from "@/app/admin/actions";
+import {
+  updateTabPermission,
+  updateUserRole,
+  updateUserStatus,
+  deleteUser,
+  resetUserPassword,
+  createAccount,
+  updateUserTabPermission,
+} from "@/app/admin/actions";
 import { setPreviewRole } from "@/app/admin/preview-actions";
 import {
   sendProjectInvite,
@@ -15,7 +23,7 @@ import {
   type ProjectMemberRow,
 } from "@/app/projects/[id]/invite-actions";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { ROLE_LABELS, ROLE_VALUES } from "@/lib/permissions";
+import { ROLE_LABELS, ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
 const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "warranty"];
@@ -36,6 +44,9 @@ export interface AdminUser {
   email: string;
   role: UserRole;
   status: AccountStatus;
+  isTest: boolean;
+  /** This account's user_tab_permissions overrides, keyed by tab slug — wins over the role default for that tab only. */
+  tabOverrides: Record<string, boolean>;
 }
 
 export interface AdminProject {
@@ -72,6 +83,7 @@ export function AdminClient({
       <AccessRequestsSection rows={rows} setRows={setRows} currentUserId={currentUserId} />
       <PreviewRoleSection currentPreviewRole={currentPreviewRole} />
       <TabPermissionMatrix initial={matrix} />
+      <CreateAccountSection setRows={setRows} />
       <UsersSection rows={rows} setRows={setRows} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
     </div>
@@ -249,6 +261,147 @@ function TabPermissionMatrix({ initial }: { initial: MatrixRole[] }) {
   );
 }
 
+// Avoids visually-ambiguous characters (0/O, 1/l/I) since a Developer will
+// be reading this back to someone or pasting it somewhere they can't
+// immediately verify.
+function generatePassword(length = 14): string {
+  const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+  const bytes = new Uint32Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => charset[b % charset.length]).join("");
+}
+
+// Creates an account directly — skips the public /login sign-up form (and
+// its pending-approval queue, meant for that unsolicited path) since a
+// Developer choosing to create one here has already made the access
+// decision. Two use cases in one form: a throwaway "Test account" to try
+// out a role's permissions (own badge in the Users list below, easy to
+// spot and clean up later), or a real account handed to a specific person.
+// Per-tab permission overrides aren't set here — create the account first,
+// then use that row's "Permissions" button, the same panel every existing
+// user gets.
+function CreateAccountSection({ setRows }: { setRows: React.Dispatch<React.SetStateAction<AdminUser[]>> }) {
+  const { notify } = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [role, setRole] = useState<UserRole>("owner");
+  const [isTest, setIsTest] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
+
+  async function handleCopy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      notify("success", "Copied.");
+    } catch {
+      notify("error", "Could not copy — copy it manually.");
+    }
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreating(true);
+    const res = await createAccount({ email, password, role, isTest });
+    setCreating(false);
+    if (!res.ok || !res.userId) {
+      notify("error", res.error ?? "Could not create account.");
+      return;
+    }
+    setRows((r) => [
+      ...r,
+      { id: res.userId!, email: email.trim().toLowerCase(), role, status: "approved", isTest, tabOverrides: {} },
+    ]);
+    setCreated({ email: email.trim().toLowerCase(), password });
+    notify("success", "Account created.");
+    setEmail("");
+    setPassword("");
+    setShow(false);
+  }
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Create account</h2>
+      <p className="mb-3 text-xs text-blueprint/50">
+        Creates an account directly, pre-approved — no sign-up form or email confirmation needed. Use a test account
+        to see exactly what a role (or a specific narrower/wider set of tabs, via that row&apos;s &quot;Permissions&quot;
+        button below) looks like from the inside, or create a real account to hand to someone yourself.
+      </p>
+      <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[200px] flex-1">
+          <label className="label">Email</label>
+          <input type="email" required className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
+        </div>
+        <div className="min-w-[160px]">
+          <label className="label">Password</label>
+          <div className="flex items-center gap-1">
+            <input
+              type={show ? "text" : "password"}
+              required
+              minLength={6}
+              className="input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+            />
+            <button type="button" className="btn-ghost px-2 text-xs" onClick={() => setShow((s) => !s)}>
+              {show ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="label">Role</label>
+          <select className="input" value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
+            {ROLE_VALUES.map((r) => (
+              <option key={r} value={r}>
+                {ROLE_LABELS[r]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          className="btn-ghost px-2 py-2 text-xs"
+          onClick={() => {
+            setPassword(generatePassword());
+            setShow(true);
+          }}
+        >
+          Generate password
+        </button>
+        <label className="flex items-center gap-1.5 px-1 py-2 text-xs text-blueprint/70">
+          <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)} />
+          Test account
+        </label>
+        <button type="submit" className="btn-amber" disabled={creating}>
+          {creating ? "Creating…" : "Create account"}
+        </button>
+      </form>
+
+      {created && (
+        <div className="mt-3 space-y-2 rounded-lg border border-sage/30 bg-sage/5 p-3">
+          <p className="text-sm text-blueprint-dark">
+            <strong>{created.email}</strong> created. Share these credentials with them yourself — the password won&apos;t
+            be shown again once you dismiss this.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input flex-1 font-mono text-xs" readOnly value={created.password} onFocus={(e) => e.target.select()} />
+            <button className="btn-ghost text-xs" onClick={() => handleCopy(created.password)}>
+              Copy password
+            </button>
+            <button className="btn-ghost text-xs" onClick={() => handleCopy(created.email)}>
+              Copy email
+            </button>
+            <button className="btn-outline text-xs" onClick={() => setCreated(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 const STATUS_LABELS: Record<AccountStatus, string> = {
   pending: "Pending",
   approved: "Approved",
@@ -269,6 +422,11 @@ function UsersSection({
   const { notify } = useToast();
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
   const [resettingPasswordFor, setResettingPasswordFor] = useState<AdminUser | null>(null);
+  // An id, not the row itself — re-derived from `rows` below on every
+  // render so the modal always reflects the latest overrides instead of a
+  // stale snapshot captured when it was opened.
+  const [managingPermissionsForId, setManagingPermissionsForId] = useState<string | null>(null);
+  const managingPermissionsFor = rows.find((u) => u.id === managingPermissionsForId) ?? null;
   const [busy, setBusy] = useState(false);
 
   async function handleChange(userId: string, role: UserRole) {
@@ -318,6 +476,7 @@ function UsersSection({
             <span className="flex-1 truncate">
               {u.email}
               {u.id === currentUserId && <span className="ml-2 text-xs text-blueprint/40">(you)</span>}
+              {u.isTest && <span className="badge-sage ml-2 text-xs">Test</span>}
             </span>
             {u.status !== "approved" && (
               <span className={`text-xs ${u.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>
@@ -344,6 +503,11 @@ function UsersSection({
                 ))}
               </select>
             )}
+            {u.role !== "developer" && (
+              <button className="btn-ghost text-xs" onClick={() => setManagingPermissionsForId(u.id)}>
+                Permissions{Object.keys(u.tabOverrides).length > 0 && <span className="badge-amber ml-1 px-1.5">{Object.keys(u.tabOverrides).length}</span>}
+              </button>
+            )}
             <button className="btn-ghost text-xs" onClick={() => setResettingPasswordFor(u)}>
               Reset password
             </button>
@@ -357,6 +521,22 @@ function UsersSection({
       </div>
 
       <ResetPasswordModal user={resettingPasswordFor} onClose={() => setResettingPasswordFor(null)} />
+
+      <UserPermissionsModal
+        user={managingPermissionsFor}
+        onClose={() => setManagingPermissionsForId(null)}
+        onChange={(tab, allowed) => {
+          setRows((r) =>
+            r.map((u) => {
+              if (u.id !== managingPermissionsForId) return u;
+              const tabOverrides = { ...u.tabOverrides };
+              if (allowed === null) delete tabOverrides[tab];
+              else tabOverrides[tab] = allowed;
+              return { ...u, tabOverrides };
+            })
+          );
+        }}
+      />
 
       <ConfirmDialog
         open={!!deleting}
@@ -394,16 +574,6 @@ function UsersSection({
       />
     </section>
   );
-}
-
-// Avoids visually-ambiguous characters (0/O, 1/l/I) since a Developer will
-// be reading this back to someone or pasting it somewhere they can't
-// immediately verify.
-function generatePassword(length = 14): string {
-  const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
-  const bytes = new Uint32Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => charset[b % charset.length]).join("");
 }
 
 function ResetPasswordModal({ user, onClose }: { user: AdminUser | null; onClose: () => void }) {
@@ -519,6 +689,82 @@ function ResetPasswordModal({ user, onClose }: { user: AdminUser | null; onClose
           </button>
         </div>
       )}
+    </Modal>
+  );
+}
+
+type OverrideChoice = "default" | "allowed" | "blocked";
+
+function choiceOf(tabOverrides: Record<string, boolean>, tab: string): OverrideChoice {
+  if (!(tab in tabOverrides)) return "default";
+  return tabOverrides[tab] ? "allowed" : "blocked";
+}
+
+// Per-account exception on top of the role-wide Tab permissions matrix
+// above — "Default" here means "use whatever that role's row in the
+// matrix says," not "always allowed." Auto-saves each change immediately,
+// same as the role matrix's own checkboxes, rather than a separate Save
+// step.
+function UserPermissionsModal({
+  user,
+  onClose,
+  onChange,
+}: {
+  user: AdminUser | null;
+  onClose: () => void;
+  onChange: (tab: string, allowed: boolean | null) => void;
+}) {
+  const { notify } = useToast();
+  const [savingTab, setSavingTab] = useState<string | null>(null);
+
+  async function handleChange(tab: string, choice: OverrideChoice) {
+    if (!user) return;
+    const allowed = choice === "default" ? null : choice === "allowed";
+    const previous = choiceOf(user.tabOverrides, tab);
+    setSavingTab(tab);
+    onChange(tab, allowed);
+    const res = await updateUserTabPermission(user.id, tab, allowed);
+    setSavingTab(null);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save.");
+      onChange(tab, previous === "default" ? null : previous === "allowed");
+    }
+  }
+
+  return (
+    <Modal open={!!user} onClose={onClose} title={user ? `Permissions — ${user.email}` : "Permissions"}>
+      <div className="space-y-3">
+        <p className="text-sm text-blueprint/60">
+          Overrides this account&apos;s tab visibility beyond its role (currently{" "}
+          <strong>{user ? ROLE_LABELS[user.role] : ""}</strong>). &quot;Default&quot; means it follows whatever the
+          Tab permissions matrix above says for that role; &quot;Allowed&quot;/&quot;Blocked&quot; pins it for this
+          account only, regardless of future changes to that matrix.
+        </p>
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-blueprint/10">
+          <table className="w-full text-sm">
+            <tbody>
+              {user &&
+                ALL_TABS.map((t) => (
+                  <tr key={t.slug} className="border-b border-blueprint/5 last:border-0">
+                    <td className="px-3 py-2 text-blueprint-dark">{t.label}</td>
+                    <td className="px-3 py-2 text-right">
+                      <select
+                        className="input w-auto py-1 text-xs"
+                        value={choiceOf(user.tabOverrides, t.slug)}
+                        disabled={savingTab === t.slug}
+                        onChange={(e) => handleChange(t.slug, e.target.value as OverrideChoice)}
+                      >
+                        <option value="default">Default</option>
+                        <option value="allowed">Allowed</option>
+                        <option value="blocked">Blocked</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </Modal>
   );
 }

@@ -8,6 +8,7 @@ import { AlertSubscribeButton } from "@/app/projects/[id]/alert-subscribe-button
 import { TabAccessGuard } from "@/components/TabAccessGuard";
 import { PageTransition } from "@/components/PageTransition";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
+import { PROJECT_TABS } from "@/lib/permissions";
 
 export default async function ProjectLayout({
   children,
@@ -39,13 +40,35 @@ export default async function ProjectLayout({
         .maybeSingle()
     : { data: null };
 
-  const roleAllowedSlugs = currentUser ? await getAllowedTabSlugs(currentUser.role) : [];
+  const roleAllowedSlugs = currentUser ? await getAllowedTabSlugs(currentUser.role, PROJECT_TABS, currentUser.id) : [];
   // A warranty tracker skips the construction workflow entirely — every
   // role sees only Warranty Request and Chat here, regardless of what
   // tab_permissions would otherwise allow that role on a normal construction.
   const WARRANTY_TRACKER_SLUGS = ["warranty-request", "chat"];
   const allowedSlugs =
     project.kind === "warranty_tracker" ? roleAllowedSlugs.filter((slug) => WARRANTY_TRACKER_SLUGS.includes(slug)) : roleAllowedSlugs;
+
+  // Initial unread count for the Chat tab badge — ProjectTabs (a client
+  // component that stays mounted across every tab within this project)
+  // keeps it live from here via Realtime and resets it once the user
+  // actually visits the chat page. No project_chat_reads row yet means
+  // "never read this project's chat," so every existing message counts.
+  let initialUnreadChat = 0;
+  if (currentUser && allowedSlugs.includes("chat")) {
+    const { data: readRow } = await supabase
+      .from("project_chat_reads")
+      .select("last_read_at")
+      .eq("project_id", project.id)
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    const { count } = await supabase
+      .from("project_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", project.id)
+      .neq("user_id", currentUser.id)
+      .gt("created_at", readRow?.last_read_at ?? "1970-01-01T00:00:00Z");
+    initialUnreadChat = count ?? 0;
+  }
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -67,7 +90,12 @@ export default async function ProjectLayout({
             <ShareButton projectId={project.id} initialShares={shares ?? []} />
           </div>
         </div>
-        <ProjectTabs projectId={project.id} allowedSlugs={allowedSlugs} />
+        <ProjectTabs
+          projectId={project.id}
+          allowedSlugs={allowedSlugs}
+          currentUserId={currentUser?.id ?? null}
+          initialUnreadChat={initialUnreadChat}
+        />
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
         <PageTransition>

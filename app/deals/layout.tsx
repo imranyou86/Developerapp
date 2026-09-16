@@ -10,7 +10,7 @@ export default async function DealsLayout({ children }: { children: React.ReactN
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login?next=/deals");
 
-  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS);
+  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id);
   if (!allowed.includes("deals")) redirect("/projects");
 
   return <>{children}</>;

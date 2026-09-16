@@ -9,7 +9,7 @@ export default async function ConstructionCostLayout({ children }: { children: R
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login?next=/construction-cost");
 
-  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS);
+  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id);
   if (!allowed.includes("cost")) redirect("/projects");
 
   return <>{children}</>;

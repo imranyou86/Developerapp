@@ -13,7 +13,7 @@ export default async function DealsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
-  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
   const { data: deals, error } = await supabase
     .from("deals")
     .select("id, address, city, state, zip_code, list_price, beds, baths, sqft, year_built, status, project_id, created_at")

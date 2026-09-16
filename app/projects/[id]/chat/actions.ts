@@ -72,3 +72,23 @@ export async function deleteMessage(messageId: string): Promise<ActionResult> {
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+// Marks this project's chat as read up to now for the current user — called
+// by ProjectTabs (app/projects/[id]/project-tabs.tsx) whenever it's the
+// active tab, including on every new Realtime message that arrives while
+// it's open, so navigating away and back doesn't immediately re-flag
+// messages the user already saw arrive live. No revalidatePath: this only
+// feeds the unread badge, which ProjectTabs already updates locally.
+export async function markChatRead(projectId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase
+    .from("project_chat_reads")
+    .upsert({ project_id: projectId, user_id: user.id, last_read_at: new Date().toISOString() }, { onConflict: "project_id,user_id" });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

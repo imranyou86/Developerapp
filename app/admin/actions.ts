@@ -73,6 +73,69 @@ export async function resetUserPassword(userId: string, newPassword: string): Pr
   return { ok: true };
 }
 
+// Creates an account directly from the Admin portal — a test account made
+// to try out a role's permissions, or a real account handed to a specific
+// person — without going through the public /login sign-up form (and its
+// pending-approval queue, meant for that unsolicited path, not one a
+// Developer already deliberately chose to create). role/status are passed
+// as auth user_metadata, which handle_new_user() (supabase/schema.sql)
+// reads when it inserts the profiles row — same mechanism
+// invite-actions.ts's inviteUserByEmail already relies on for
+// pre-approving invited accounts, just with a password set up front here
+// instead of an emailed sign-in link.
+export async function createAccount(input: {
+  email: string;
+  password: string;
+  role: UserRole;
+  isTest: boolean;
+}): Promise<ActionResult & { userId?: string }> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const email = input.email.trim().toLowerCase();
+  if (!email || !email.includes("@")) return { ok: false, error: "Enter a valid email." };
+  if (input.password.length < 6) return { ok: false, error: "Password must be at least 6 characters." };
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: { role: input.role, status: "approved" },
+  });
+  if (error) return { ok: false, error: error.message };
+  const userId = data.user.id;
+
+  if (input.isTest) {
+    const supabase = createClient();
+    const { error: updateError } = await supabase.from("profiles").update({ is_test: true }).eq("id", userId);
+    if (updateError) return { ok: false, error: updateError.message };
+  }
+
+  revalidatePath("/admin");
+  return { ok: true, userId };
+}
+
+// A per-account exception on top of the role-wide tab_permissions matrix —
+// see user_tab_permissions in supabase/schema.sql. `allowed: null` clears
+// the override for that tab (falls back to the role default again) instead
+// of storing an explicit true/false.
+export async function updateUserTabPermission(userId: string, tab: string, allowed: boolean | null): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const supabase = createClient();
+  if (allowed === null) {
+    const { error } = await supabase.from("user_tab_permissions").delete().eq("user_id", userId).eq("tab", tab);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await supabase.from("user_tab_permissions").upsert({ user_id: userId, tab, allowed }, { onConflict: "user_id,tab" });
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
 export async function deleteUser(userId: string): Promise<ActionResult> {
   const auth = await requireDeveloper();
   if (!auth.ok) return { ok: false, error: auth.error };

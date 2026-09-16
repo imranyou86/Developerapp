@@ -12,7 +12,7 @@ export default async function LandscapeLayout({ children }: { children: React.Re
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login?next=/landscape");
 
-  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS);
+  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id);
   if (!allowed.includes("landscape")) redirect("/projects");
 
   return <>{children}</>;

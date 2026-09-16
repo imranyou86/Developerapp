@@ -5,7 +5,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { AdminClient, type AdminProject, type AdminUser } from "@/app/admin/admin-client";
 import { ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
 import { getCurrentUser } from "@/lib/permissions-server";
-import type { TabPermission } from "@/lib/types";
+import type { TabPermission, UserTabPermission } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,13 +23,30 @@ export default async function AdminPage() {
   const currentUser = await getCurrentUser();
   if (!currentUser?.isDeveloper) redirect("/projects");
 
-  const [{ data: tabPermissions }, { data: profiles }, { data: projects }] = await Promise.all([
+  const [{ data: tabPermissions }, { data: profiles }, { data: projects }, { data: userTabPermissions }] = await Promise.all([
     supabase.from("tab_permissions").select("role, tab, allowed"),
-    supabase.from("profiles").select("id, email, role, status").order("email"),
+    supabase.from("profiles").select("id, email, role, status, is_test").order("email"),
     supabase.from("projects").select("id, name, address, user_id").order("name"),
+    supabase.from("user_tab_permissions").select("user_id, tab, allowed"),
   ]);
 
-  const users: AdminUser[] = (profiles ?? []) as AdminUser[];
+  // Grouped by user so each row's "Permissions" panel already has its own
+  // overrides on hand without a fetch of its own.
+  const userOverrides = new Map<string, Record<string, boolean>>();
+  for (const row of (userTabPermissions ?? []) as UserTabPermission[]) {
+    const existing = userOverrides.get(row.user_id) ?? {};
+    existing[row.tab] = row.allowed;
+    userOverrides.set(row.user_id, existing);
+  }
+
+  const users: AdminUser[] = (profiles ?? []).map((p) => ({
+    id: p.id,
+    email: p.email,
+    role: p.role,
+    status: p.status,
+    isTest: p.is_test,
+    tabOverrides: userOverrides.get(p.id) ?? {},
+  }));
   const projectRows: AdminProject[] = (projects ?? []).map((p) => ({
     id: p.id,
     name: p.name,

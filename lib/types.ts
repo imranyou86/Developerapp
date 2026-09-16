@@ -375,11 +375,20 @@ export interface Profile {
   id: string;
   email: string;
   role: UserRole;
+  is_test: boolean;
   created_at: string;
 }
 
 export interface TabPermission {
   role: UserRole;
+  tab: string;
+  allowed: boolean;
+}
+
+// A per-account exception on top of the role-wide TabPermission matrix —
+// see user_tab_permissions in supabase/schema.sql.
+export interface UserTabPermission {
+  user_id: string;
   tab: string;
   allowed: boolean;
 }

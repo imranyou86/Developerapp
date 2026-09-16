@@ -9,7 +9,7 @@ export default async function SubcontractorsLayout({ children }: { children: Rea
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login?next=/subcontractors");
 
-  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS);
+  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id);
   if (!allowed.includes("subcontractors")) redirect("/projects");
 
   return <>{children}</>;

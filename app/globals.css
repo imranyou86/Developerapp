@@ -96,4 +96,11 @@
   .badge-amber {
     @apply badge bg-amber/15 text-amber-dark;
   }
+
+  /* Solid fill (not a translucent tint like .badge-*) so an unread count
+     stays legible sitting on top of either tab background — the active
+     tab's solid blueprint fill or the inactive tab's transparent one. */
+  .badge-count {
+    @apply inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber px-1 text-[10px] font-semibold leading-none text-white;
+  }
 }

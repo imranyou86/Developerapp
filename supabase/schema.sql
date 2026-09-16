@@ -414,6 +414,11 @@ create table if not exists profiles (
   -- usage. 'rejected' is a permanent-looking decline an admin can still
   -- flip back to 'pending'/'approved' later.
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  -- Set by the Admin portal's "Create account" form for a throwaway account
+  -- made to try out a role's permissions, as opposed to a real person's
+  -- account — purely a label (a small "Test" badge in the Users list), no
+  -- effect on access or behavior anywhere else.
+  is_test boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -425,6 +430,22 @@ create table if not exists tab_permissions (
   tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
   allowed boolean not null default true,
   primary key (role, tab)
+);
+
+-- Per-account exception on top of the role-wide matrix above — a row here
+-- for (user_id, tab) wins over that role's tab_permissions default for
+-- this one account only. Lets a Developer hand a specific account (a test
+-- account created to try out a role's permissions, or a real account
+-- given to a specific person) a narrower or wider tab set without
+-- affecting every other account of that role. No row for a tab means "use
+-- the role default" (see getAllowedTabSlugs in lib/permissions-server.ts).
+-- A Developer account is always fully allowed regardless of any row here,
+-- same invariant as tab_permissions.
+create table if not exists user_tab_permissions (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
+  allowed boolean not null,
+  primary key (user_id, tab)
 );
 
 -- Who has access to a project beyond its owner (projects.user_id), and at
@@ -471,6 +492,20 @@ create table if not exists project_messages (
   sender_email text not null,
   body text not null,
   created_at timestamptz not null default now()
+);
+
+-- Tracks the last time each member read a given construction's chat, so the
+-- tab strip (app/projects/[id]/project-tabs.tsx) can show an unread-count
+-- badge on "Chat" — one row per (project, user), upserted to now() whenever
+-- that user is actively viewing the chat page (markChatRead in
+-- app/projects/[id]/chat/actions.ts). No row yet means "never read this
+-- project's chat," so every existing message counts as unread the first
+-- time, same as most chat apps.
+create table if not exists project_chat_reads (
+  project_id uuid not null references projects (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  last_read_at timestamptz not null default now(),
+  primary key (project_id, user_id)
 );
 
 -- Opt-in email alerts, one row per (project, subscriber) — a chat message,
@@ -733,6 +768,8 @@ alter table tab_permissions enable row level security;
 alter table project_members enable row level security;
 alter table project_invites enable row level security;
 alter table project_messages enable row level security;
+alter table project_chat_reads enable row level security;
+alter table user_tab_permissions enable row level security;
 alter table project_alert_subscriptions enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
@@ -948,6 +985,14 @@ create policy "tab_permissions_select" on tab_permissions
 create policy "tab_permissions_write" on tab_permissions
   for all using (is_developer()) with check (is_developer());
 
+-- Tighter than tab_permissions_select — these rows are tied to one specific
+-- account (a per-user exception, not a shared matrix), so only that
+-- account or a Developer can see them.
+create policy "user_tab_permissions_select" on user_tab_permissions
+  for select using (auth.uid() = user_id or is_developer());
+create policy "user_tab_permissions_write" on user_tab_permissions
+  for all using (is_developer()) with check (is_developer());
+
 create policy "project_members_select" on project_members
   for select using (has_project_access(project_id));
 create policy "project_members_insert" on project_members
@@ -982,6 +1027,12 @@ create policy "project_messages_insert" on project_messages
   for insert with check (has_project_access(project_id) and auth.uid() = user_id);
 create policy "project_messages_delete" on project_messages
   for delete using (auth.uid() = user_id or is_developer());
+
+-- Self-service only, same shape as project_alert_subscriptions — a user
+-- manages just their own read marker, never another member's.
+create policy "project_chat_reads_owner" on project_chat_reads
+  for all using (auth.uid() = user_id)
+  with check (has_project_access(project_id) and auth.uid() = user_id);
 
 -- Self-service only — a user manages just their own subscription row, never
 -- another member's. Dispatching alerts (reading every subscriber's email

@@ -71,4 +71,62 @@ describe("getAllowedTabSlugs", () => {
     const tabs = [{ slug: "plan", label: "Plan" }];
     expect(await getAllowedTabSlugs("owner", tabs)).toEqual([]);
   });
+
+  it("lets a per-user override win over the role default when a userId is passed", async () => {
+    vi.resetModules();
+    // Role default: "plan" allowed, "chat" disallowed. Per-user override
+    // for this one account flips both the other way.
+    vi.doMock("@/lib/supabase/server", () => ({
+      createClient: () => ({
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              in: () =>
+                Promise.resolve({
+                  data:
+                    table === "tab_permissions"
+                      ? [
+                          { tab: "plan", allowed: true },
+                          { tab: "chat", allowed: false },
+                        ]
+                      : [
+                          { tab: "plan", allowed: false },
+                          { tab: "chat", allowed: true },
+                        ],
+                }),
+            }),
+          }),
+        }),
+      }),
+    }));
+    const { getAllowedTabSlugs } = await import("./permissions-server");
+
+    const tabs = [
+      { slug: "plan", label: "Plan" },
+      { slug: "chat", label: "Chat" },
+    ];
+    expect(await getAllowedTabSlugs("owner", tabs, "user-1")).toEqual(["chat"]);
+  });
+
+  it("a per-user override still applies even when the role has zero configured rows", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/supabase/server", () => ({
+      createClient: () => ({
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              in: () => Promise.resolve({ data: table === "tab_permissions" ? [] : [{ tab: "plan", allowed: true }] }),
+            }),
+          }),
+        }),
+      }),
+    }));
+    const { getAllowedTabSlugs } = await import("./permissions-server");
+
+    const tabs = [
+      { slug: "plan", label: "Plan" },
+      { slug: "chat", label: "Chat" },
+    ];
+    expect(await getAllowedTabSlugs("owner", tabs, "user-1")).toEqual(["plan"]);
+  });
 });

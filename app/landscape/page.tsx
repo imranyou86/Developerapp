@@ -23,7 +23,7 @@ export default async function LandscapePage({ searchParams }: { searchParams: { 
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
-  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
   const { data: projects } = await supabase.from("projects").select("id, name, address").order("name");
   const projectList = projects ?? [];

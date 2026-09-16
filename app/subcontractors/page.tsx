@@ -14,7 +14,7 @@ export default async function SubcontractorsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
-  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
   const [{ data: subs, error }, { data: projects }, { data: links }] = await Promise.all([
     supabase

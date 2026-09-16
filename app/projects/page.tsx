@@ -13,7 +13,7 @@ export default async function ProjectsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
-  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS) : [];
+  const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
   const { data, error } = await supabase
     .from("projects")

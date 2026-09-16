@@ -12,7 +12,7 @@ export default async function InteriorDesignLayout({ children }: { children: Rea
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login?next=/interior-design");
 
-  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS);
+  const allowed = await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id);
   if (!allowed.includes("interior-design")) redirect("/projects");
 
   return <>{children}</>;
