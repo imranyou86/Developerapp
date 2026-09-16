@@ -930,8 +930,13 @@ yet; each one only adds what a given feature needed.
     actions, and fine for a single-admin-editing-at-a-time tool) and
     returns the new total so the client can update its local `bids` state
     immediately rather than waiting on `revalidatePath`.
-- **Bank Transactions tab** (per-project, next to Payments — migration
-  `040_bank_transactions.sql`) — upload a bank-exported CSV of transactions
+- **Accounting tab** (per-project, next to Payments — migration
+  `040_bank_transactions.sql`; labeled "Bank Transactions" until this tab grew
+  the manual-entry/category/P&L features below and "Accounting" became the
+  more accurate name — the slug, table, route, and file paths all stayed
+  `bank-transactions`/`bank_transactions` to avoid a tab-permissions
+  migration and broken bookmarks, so that name still appears throughout the
+  code and this doc) — upload a bank-exported CSV of transactions
   and reconcile them against bids: how much has actually gone out the door,
   matched to which contractor. Parsing is entirely deterministic
   (`lib/bankCsv.ts`, unit-tested in `lib/bankCsv.test.ts`) — a CSV is
@@ -1347,7 +1352,7 @@ yet; each one only adds what a given feature needed.
   access everywhere and the Admin page, not just that one project. From the
   Admin page a Developer can also edit the **tab permission matrix** —
   which sections each role can see, covering both the per-project tabs
-  (Plan, Rooms, Checklist, Budget, Bids, Payments, Bank Transactions, Files,
+  (Plan, Rooms, Checklist, Budget, Bids, Payments, Accounting, Files,
   Certificate of Occupancy, House Book, Chat, Warranty Request) and the
   top-level tabs (Buyers Guide/`deals`, Interior Design, Construction Cost,
   Landscape, Subcontractors) — Finish ID no
