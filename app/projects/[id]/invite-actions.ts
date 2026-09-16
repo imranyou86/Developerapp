@@ -127,6 +127,56 @@ export async function removeMember(memberId: string, projectId: string, email?: 
   return { ok: true };
 }
 
+// Directly grants an existing account access to a construction — no invite
+// token/email/acceptance step, unlike sendProjectInvite above. Makes sense
+// specifically because the account already exists with known credentials
+// (an Admin-portal-created account, or any existing user): a Developer
+// choosing to assign it here has already made the access decision, the
+// same as is_developer() already lets bypass project_members_insert's
+// normal "must accept a pending invite for your own email" check. Upserts
+// rather than a bare insert so re-assigning someone already a member just
+// updates their role instead of erroring on the (project_id, user_id)
+// unique constraint.
+export async function addProjectMember(projectId: string, userId: string, role: UserRole): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("project_members")
+    .upsert({ project_id: projectId, user_id: userId, role, invited_by: auth.userId }, { onConflict: "project_id,user_id" });
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: auth.userId,
+    action: "project_member.added",
+    entityType: "project_members",
+    entityId: userId,
+    detail: `Assigned an account directly to this construction (${role})`,
+  });
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export interface UserMembershipRow {
+  id: string;
+  project_id: string;
+  role: UserRole;
+}
+
+// The reverse lookup of listProjectInvitesAndMembers below (which is keyed
+// by project) — every construction a given account currently has
+// project_members access to, for the Admin Users list's own "Projects"
+// panel per account.
+export async function listMembershipsForUser(userId: string): Promise<UserMembershipRow[]> {
+  const supabase = createClient();
+  const { data } = await supabase.from("project_members").select("id, project_id, role").eq("user_id", userId);
+  return (data ?? []) as UserMembershipRow[];
+}
+
 export interface ProjectInviteRow {
   id: string;
   email: string;

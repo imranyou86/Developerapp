@@ -1467,6 +1467,31 @@ yet; each one only adds what a given feature needed.
     the account wasn't explicitly granted. A Developer account is
     unaffected by any of this and always has every tab, same invariant as
     the role matrix.
+  - **Assigning an account (created or pre-existing) to a construction** —
+    `app/projects/[id]/invite-actions.ts`'s `addProjectMember` grants an
+    existing account access to a specific construction directly: no invite
+    token, email, or acceptance step, since (unlike the "Projects &
+    invites" section's `sendProjectInvite`, built for someone who may not
+    have an account yet) this account already exists with known
+    credentials, and a Developer choosing to assign it here has already
+    made the access decision — the same `is_developer()` check that
+    already lets `project_members_insert`'s RLS policy bypass its normal
+    "must accept your own pending invite" rule. Reachable two ways: an
+    "Assign to construction (optional)" picker right on the Create account
+    form itself (assigns immediately after the account is made, using that
+    same role, so a test/managed account can be fully set up — credentials
+    plus construction access — in one step), and a **Projects** button on
+    every existing user row opening `UserProjectsModal`
+    (`listMembershipsForUser` for the reverse lookup — every construction
+    a given account belongs to, complementing `listProjectInvitesAndMembers`'s
+    per-*project* member list used by "Projects & invites" below) to assign
+    or remove constructions for that account at any time afterward, with
+    its own role picker per assignment (independent of the account's own
+    `profiles.role` — a `project_members.role` can differ per project, same
+    as an emailed invite always could). `addProjectMember` upserts on
+    `(project_id, user_id)` rather than a bare insert, so re-assigning
+    someone already a member just updates their role instead of erroring
+    on the unique constraint.
 - **Preview as another role** — a "Preview as another role" picker on the
   **Admin** page (`app/admin/admin-client.tsx`'s `PreviewRoleSection`),
   visible only to a real Developer account, lets you browse the rest of

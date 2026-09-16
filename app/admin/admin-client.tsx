@@ -19,8 +19,11 @@ import {
   revokeInvite,
   removeMember,
   listProjectInvitesAndMembers,
+  addProjectMember,
+  listMembershipsForUser,
   type ProjectInviteRow,
   type ProjectMemberRow,
+  type UserMembershipRow,
 } from "@/app/projects/[id]/invite-actions";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ROLE_LABELS, ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
@@ -83,7 +86,7 @@ export function AdminClient({
       <AccessRequestsSection rows={rows} setRows={setRows} currentUserId={currentUserId} />
       <PreviewRoleSection currentPreviewRole={currentPreviewRole} />
       <TabPermissionMatrix initial={matrix} />
-      <CreateAccountSection setRows={setRows} />
+      <CreateAccountSection setRows={setRows} projects={projects} />
       <UsersSection rows={rows} setRows={setRows} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
     </div>
@@ -280,13 +283,20 @@ function generatePassword(length = 14): string {
 // Per-tab permission overrides aren't set here — create the account first,
 // then use that row's "Permissions" button, the same panel every existing
 // user gets.
-function CreateAccountSection({ setRows }: { setRows: React.Dispatch<React.SetStateAction<AdminUser[]>> }) {
+function CreateAccountSection({
+  setRows,
+  projects,
+}: {
+  setRows: React.Dispatch<React.SetStateAction<AdminUser[]>>;
+  projects: AdminProject[];
+}) {
   const { notify } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [role, setRole] = useState<UserRole>("owner");
   const [isTest, setIsTest] = useState(true);
+  const [assignProjectId, setAssignProjectId] = useState("");
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
 
@@ -303,8 +313,8 @@ function CreateAccountSection({ setRows }: { setRows: React.Dispatch<React.SetSt
     e.preventDefault();
     setCreating(true);
     const res = await createAccount({ email, password, role, isTest });
-    setCreating(false);
     if (!res.ok || !res.userId) {
+      setCreating(false);
       notify("error", res.error ?? "Could not create account.");
       return;
     }
@@ -312,11 +322,26 @@ function CreateAccountSection({ setRows }: { setRows: React.Dispatch<React.SetSt
       ...r,
       { id: res.userId!, email: email.trim().toLowerCase(), role, status: "approved", isTest, tabOverrides: {} },
     ]);
+
+    // Assigning to a construction is a second, independent write
+    // (project_members, not profiles) — the account itself is already
+    // created and usable at this point even if this second step fails, so
+    // that failure gets its own toast rather than rolling back or blocking
+    // on it.
+    if (assignProjectId) {
+      const memberRes = await addProjectMember(assignProjectId, res.userId, role);
+      if (!memberRes.ok) {
+        notify("error", `Account created, but could not assign it to that construction: ${memberRes.error ?? "unknown error"}`);
+      }
+    }
+    setCreating(false);
+
     setCreated({ email: email.trim().toLowerCase(), password });
-    notify("success", "Account created.");
+    notify("success", assignProjectId ? "Account created and assigned." : "Account created.");
     setEmail("");
     setPassword("");
     setShow(false);
+    setAssignProjectId("");
   }
 
   return (
@@ -373,6 +398,17 @@ function CreateAccountSection({ setRows }: { setRows: React.Dispatch<React.SetSt
           <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)} />
           Test account
         </label>
+        <div className="min-w-[180px]">
+          <label className="label">Assign to construction (optional)</label>
+          <select className="input" value={assignProjectId} onChange={(e) => setAssignProjectId(e.target.value)}>
+            <option value="">Don&apos;t assign yet</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <button type="submit" className="btn-amber" disabled={creating}>
           {creating ? "Creating…" : "Create account"}
         </button>
@@ -427,6 +463,8 @@ function UsersSection({
   // stale snapshot captured when it was opened.
   const [managingPermissionsForId, setManagingPermissionsForId] = useState<string | null>(null);
   const managingPermissionsFor = rows.find((u) => u.id === managingPermissionsForId) ?? null;
+  const [managingProjectsForId, setManagingProjectsForId] = useState<string | null>(null);
+  const managingProjectsFor = rows.find((u) => u.id === managingProjectsForId) ?? null;
   const [busy, setBusy] = useState(false);
 
   async function handleChange(userId: string, role: UserRole) {
@@ -508,6 +546,9 @@ function UsersSection({
                 Permissions{Object.keys(u.tabOverrides).length > 0 && <span className="badge-amber ml-1 px-1.5">{Object.keys(u.tabOverrides).length}</span>}
               </button>
             )}
+            <button className="btn-ghost text-xs" onClick={() => setManagingProjectsForId(u.id)}>
+              Projects
+            </button>
             <button className="btn-ghost text-xs" onClick={() => setResettingPasswordFor(u)}>
               Reset password
             </button>
@@ -537,6 +578,8 @@ function UsersSection({
           );
         }}
       />
+
+      <UserProjectsModal user={managingProjectsFor} projects={projects} onClose={() => setManagingProjectsForId(null)} />
 
       <ConfirmDialog
         open={!!deleting}
@@ -764,6 +807,140 @@ function UserPermissionsModal({
             </tbody>
           </table>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Direct assignment to a construction — no invite/token/email/acceptance
+// step, since this account already exists with known credentials and a
+// Developer choosing to assign it here has already made the access
+// decision (addProjectMember relies on the same is_developer() bypass
+// project_members_insert's RLS policy already grants). Complements the
+// "Projects & invites" section below, which is for inviting someone who
+// may not have an account yet; this is the reverse direction — starting
+// from an existing account and picking which construction(s) it can see.
+function UserProjectsModal({
+  user,
+  projects,
+  onClose,
+}: {
+  user: AdminUser | null;
+  projects: AdminProject[];
+  onClose: () => void;
+}) {
+  const { notify } = useToast();
+  const [memberships, setMemberships] = useState<UserMembershipRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [assignProjectId, setAssignProjectId] = useState("");
+  const [assignRole, setAssignRole] = useState<UserRole>("owner");
+  const [assigning, setAssigning] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoaded(false);
+    listMembershipsForUser(user.id).then((rows) => {
+      setMemberships(rows);
+      setLoaded(true);
+    });
+  }, [user]);
+
+  const assignableProjects = projects.filter((p) => !memberships.some((m) => m.project_id === p.id));
+
+  async function handleAssign(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !assignProjectId) return;
+    setAssigning(true);
+    const res = await addProjectMember(assignProjectId, user.id, assignRole);
+    if (!res.ok) {
+      setAssigning(false);
+      notify("error", res.error ?? "Could not assign to that construction.");
+      return;
+    }
+    // Refetches rather than appending an optimistic row locally — the
+    // action doesn't return the new project_members row's real id, and a
+    // made-up one wouldn't match anything for handleRemove's delete below.
+    const rows = await listMembershipsForUser(user.id);
+    setMemberships(rows);
+    setAssigning(false);
+    setAssignProjectId("");
+    notify("success", "Assigned.");
+  }
+
+  async function handleRemove(membershipId: string, projectId: string) {
+    if (!user) return;
+    setRemovingId(membershipId);
+    const res = await removeMember(membershipId, projectId, user.email);
+    setRemovingId(null);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not remove.");
+      return;
+    }
+    setMemberships((m) => m.filter((row) => row.id !== membershipId));
+    notify("success", "Removed.");
+  }
+
+  return (
+    <Modal open={!!user} onClose={onClose} title={user ? `Constructions — ${user.email}` : "Constructions"}>
+      <div className="space-y-3">
+        <p className="text-sm text-blueprint/60">
+          Which constructions this account can access, beyond any it owns outright. Assigning here grants access
+          immediately — no invite email or acceptance step, since this account already exists.
+        </p>
+        {!loaded ? (
+          <p className="text-sm text-blueprint/50">Loading…</p>
+        ) : memberships.length === 0 ? (
+          <p className="text-sm text-blueprint/50">Not assigned to any construction yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {memberships.map((m) => {
+              const project = projects.find((p) => p.id === m.project_id);
+              return (
+                <div key={m.id} className="flex items-center gap-2 rounded-lg border border-blueprint/10 p-2 text-sm">
+                  <span className="flex-1 truncate">{project?.name ?? m.project_id}</span>
+                  <span className="badge-amber text-xs">{ROLE_LABELS[m.role]}</span>
+                  <button
+                    className="text-xs text-red-500 hover:underline"
+                    disabled={removingId === m.id}
+                    onClick={() => handleRemove(m.id, m.project_id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {assignableProjects.length > 0 && (
+          <form onSubmit={handleAssign} className="flex flex-wrap items-end gap-2 border-t border-blueprint/10 pt-3">
+            <div className="min-w-[160px] flex-1">
+              <label className="label">Assign to</label>
+              <select className="input" value={assignProjectId} onChange={(e) => setAssignProjectId(e.target.value)}>
+                <option value="">Choose a construction…</option>
+                {assignableProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Role</label>
+              <select className="input" value={assignRole} onChange={(e) => setAssignRole(e.target.value as UserRole)}>
+                {ROLE_VALUES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" className="btn-amber" disabled={assigning || !assignProjectId}>
+              {assigning ? "Assigning…" : "Assign"}
+            </button>
+          </form>
+        )}
       </div>
     </Modal>
   );
