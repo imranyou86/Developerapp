@@ -833,7 +833,7 @@ function UserProjectsModal({
   const [memberships, setMemberships] = useState<UserMembershipRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [assignProjectId, setAssignProjectId] = useState("");
-  const [assignRole, setAssignRole] = useState<UserRole>("owner");
+  const [assignRole, setAssignRole] = useState<UserRole>("warranty");
   const [assigning, setAssigning] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
