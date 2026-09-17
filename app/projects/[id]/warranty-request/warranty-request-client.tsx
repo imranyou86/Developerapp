@@ -57,7 +57,7 @@ interface WarrantyItemRow {
   checklist_photos: WarrantyPhoto[];
 }
 
-interface InspectionReportRow {
+export interface InspectionReportRow {
   id: string;
   project_id: string;
   checklist_item_id: string | null;
@@ -67,7 +67,7 @@ interface InspectionReportRow {
   created_at: string;
 }
 
-interface SubcontractorOption {
+export interface SubcontractorOption {
   id: string;
   company_name: string;
   trade: string | null;
@@ -432,7 +432,7 @@ const PROGRESS_BADGE: Record<WarrantyRequestProgress, string> = {
   complete: "badge-sage",
 };
 
-function WarrantyRequestCard({
+export function WarrantyRequestCard({
   projectId,
   request,
   comments,

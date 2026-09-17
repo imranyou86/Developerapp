@@ -983,18 +983,30 @@ yet; each one only adds what a given feature needed.
     Siding, Other — plain `text` column, no DB check constraint, same
     "fixed option list enforced only at the UI layer" choice
     `bank_transactions.category` already made), an optional description,
-    and multiple photo/file attachments, submitted with "Submit request."
-    Deliberately shows nothing back afterward beyond a one-line "submitted,
-    thank you" confirmation — no list of past requests, no status, no
-    comments, no subcontractor — the same shape as a CRM's public
-    lead-capture ("Web-to-Lead") form: the submitter feeds the pipeline but
-    never sees inside it: everything after submission is Contractor/
-    Developer/PM's internal working queue (the `WarrantyRequestClient`
-    dashboard described throughout this section, unchanged for them).
+    and multiple photo/file attachments, submitted with "Submit request,"
+    followed by a one-line "submitted, thank you" confirmation. Below it,
+    a **`MyWarrantyRequests`** section
+    (`app/projects/[id]/warranty-request/my-warranty-requests.tsx`) lets the
+    same account track what it's already filed — status (pending/approved/
+    rejected), progress (open/working on it/complete), assigned
+    subcontractor, and the comment thread Contractor/Developer/PM leave on
+    it — read-only, and scoped to *its own* requests only, never another
+    warranty account's. It reuses `WarrantyRequestCard` (exported from
+    `warranty-request-client.tsx`) with `canManageRequests={false}`, the
+    exact same read-only rendering path Contractor/Developer/PM see for a
+    request they can't act on, rather than a second parallel
+    implementation; every handler prop besides the report-upload one is a
+    no-op, since that component already hides every control that would
+    call them once `canManageRequests` is false. Everything else after
+    submission — approving/rejecting, moving progress, assigning a
+    subcontractor, posting comments — is still Contractor/Developer/PM's
+    internal working queue (the `WarrantyRequestClient` dashboard described
+    throughout this section, unchanged for them).
     `app/projects/[id]/warranty-request/page.tsx` branches on `viewerRole`
     *before* querying anything — a 'warranty' viewer's request short-
-    circuits straight to rendering this form, so items/requests/comments/
-    subcontractors are never fetched or sent to that viewer at all, not
+    circuits to its own narrower query (`requested_by = auth.uid()` only,
+    no checklist items, no other account's requests), so the full-project
+    dashboard data is never fetched or sent to that viewer at all, not
     merely hidden client-side; every other role still gets the full
     dashboard query exactly as before (now also selecting `category`, shown
     as a badge on each request card, with a category filter dropdown above
