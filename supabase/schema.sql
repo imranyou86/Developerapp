@@ -242,6 +242,10 @@ create table if not exists warranty_item_requests (
   project_id uuid not null references projects (id) on delete cascade,
   title text not null,
   comment text,
+  -- Fixed option list (lib/warrantyRequestCategories.ts), enforced only at
+  -- the UI layer — same "plain text, no DB check constraint" choice as
+  -- bank_transactions.category.
+  category text,
   requested_by uuid not null references auth.users (id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   -- Separate from `status` above: `status` is the triage decision (does

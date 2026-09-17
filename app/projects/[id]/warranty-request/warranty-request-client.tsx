@@ -21,7 +21,6 @@ import {
   deleteWarrantyPhoto,
   deleteWarrantyRequestComment,
   rejectWarrantyItemRequest,
-  requestWarrantyItem,
   setWarrantyRequestProgress,
   setWarrantyStatus,
   toggleWarrantyItem,
@@ -174,35 +173,6 @@ export function WarrantyRequestClient({
     }
   }
 
-  async function handleRequest(title: string, comment: string) {
-    if (!title.trim()) return;
-    setAdding(true);
-    const res = await requestWarrantyItem(projectId, title, comment);
-    if (!res.ok || !res.id) {
-      notify("error", res.error ?? "Could not submit request.");
-    } else {
-      setRequests((prev) => [
-        {
-          id: res.id!,
-          project_id: projectId,
-          title: title.trim(),
-          comment: comment.trim() || null,
-          requested_by: currentUserId ?? "",
-          status: "pending",
-          progress: "open",
-          subcontractor_id: null,
-          checklist_item_id: null,
-          reviewed_by: null,
-          reviewed_at: null,
-          created_at: new Date().toISOString(),
-        },
-        ...prev,
-      ]);
-      notify("success", "Request submitted — a Contractor, Developer, or PM will review it.");
-    }
-    setAdding(false);
-  }
-
   async function handleApprove(request: WarrantyItemRequest) {
     const res = await approveWarrantyItemRequest(projectId, request.id);
     if (!res.ok || !res.id) {
@@ -345,10 +315,8 @@ export function WarrantyRequestClient({
         comments={comments}
         reports={reports}
         subcontractors={subcontractors}
-        canManage={canManage}
         canManageRequests={canManageRequests}
         currentUserId={currentUserId}
-        onRequest={handleRequest}
         onApprove={handleApprove}
         onReject={handleReject}
         onSetProgress={handleSetProgress}
@@ -361,16 +329,18 @@ export function WarrantyRequestClient({
   );
 }
 
+// Only ever rendered for Contractor/Developer/PM/Owner now — the
+// 'warranty' role gets CreateWarrantyRequestForm instead (page.tsx
+// branches before this component is even reached), so there's no
+// "submit a request from here" path to render for it anymore.
 function RequestsSection({
   projectId,
   requests,
   comments,
   reports,
   subcontractors,
-  canManage,
   canManageRequests,
   currentUserId,
-  onRequest,
   onApprove,
   onReject,
   onSetProgress,
@@ -384,10 +354,8 @@ function RequestsSection({
   comments: WarrantyItemRequestComment[];
   reports: InspectionReportRow[];
   subcontractors: SubcontractorOption[];
-  canManage: boolean;
   canManageRequests: boolean;
   currentUserId: string | null;
-  onRequest: (title: string, comment: string) => Promise<void>;
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest) => Promise<void>;
   onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
@@ -396,39 +364,38 @@ function RequestsSection({
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [comment, setComment] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<"all" | string>("all");
+  const usedCategories = Array.from(new Set(requests.map((r) => r.category).filter((c): c is string => !!c))).sort();
+  const filteredRequests = filterCategory === "all" ? requests : requests.filter((r) => r.category === filterCategory);
 
-  async function handleSubmit() {
-    if (!title.trim()) return;
-    setSubmitting(true);
-    await onRequest(title, comment);
-    setTitle("");
-    setComment("");
-    setSubmitting(false);
-  }
-
-  if (requests.length === 0 && canManage) return null;
+  if (requests.length === 0) return null;
 
   return (
     <div className="card p-5">
-      <h2 className="mb-1 font-semibold text-blueprint-dark">Warranty Item Requests</h2>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-blueprint-dark">Warranty Item Requests</h2>
+        {usedCategories.length > 0 && (
+          <select className="input w-auto py-1 text-xs" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+            <option value="all">All categories</option>
+            {usedCategories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       <p className="mb-4 text-sm text-blueprint/60">
         {canManageRequests
           ? "Requests filed by a warranty account — approve or reject each one, track it through to done, assign a subcontractor, and leave notes for the record."
-          : canManage
-            ? "Items requested but not yet added to the warranty list above."
-            : "Everything you've requested, and where it stands — a Contractor, Developer, or PM reviews it, tracks the work, and can leave notes here."}
+          : "Items requested but not yet added to the warranty list above."}
       </p>
 
-      {requests.length === 0 ? (
-        <p className="text-sm text-blueprint/40">
-          {canManage ? "No requests yet." : "You haven't filed a warranty request yet — submit one below."}
-        </p>
+      {filteredRequests.length === 0 ? (
+        <p className="text-sm text-blueprint/40">No requests in this category.</p>
       ) : (
         <div className="space-y-3">
-          {requests.map((request) => (
+          {filteredRequests.map((request) => (
             <WarrantyRequestCard
               key={request.id}
               projectId={projectId}
@@ -447,27 +414,6 @@ function RequestsSection({
               onReportAdd={onReportAdd}
             />
           ))}
-        </div>
-      )}
-
-      {!canManage && (
-        <div className="mt-4 space-y-2 border-t border-blueprint/10 pt-3">
-          <input
-            className="input"
-            placeholder="Describe the issue — e.g. &quot;Leaky faucet in kitchen&quot;"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <textarea
-            className="input"
-            rows={2}
-            placeholder="Additional details (optional)…"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-          />
-          <button className="btn-outline" onClick={handleSubmit} disabled={submitting || !title.trim()}>
-            Submit request
-          </button>
         </div>
       )}
     </div>
@@ -576,7 +522,10 @@ function WarrantyRequestCard({
     <div className="rounded-lg border border-blueprint/10 p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="font-medium text-blueprint-dark">{request.title}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="font-medium text-blueprint-dark">{request.title}</p>
+            {request.category && <span className="badge bg-blueprint/10 text-blueprint">{request.category}</span>}
+          </div>
           {request.comment && <p className="mt-0.5 text-xs text-blueprint/60">{request.comment}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">

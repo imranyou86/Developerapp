@@ -385,7 +385,12 @@ export async function addWarrantyItemsFromReport(
 // A 'warranty' user files here instead of calling addWarrantyItem directly
 // (requireCanManageWarrantyItems blocks that role from it) — a Contractor
 // or Developer then reviews the queue and approves or rejects it below.
-export async function requestWarrantyItem(projectId: string, title: string, comment?: string): Promise<ActionResult> {
+export async function requestWarrantyItem(
+  projectId: string,
+  title: string,
+  comment?: string,
+  category?: string | null
+): Promise<ActionResult> {
   if (!title.trim()) return { ok: false, error: "Description is required." };
 
   const supabase = createClient();
@@ -396,14 +401,20 @@ export async function requestWarrantyItem(projectId: string, title: string, comm
 
   const { error, data } = await supabase
     .from("warranty_item_requests")
-    .insert({ project_id: projectId, title: title.trim(), comment: comment?.trim() || null, requested_by: user.id })
+    .insert({
+      project_id: projectId,
+      title: title.trim(),
+      comment: comment?.trim() || null,
+      category: category || null,
+      requested_by: user.id,
+    })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
   await notifyProjectSubscribers(projectId, {
     subject: "New warranty item request",
-    body: `A warranty item was requested: "${title.trim()}" — awaiting Contractor/Developer approval.`,
+    body: `A warranty item was requested${category ? ` (${category})` : ""}: "${title.trim()}" — awaiting Contractor/Developer/PM approval.`,
     excludeUserId: user.id,
   });
 

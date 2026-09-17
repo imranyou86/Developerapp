@@ -872,9 +872,13 @@ yet; each one only adds what a given feature needed.
   Chat is now allowed alongside Warranty Request (`tab_permissions` and the
   `warranty_tracker`-kind filter in `app/projects/[id]/layout.tsx` both
   updated), since a homeowner filing warranty issues should be able to talk
-  to the team about them. On Warranty Request itself the role is now
-  view-only — it can watch every checklist item, note, photo, and
-  inspection report, but every mutating action (`toggleWarrantyItem`,
+  to the team about them. On Warranty Request itself the role was originally
+  view-only — able to watch every checklist item, note, photo, and
+  inspection report — but has since been narrowed further into a pure
+  submission form with no visibility into any of that at all; see "Warranty
+  Request becomes a one-way submission form" near the end of this section
+  for where that landed. Every mutating action on the tracking side
+  (`toggleWarrantyItem`,
   `setWarrantyStatus`, `updateWarrantyComment`, `deleteWarrantyItem`,
   `addWarrantyPhoto`/`deleteWarrantyPhoto`, the inspection-report actions,
   and direct `addWarrantyItem`) is blocked for it server-side by a shared
@@ -929,9 +933,11 @@ yet; each one only adds what a given feature needed.
       as `project_messages`), posted via `addWarrantyRequestComment` and
       gated to Contractor/Developer/PM in both the action (`requireApprover`,
       renamed in spirit though not in name to cover all three roles now)
-      and RLS (`warranty_item_request_comments_insert`) — the 'warranty'
-      role who filed the request can read the thread but never post to it,
-      matching its view-only stance everywhere else on this tab.
+      and RLS (`warranty_item_request_comments_insert`) — 'warranty' was
+      never able to post to it, and (per the form-only restructure below)
+      no longer sees it rendered anywhere either, though the RLS read
+      restriction described next still applies underneath as defense in
+      depth regardless of what the UI shows.
 
     **"Only track the requests they created"** — previously any project
     member (including every other 'warranty' account sharing that
@@ -965,6 +971,41 @@ yet; each one only adds what a given feature needed.
     top-of-page Inspection Reports section already uses) and its own
     attached-reports list, separate from that top section's checklist-
     item-scoped one.
+  - **Warranty Request becomes a one-way submission form for the 'warranty'
+    role** (migration `046_warranty_request_category.sql`) — rather than a
+    trimmed-down view of the same tracking dashboard Contractor/Developer/
+    PM use, the 'warranty' role's whole "Warranty Request" tab is now a
+    single-purpose form, `CreateWarrantyRequestForm`
+    (`app/projects/[id]/warranty-request/create-warranty-request-form.tsx`):
+    a title, a **category** (a new fixed list —
+    `lib/warrantyRequestCategories.ts`: Electrical, Plumbing, Roof/Leaks,
+    HVAC, Structural, Appliances, Flooring, Windows & Doors, Exterior/
+    Siding, Other — plain `text` column, no DB check constraint, same
+    "fixed option list enforced only at the UI layer" choice
+    `bank_transactions.category` already made), an optional description,
+    and multiple photo/file attachments, submitted with "Submit request."
+    Deliberately shows nothing back afterward beyond a one-line "submitted,
+    thank you" confirmation — no list of past requests, no status, no
+    comments, no subcontractor — the same shape as a CRM's public
+    lead-capture ("Web-to-Lead") form: the submitter feeds the pipeline but
+    never sees inside it: everything after submission is Contractor/
+    Developer/PM's internal working queue (the `WarrantyRequestClient`
+    dashboard described throughout this section, unchanged for them).
+    `app/projects/[id]/warranty-request/page.tsx` branches on `viewerRole`
+    *before* querying anything — a 'warranty' viewer's request short-
+    circuits straight to rendering this form, so items/requests/comments/
+    subcontractors are never fetched or sent to that viewer at all, not
+    merely hidden client-side; every other role still gets the full
+    dashboard query exactly as before (now also selecting `category`, shown
+    as a badge on each request card, with a category filter dropdown above
+    the list for triage). Submission itself still goes through the same
+    `requestWarrantyItem` action (now taking `category` as a 4th argument)
+    and the same `addInspectionReport(..., warrantyItemRequestId)` path
+    described above for attachments — this is a UI/data-flow restructure of
+    who sees what, not a new write path. The now-unreachable "submit a
+    request from here" form and its messaging were removed from
+    `WarrantyRequestClient`/`RequestsSection`, since that component is only
+    ever rendered for the roles that manage the queue now.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

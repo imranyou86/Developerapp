@@ -297,6 +297,8 @@ export interface WarrantyItemRequest {
   project_id: string;
   title: string;
   comment: string | null;
+  // Fixed option list — see lib/warrantyRequestCategories.ts.
+  category: string | null;
   requested_by: string;
   status: WarrantyItemRequestStatus;
   progress: WarrantyRequestProgress;
