@@ -29,7 +29,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
       .order("created_at", { ascending: false });
 
     const requestIds = (requests ?? []).map((r) => r.id);
-    const [{ data: comments, error: commentsError }, { data: reports }, { data: subLinks }] = await Promise.all([
+    const [{ data: comments, error: commentsError }, { data: reports }] = await Promise.all([
       requestIds.length > 0
         ? supabase
             .from("warranty_item_request_comments")
@@ -43,10 +43,14 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
             .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
             .in("warranty_item_request_id", requestIds)
         : Promise.resolve({ data: [] }),
-      supabase.from("project_subcontractors").select("subcontractor_id").eq("project_id", params.id),
     ]);
 
-    const subIds = (subLinks ?? []).map((l) => l.subcontractor_id);
+    // Resolved by whatever subcontractor_id is actually assigned to one of
+    // this account's own requests — not by project_subcontractors links —
+    // since a Contractor/Developer/PM can now assign any subcontractor
+    // from the shared directory, not just ones already linked to this
+    // project.
+    const subIds = Array.from(new Set((requests ?? []).map((r) => r.subcontractor_id).filter((id): id is string => !!id)));
     const { data: subcontractors } =
       subIds.length > 0
         ? await supabase.from("subcontractors").select("id, company_name, trade").in("id", subIds).order("company_name")
@@ -76,7 +80,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
 
   const supabase = createClient();
 
-  const [{ data: items, error }, { data: reports, error: reportsError }, { data: requests, error: requestsError }, { data: subLinks }] =
+  const [{ data: items, error }, { data: reports, error: reportsError }, { data: requests, error: requestsError }] =
     await Promise.all([
       supabase
         .from("checklist_items")
@@ -96,13 +100,15 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
         )
         .eq("project_id", params.id)
         .order("created_at", { ascending: false }),
-      // Only this project's own linked subs — same pattern house-book/page.tsx
-      // uses — not the whole shared subcontractor directory.
-      supabase.from("project_subcontractors").select("subcontractor_id").eq("project_id", params.id),
     ]);
 
   const requestIds = (requests ?? []).map((r) => r.id);
-  const subIds = (subLinks ?? []).map((l) => l.subcontractor_id);
+  // Any subcontractor in the shared directory can be assigned to a
+  // warranty request, not just ones already linked to this specific
+  // project (subcontractors_select's RLS already lets any signed-in user
+  // read the whole directory) — a Contractor/Developer/PM fixing a
+  // warranty item may want to bring in a sub who hasn't worked this
+  // construction before.
   const [{ data: comments, error: commentsError }, { data: subcontractors }] = await Promise.all([
     requestIds.length > 0
       ? supabase
@@ -111,9 +117,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
           .in("request_id", requestIds)
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
-    subIds.length > 0
-      ? supabase.from("subcontractors").select("id, company_name, trade").in("id", subIds).order("company_name")
-      : Promise.resolve({ data: [] }),
+    supabase.from("subcontractors").select("id, company_name, trade").order("company_name"),
   ]);
 
   const [signedItems, signedReports] = await Promise.all([

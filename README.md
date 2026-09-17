@@ -1999,3 +1999,22 @@ yet; each one only adds what a given feature needed.
   `sender_email` already has today. `getCurrentUser()`
   (`lib/permissions-server.ts`) and `CurrentUser` (`lib/permissions.ts`)
   gained a `displayName` field for anywhere else that might want it later.
+
+## Warranty request subcontractor assignment: any sub, not just project-linked ones
+
+- **Contractor/Developer/PM can now assign any subcontractor from the
+  shared directory to a warranty request** — the assignment dropdown was
+  previously scoped to only subcontractors already linked to that specific
+  construction (via `project_subcontractors`), so a sub who'd never worked
+  that project before couldn't be picked at all, even though nothing in
+  `warranty_item_requests_update`'s RLS or the `subcontractor_id` foreign
+  key ever required that link. `app/projects/[id]/warranty-request/page.tsx`
+  now fetches the whole `subcontractors` directory (`subcontractors_select`
+  already lets any signed-in user read all of it) instead of filtering
+  through `project_subcontractors`. The warranty role's own request-
+  tracking query was fixed the same way — it now resolves names from
+  whichever `subcontractor_id`s are actually set on that account's own
+  requests, rather than from the project's linked-subs list, so an
+  assigned sub's name always resolves correctly for the submitter
+  regardless of whether that sub has a `project_subcontractors` row for
+  this construction.
