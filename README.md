@@ -896,12 +896,75 @@ yet; each one only adds what a given feature needed.
   Approval is gated by a `requireApprover()` action guard AND, since this
   is a genuinely new authorization boundary (not an existing widely-shared
   table), directly in RLS too (`warranty_item_requests_update` checks
-  `profiles.role in ('contractor', 'developer')`, the same
-  `is_developer()`-in-RLS pattern `project_invites` uses) for defense in
-  depth. The select policy stays broad (`has_project_access`) so a
-  homeowner can watch their own request move from pending to approved/
-  rejected. All three request/approval actions notify subscribers via the
-  existing email-alerts pipeline.
+  `profiles.role in ('contractor', 'developer', 'pm')` — PM added by the
+  extension described just below — the same `is_developer()`-in-RLS
+  pattern `project_invites` uses) for defense in depth. All three request/
+  approval actions notify subscribers via the existing email-alerts
+  pipeline. (The select policy's original "anyone with project access
+  sees the whole queue" behavior is also since narrowed — see below.)
+  - **A filed request is now a lightweight ticket, not just an approve/
+    reject gate** (migration `045_warranty_request_tracking.sql`) —
+    Contractor/Developer/PM (PM newly added everywhere in this section;
+    previously only Contractor/Developer could touch a request at all)
+    can now also track a request's actual progress, assign a
+    subcontractor to it, and leave a running comment/notes thread, all
+    independent of whether it's ever been approved into a real checklist
+    item. Three additions to `warranty_item_requests`:
+    - **`progress`** (`open` / `in_progress` / `complete`, its own column,
+      deliberately separate from the existing `status` triage column) —
+      `status` answers "is this a legitimate warranty issue at all";
+      `progress` answers "where does the actual work stand," and moves on
+      its own timeline, usually starting well before (or entirely without)
+      an approve decision. `setWarrantyRequestProgress` updates it and
+      renders as a Default/"Working on it"/Complete selector for a
+      manager, a plain badge for everyone else.
+    - **`subcontractor_id`** (references `subcontractors`, nullable) —
+      `assignWarrantyRequestSubcontractor` sets it; the picker only offers
+      subs already linked to *this* construction (`project_subcontractors`,
+      same query `house-book/page.tsx` already uses for the same purpose),
+      not the entire shared subcontractor directory.
+    - A **comment/notes thread** — a new `warranty_item_request_comments`
+      table (`request_id, user_id, sender_email, body, created_at` — same
+      shape and same `sender_email`-denormalized-at-write-time reasoning
+      as `project_messages`), posted via `addWarrantyRequestComment` and
+      gated to Contractor/Developer/PM in both the action (`requireApprover`,
+      renamed in spirit though not in name to cover all three roles now)
+      and RLS (`warranty_item_request_comments_insert`) — the 'warranty'
+      role who filed the request can read the thread but never post to it,
+      matching its view-only stance everywhere else on this tab.
+
+    **"Only track the requests they created"** — previously any project
+    member (including every other 'warranty' account sharing that
+    project) could see the *entire* request queue via one broad
+    `has_project_access` select policy. A new security-definer function,
+    `can_view_warranty_request(rid)` (same "callable from the table's own
+    policy without recursing through it" pattern as `has_project_access`/
+    `is_developer()`), now backs both `warranty_item_requests_select` and
+    `warranty_item_request_comments_select`: a 'warranty' account only
+    ever sees a request where `requested_by = auth.uid()` (and, by
+    extension, only that request's own comment thread); every other role
+    with project access still sees the whole queue, since Contractor/
+    Developer/PM need to triage all of it. This is a real RLS-level
+    restriction, not just a client-side filter — `page.tsx`'s query for
+    the queue has no explicit `requested_by` filter of its own; the row
+    set a 'warranty' session gets back from Postgres is already narrowed
+    before it ever reaches the app.
+
+    **Uploading an inspection report to a request directly** — before
+    this, `inspection_reports.checklist_item_id` was the only attachment
+    point, which doesn't exist until a request is approved, and
+    `addInspectionReport` was blocked for 'warranty' entirely. A new,
+    independent `warranty_item_request_id` column on `inspection_reports`
+    lets the person who filed a request attach evidence to it right away;
+    `addInspectionReport` now accepts that id as an optional 4th argument
+    and, when the caller is 'warranty', checks that the request is
+    actually theirs (`request.requested_by === user.id`) before allowing
+    it — every other role keeps its existing broad access unchanged. Each
+    request card in the UI has its own small "+ Attach report" upload
+    control (same direct-to-`project-files`-bucket signed-upload flow the
+    top-of-page Inspection Reports section already uses) and its own
+    attached-reports list, separate from that top section's checklist-
+    item-scoped one.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

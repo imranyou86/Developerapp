@@ -12,20 +12,30 @@ import {
   addWarrantyItem,
   addWarrantyItemsFromReport,
   addWarrantyPhoto,
+  addWarrantyRequestComment,
   approveWarrantyItemRequest,
+  assignWarrantyRequestSubcontractor,
   attachInspectionReport,
   deleteInspectionReport,
   deleteWarrantyItem,
   deleteWarrantyPhoto,
+  deleteWarrantyRequestComment,
   rejectWarrantyItemRequest,
   requestWarrantyItem,
+  setWarrantyRequestProgress,
   setWarrantyStatus,
   toggleWarrantyItem,
   updateWarrantyComment,
   type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
-import type { UserRole, WarrantyItemRequest, WarrantyItemStatus } from "@/lib/types";
+import type { UserRole, WarrantyItemRequest, WarrantyItemRequestComment, WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
+
+const PROGRESS_LABELS: Record<WarrantyRequestProgress, string> = {
+  open: "Open",
+  in_progress: "Working on it",
+  complete: "Complete",
+};
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
 
@@ -52,9 +62,16 @@ interface InspectionReportRow {
   id: string;
   project_id: string;
   checklist_item_id: string | null;
+  warranty_item_request_id: string | null;
   file_name: string;
   storage_url: string;
   created_at: string;
+}
+
+interface SubcontractorOption {
+  id: string;
+  company_name: string;
+  trade: string | null;
 }
 
 export function WarrantyRequestClient({
@@ -62,18 +79,25 @@ export function WarrantyRequestClient({
   initialItems,
   initialReports,
   initialRequests,
+  initialComments,
+  subcontractors,
   viewerRole,
+  currentUserId,
 }: {
   projectId: string;
   initialItems: WarrantyItemRow[];
   initialReports: InspectionReportRow[];
   initialRequests: WarrantyItemRequest[];
+  initialComments: WarrantyItemRequestComment[];
+  subcontractors: SubcontractorOption[];
   viewerRole: UserRole;
+  currentUserId: string | null;
 }) {
   const { notify } = useToast();
   const [items, setItems] = useState<WarrantyItemRow[]>(initialItems);
   const [reports, setReports] = useState<InspectionReportRow[]>(initialReports);
   const [requests, setRequests] = useState<WarrantyItemRequest[]>(initialRequests);
+  const [comments, setComments] = useState<WarrantyItemRequestComment[]>(initialComments);
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const fixed = items.filter((i) => i.done).length;
@@ -81,7 +105,10 @@ export function WarrantyRequestClient({
   // and chat about them, but can't mutate anything directly — they file a
   // request instead, which a Contractor or Developer approves or rejects.
   const canManage = viewerRole !== "warranty";
-  const canApprove = viewerRole === "contractor" || viewerRole === "developer";
+  // Contractor/Developer/PM manage a request end to end: approve/reject it,
+  // move its progress, assign a subcontractor, and comment on it — the
+  // 'warranty' role who filed it (and, for now, Owner) only ever watches.
+  const canManageRequests = viewerRole === "contractor" || viewerRole === "developer" || viewerRole === "pm";
 
   function updateItem(id: string, patch: Partial<WarrantyItemRow>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -160,8 +187,10 @@ export function WarrantyRequestClient({
           project_id: projectId,
           title: title.trim(),
           comment: comment.trim() || null,
-          requested_by: "",
+          requested_by: currentUserId ?? "",
           status: "pending",
+          progress: "open",
+          subcontractor_id: null,
           checklist_item_id: null,
           reviewed_by: null,
           reviewed_at: null,
@@ -169,7 +198,7 @@ export function WarrantyRequestClient({
         },
         ...prev,
       ]);
-      notify("success", "Request submitted — a Contractor or Developer will review it.");
+      notify("success", "Request submitted — a Contractor, Developer, or PM will review it.");
     }
     setAdding(false);
   }
@@ -193,6 +222,55 @@ export function WarrantyRequestClient({
       return;
     }
     setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, status: "rejected" } : r)));
+  }
+
+  async function handleSetProgress(request: WarrantyItemRequest, progress: WarrantyRequestProgress) {
+    const previous = request.progress;
+    setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, progress } : r)));
+    const res = await setWarrantyRequestProgress(projectId, request.id, progress, request.title);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update status.");
+      setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, progress: previous } : r)));
+    }
+  }
+
+  async function handleAssignSubcontractor(request: WarrantyItemRequest, subcontractorId: string | null) {
+    const previous = request.subcontractor_id;
+    setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, subcontractor_id: subcontractorId } : r)));
+    const res = await assignWarrantyRequestSubcontractor(projectId, request.id, subcontractorId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not assign a subcontractor.");
+      setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, subcontractor_id: previous } : r)));
+    }
+  }
+
+  async function handleAddComment(requestId: string, body: string) {
+    const res = await addWarrantyRequestComment(projectId, requestId, body);
+    if (!res.ok || !res.id) {
+      notify("error", res.error ?? "Could not add comment.");
+      return;
+    }
+    setComments((prev) => [
+      ...prev,
+      {
+        id: res.id!,
+        request_id: requestId,
+        user_id: currentUserId ?? "",
+        sender_email: "you",
+        body: body.trim(),
+        created_at: res.createdAt ?? new Date().toISOString(),
+      },
+    ]);
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    const previous = comments;
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
+    const res = await deleteWarrantyRequestComment(projectId, commentId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete comment.");
+      setComments(previous);
+    }
   }
 
   return (
@@ -261,32 +339,66 @@ export function WarrantyRequestClient({
         )}
       </div>
 
-      <RequestsSection requests={requests} canManage={canManage} canApprove={canApprove} onRequest={handleRequest} onApprove={handleApprove} onReject={handleReject} />
+      <RequestsSection
+        projectId={projectId}
+        requests={requests}
+        comments={comments}
+        reports={reports}
+        subcontractors={subcontractors}
+        canManage={canManage}
+        canManageRequests={canManageRequests}
+        currentUserId={currentUserId}
+        onRequest={handleRequest}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        onSetProgress={handleSetProgress}
+        onAssignSubcontractor={handleAssignSubcontractor}
+        onAddComment={handleAddComment}
+        onDeleteComment={handleDeleteComment}
+        onReportAdd={(r) => setReports((prev) => [r, ...prev])}
+      />
     </div>
   );
 }
 
 function RequestsSection({
+  projectId,
   requests,
+  comments,
+  reports,
+  subcontractors,
   canManage,
-  canApprove,
+  canManageRequests,
+  currentUserId,
   onRequest,
   onApprove,
   onReject,
+  onSetProgress,
+  onAssignSubcontractor,
+  onAddComment,
+  onDeleteComment,
+  onReportAdd,
 }: {
+  projectId: string;
   requests: WarrantyItemRequest[];
+  comments: WarrantyItemRequestComment[];
+  reports: InspectionReportRow[];
+  subcontractors: SubcontractorOption[];
   canManage: boolean;
-  canApprove: boolean;
+  canManageRequests: boolean;
+  currentUserId: string | null;
   onRequest: (title: string, comment: string) => Promise<void>;
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest) => Promise<void>;
+  onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
+  onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
+  onAddComment: (requestId: string, body: string) => Promise<void>;
+  onDeleteComment: (commentId: string) => Promise<void>;
+  onReportAdd: (report: InspectionReportRow) => void;
 }) {
   const [title, setTitle] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [actingOn, setActingOn] = useState<string | null>(null);
-  const pending = requests.filter((r) => r.status === "pending");
-  const reviewed = requests.filter((r) => r.status !== "pending");
 
   async function handleSubmit() {
     if (!title.trim()) return;
@@ -303,61 +415,37 @@ function RequestsSection({
     <div className="card p-5">
       <h2 className="mb-1 font-semibold text-blueprint-dark">Warranty Item Requests</h2>
       <p className="mb-4 text-sm text-blueprint/60">
-        {canApprove
-          ? "Requests filed by a warranty account, awaiting your approval before they're added as a warranty item."
-          : "Items requested but not yet added to the warranty list above."}
+        {canManageRequests
+          ? "Requests filed by a warranty account — approve or reject each one, track it through to done, assign a subcontractor, and leave notes for the record."
+          : canManage
+            ? "Items requested but not yet added to the warranty list above."
+            : "Everything you've requested, and where it stands — a Contractor, Developer, or PM reviews it, tracks the work, and can leave notes here."}
       </p>
 
-      {pending.length === 0 ? (
-        <p className="text-sm text-blueprint/40">No pending requests.</p>
+      {requests.length === 0 ? (
+        <p className="text-sm text-blueprint/40">
+          {canManage ? "No requests yet." : "You haven't filed a warranty request yet — submit one below."}
+        </p>
       ) : (
-        <div className="space-y-2">
-          {pending.map((request) => (
-            <div key={request.id} className="rounded-lg border border-amber/30 bg-amber/5 p-2.5 text-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-blueprint-dark">{request.title}</p>
-                  {request.comment && <p className="mt-0.5 text-xs text-blueprint/60">{request.comment}</p>}
-                </div>
-                {canApprove && (
-                  <div className="flex shrink-0 gap-2">
-                    <button
-                      className="text-xs text-sage-dark hover:underline"
-                      disabled={actingOn === request.id}
-                      onClick={async () => {
-                        setActingOn(request.id);
-                        await onApprove(request);
-                        setActingOn(null);
-                      }}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      className="text-xs text-red-500 hover:underline"
-                      disabled={actingOn === request.id}
-                      onClick={async () => {
-                        setActingOn(request.id);
-                        await onReject(request);
-                        setActingOn(null);
-                      }}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {reviewed.length > 0 && (
-        <div className="mt-3 space-y-1 border-t border-blueprint/10 pt-2">
-          {reviewed.map((request) => (
-            <div key={request.id} className="flex items-center justify-between text-xs text-blueprint/50">
-              <span className={request.status === "rejected" ? "line-through" : ""}>{request.title}</span>
-              <span className={request.status === "approved" ? "text-sage-dark" : "text-red-500"}>{request.status}</span>
-            </div>
+        <div className="space-y-3">
+          {requests.map((request) => (
+            <WarrantyRequestCard
+              key={request.id}
+              projectId={projectId}
+              request={request}
+              comments={comments.filter((c) => c.request_id === request.id)}
+              reports={reports.filter((r) => r.warranty_item_request_id === request.id)}
+              subcontractors={subcontractors}
+              canManageRequests={canManageRequests}
+              currentUserId={currentUserId}
+              onApprove={onApprove}
+              onReject={onReject}
+              onSetProgress={onSetProgress}
+              onAssignSubcontractor={onAssignSubcontractor}
+              onAddComment={onAddComment}
+              onDeleteComment={onDeleteComment}
+              onReportAdd={onReportAdd}
+            />
           ))}
         </div>
       )}
@@ -382,6 +470,269 @@ function RequestsSection({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+const STATUS_BADGE: Record<WarrantyItemRequest["status"], string> = {
+  pending: "badge-amber",
+  approved: "badge-sage",
+  rejected: "badge bg-red-100 text-red-700",
+};
+
+const PROGRESS_BADGE: Record<WarrantyRequestProgress, string> = {
+  open: "badge bg-blueprint/10 text-blueprint",
+  in_progress: "badge-amber",
+  complete: "badge-sage",
+};
+
+function WarrantyRequestCard({
+  projectId,
+  request,
+  comments,
+  reports,
+  subcontractors,
+  canManageRequests,
+  currentUserId,
+  onApprove,
+  onReject,
+  onSetProgress,
+  onAssignSubcontractor,
+  onAddComment,
+  onDeleteComment,
+  onReportAdd,
+}: {
+  projectId: string;
+  request: WarrantyItemRequest;
+  comments: WarrantyItemRequestComment[];
+  reports: InspectionReportRow[];
+  subcontractors: SubcontractorOption[];
+  canManageRequests: boolean;
+  currentUserId: string | null;
+  onApprove: (request: WarrantyItemRequest) => Promise<void>;
+  onReject: (request: WarrantyItemRequest) => Promise<void>;
+  onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
+  onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
+  onAddComment: (requestId: string, body: string) => Promise<void>;
+  onDeleteComment: (commentId: string) => Promise<void>;
+  onReportAdd: (report: InspectionReportRow) => void;
+}) {
+  const { notify } = useToast();
+  const [acting, setActing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const assignedSub = subcontractors.find((s) => s.id === request.subcontractor_id);
+
+  async function handleUploadReport(file: File) {
+    setUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+
+      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: pub, error: signError } = await supabase.storage
+        .from("project-files")
+        .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+      if (signError || !pub) throw new Error(signError?.message ?? "Could not get a URL for the uploaded file.");
+
+      const res = await addInspectionReport(projectId, file.name, pub.signedUrl, request.id);
+      if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save report.");
+
+      onReportAdd({
+        id: res.id,
+        project_id: projectId,
+        checklist_item_id: null,
+        warranty_item_request_id: request.id,
+        file_name: file.name,
+        storage_url: pub.signedUrl,
+        created_at: new Date().toISOString(),
+      });
+      notify("success", `Uploaded "${file.name}".`);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handlePostComment() {
+    if (!draft.trim()) return;
+    setPosting(true);
+    await onAddComment(request.id, draft);
+    setDraft("");
+    setPosting(false);
+  }
+
+  return (
+    <div className="rounded-lg border border-blueprint/10 p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="font-medium text-blueprint-dark">{request.title}</p>
+          {request.comment && <p className="mt-0.5 text-xs text-blueprint/60">{request.comment}</p>}
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <span className={`${STATUS_BADGE[request.status]} text-xs`}>{request.status}</span>
+          <span className={`${PROGRESS_BADGE[request.progress]} text-xs`}>{PROGRESS_LABELS[request.progress]}</span>
+        </div>
+      </div>
+
+      {request.status === "pending" && canManageRequests && (
+        <div className="mt-2 flex gap-3">
+          <button
+            className="text-xs text-sage-dark hover:underline"
+            disabled={acting}
+            onClick={async () => {
+              setActing(true);
+              await onApprove(request);
+              setActing(false);
+            }}
+          >
+            Approve
+          </button>
+          <button
+            className="text-xs text-red-500 hover:underline"
+            disabled={acting}
+            onClick={async () => {
+              setActing(true);
+              await onReject(request);
+              setActing(false);
+            }}
+          >
+            Reject
+          </button>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-blueprint/10 pt-2.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-blueprint/50">Status:</span>
+          {canManageRequests ? (
+            <select
+              className="input w-auto py-1 text-xs"
+              value={request.progress}
+              onChange={(e) => onSetProgress(request, e.target.value as WarrantyRequestProgress)}
+            >
+              {(Object.keys(PROGRESS_LABELS) as WarrantyRequestProgress[]).map((p) => (
+                <option key={p} value={p}>
+                  {PROGRESS_LABELS[p]}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-xs text-blueprint-dark">{PROGRESS_LABELS[request.progress]}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-blueprint/50">Subcontractor:</span>
+          {canManageRequests ? (
+            <select
+              className="input w-auto py-1 text-xs"
+              value={request.subcontractor_id ?? ""}
+              onChange={(e) => onAssignSubcontractor(request, e.target.value || null)}
+            >
+              <option value="">Unassigned</option>
+              {subcontractors.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.company_name}
+                  {s.trade ? ` — ${s.trade}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-xs text-blueprint-dark">
+              {assignedSub ? assignedSub.company_name : "Unassigned"}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2.5 border-t border-blueprint/10 pt-2.5">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs font-medium text-blueprint/50">Inspection reports</span>
+          <label className="btn-ghost cursor-pointer px-2 py-0.5 text-xs">
+            {uploading ? "Uploading…" : "+ Attach report"}
+            <input
+              type="file"
+              accept="application/pdf,image/*,.doc,.docx"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadReport(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {reports.length === 0 ? (
+          <p className="text-xs text-blueprint/40">None attached yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {reports.map((r) => (
+              <a
+                key={r.id}
+                href={r.storage_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
+              >
+                📄 {r.file_name}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2.5 border-t border-blueprint/10 pt-2.5">
+        <span className="mb-1.5 block text-xs font-medium text-blueprint/50">Comments &amp; notes</span>
+        {comments.length === 0 ? (
+          <p className="text-xs text-blueprint/40">No comments yet.</p>
+        ) : (
+          <div className="mb-2 space-y-1.5">
+            {comments.map((c) => (
+              <div key={c.id} className="group rounded bg-concrete px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-blueprint-dark">{c.sender_email}</span>
+                  <span className="flex items-center gap-2 text-blueprint/40">
+                    {new Date(c.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                    {c.user_id === currentUserId && (
+                      <button
+                        className="opacity-0 hover:underline group-hover:opacity-100"
+                        onClick={() => onDeleteComment(c.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <p className="mt-0.5 whitespace-pre-wrap break-words text-blueprint-dark">{c.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {canManageRequests && (
+          <div className="flex gap-2">
+            <input
+              className="input flex-1 py-1 text-xs"
+              placeholder="Add a comment or note…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handlePostComment()}
+            />
+            <button className="btn-outline px-2 py-1 text-xs" onClick={handlePostComment} disabled={posting || !draft.trim()}>
+              Post
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -439,6 +790,7 @@ function InspectionReportsSection({
           id: res.id,
           project_id: projectId,
           checklist_item_id: null,
+          warranty_item_request_id: null,
           file_name: file.name,
           storage_url: pub.signedUrl,
           created_at: new Date().toISOString(),

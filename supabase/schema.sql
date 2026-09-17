@@ -244,11 +244,42 @@ create table if not exists warranty_item_requests (
   comment text,
   requested_by uuid not null references auth.users (id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  -- Separate from `status` above: `status` is the triage decision (does
+  -- this become a real checklist item at all); `progress` is Contractor/
+  -- Developer/PM tracking the actual work on it through to done, and
+  -- moves independently of (and usually after) that decision.
+  progress text not null default 'open' check (progress in ('open', 'in_progress', 'complete')),
+  -- subcontractor_id is added via `alter table` further down, after the
+  -- `subcontractors` table it references is defined — this table is
+  -- created earlier in the file, so an inline FK here would fail on a
+  -- fresh install.
   checklist_item_id uuid references checklist_items (id) on delete set null,
   reviewed_by uuid references auth.users (id) on delete set null,
   reviewed_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- A running comment/notes thread Contractor/Developer/PM keep on a
+-- warranty request — the 'warranty' role who filed it can watch this
+-- change but never post (see the insert policy below). sender_email is
+-- denormalized at write time for the same reason project_messages.sender_email
+-- is — profiles_select only lets a user read their own profile row.
+create table if not exists warranty_item_request_comments (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references warranty_item_requests (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  sender_email text not null,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Added here rather than inline on inspection_reports' own `create table`
+-- above, since warranty_item_requests doesn't exist yet at that point in
+-- this file. Lets whoever filed the request attach supporting evidence
+-- directly to it (not just to a checklist item, which doesn't exist until
+-- the request is approved).
+alter table inspection_reports
+  add column if not exists warranty_item_request_id uuid references warranty_item_requests (id) on delete set null;
 
 create table if not exists bids (
   id uuid primary key default gen_random_uuid(),
@@ -572,6 +603,13 @@ create table if not exists project_subcontractors (
   unique (project_id, subcontractor_id)
 );
 
+-- Added here (rather than inline on warranty_item_requests' own `create
+-- table` above) since `subcontractors` doesn't exist yet at that point in
+-- this file. Who a Contractor/Developer/PM has assigned to actually fix a
+-- warranty request, picked from this project's own linked subcontractors.
+alter table warranty_item_requests
+  add column if not exists subcontractor_id uuid references subcontractors (id) on delete set null;
+
 -- One row per project, kept current rather than kept as history — the
 -- "Update information" button overwrites this row with a fresh lookup
 -- (see app/api/claude/lookup-certificate-of-occupancy) rather than
@@ -757,6 +795,7 @@ alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table inspection_reports enable row level security;
 alter table warranty_item_requests enable row level security;
+alter table warranty_item_request_comments enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
 alter table project_shares enable row level security;
@@ -801,6 +840,28 @@ as $$
     is_developer()
     or exists (select 1 from projects p where p.id = pid and p.user_id = auth.uid())
     or exists (select 1 from project_members m where m.project_id = pid and m.user_id = auth.uid());
+$$;
+
+-- Security definer so it can be called from warranty_item_requests' own
+-- select policy without recursing back through it. A 'warranty' role only
+-- ever sees a request it filed itself; every other role with project
+-- access sees all of them.
+create or replace function can_view_warranty_request(rid uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from warranty_item_requests r
+    where r.id = rid
+    and has_project_access(r.project_id)
+    and (
+      r.requested_by = auth.uid()
+      or not exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'warranty')
+    )
+  );
 $$;
 
 create policy "projects_select" on projects
@@ -897,13 +958,15 @@ create policy "inspection_reports_member" on inspection_reports
   for all using (has_project_access(inspection_reports.project_id))
   with check (has_project_access(inspection_reports.project_id));
 
--- Anyone with project access can see the request queue (so a homeowner can
--- watch their own request's status), but only Contractor/Developer can move
--- one out of 'pending' — enforced here in RLS, not just the Server Action,
--- since approval is a real authorization boundary (see project_invites'
--- is_developer()-gated policy for the same pattern).
+-- A 'warranty' role only sees a request it filed itself (can_view_warranty_request);
+-- every other role with project access sees the whole queue (so Contractor/
+-- Developer/PM triage it, and a co-owner can follow along too). Only
+-- Contractor/Developer/PM can move one out of 'pending' or change its
+-- progress/subcontractor — enforced here in RLS, not just the Server
+-- Action, since approval is a real authorization boundary (see
+-- project_invites' is_developer()-gated policy for the same pattern).
 create policy "warranty_item_requests_select" on warranty_item_requests
-  for select using (has_project_access(warranty_item_requests.project_id));
+  for select using (can_view_warranty_request(id));
 
 create policy "warranty_item_requests_insert" on warranty_item_requests
   for insert with check (has_project_access(warranty_item_requests.project_id) and auth.uid() = requested_by);
@@ -911,11 +974,32 @@ create policy "warranty_item_requests_insert" on warranty_item_requests
 create policy "warranty_item_requests_update" on warranty_item_requests
   for update using (
     has_project_access(warranty_item_requests.project_id)
-    and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer'))
+    and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer', 'pm'))
   );
 
 create policy "warranty_item_requests_delete" on warranty_item_requests
   for delete using (auth.uid() = requested_by);
+
+-- A running comment/notes thread — visible to whoever can see the request
+-- itself (can_view_warranty_request, same "warranty sees only its own"
+-- restriction), but only Contractor/Developer/PM can post; no update
+-- policy, comments aren't editable, same as project_messages.
+create policy "warranty_item_request_comments_select" on warranty_item_request_comments
+  for select using (can_view_warranty_request(request_id));
+
+create policy "warranty_item_request_comments_insert" on warranty_item_request_comments
+  for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from warranty_item_requests r
+      where r.id = warranty_item_request_comments.request_id
+      and has_project_access(r.project_id)
+    )
+    and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer', 'pm'))
+  );
+
+create policy "warranty_item_request_comments_delete" on warranty_item_request_comments
+  for delete using (auth.uid() = user_id or is_developer());
 
 -- No update/delete policy — see the table comment above.
 create policy "activity_log_select" on activity_log

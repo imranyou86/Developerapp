@@ -6,7 +6,7 @@ import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import { notifyProjectSubscribers } from "@/lib/alerts";
 import { logActivity } from "@/lib/activityLog";
-import type { WarrantyItemStatus } from "@/lib/types";
+import type { WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 
 // Warranty requests are checklist_items/checklist_photos rows with
 // phase = "warranty" — same shape (title/done/comment/photos) as the
@@ -40,10 +40,14 @@ async function requireCanManageWarrantyItems(): Promise<Guard> {
   return { ok: true, userId: user.id };
 }
 
-// Only a Contractor or Developer can approve/reject a filed request — same
-// boundary is also enforced in RLS (see warranty_item_requests_update in
-// supabase/migrations/034_warranty_item_requests.sql) for defense in depth,
-// since approving creates a real checklist item.
+const REQUEST_MANAGER_ROLES = ["contractor", "developer", "pm"];
+
+// Contractor, Developer, or PM can approve/reject a filed request, move its
+// progress, assign a subcontractor, or comment on it — same boundary is
+// also enforced in RLS (see warranty_item_requests_update and
+// warranty_item_request_comments_insert in
+// supabase/migrations/045_warranty_request_tracking.sql) for defense in
+// depth, since these are real authorization boundaries, not just UI.
 async function requireApprover(): Promise<Guard> {
   const supabase = createClient();
   const {
@@ -52,8 +56,8 @@ async function requireApprover(): Promise<Guard> {
   if (!user) return { ok: false, error: "Not signed in." };
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "contractor" && profile?.role !== "developer") {
-    return { ok: false, error: "Only a Contractor or Developer can approve or reject a warranty request." };
+  if (!profile || !REQUEST_MANAGER_ROLES.includes(profile.role)) {
+    return { ok: false, error: "Only a Contractor, Developer, or PM can manage a warranty request." };
   }
   return { ok: true, userId: user.id };
 }
@@ -227,23 +231,48 @@ export async function deleteWarrantyPhoto(projectId: string, photoId: string): P
 // checklist photos but decoupled: a report can exist unattached, and
 // attachInspectionReport can move it between items or detach it later
 // rather than being fixed to the item it was uploaded under.
+//
+// A 'warranty' account is normally blocked by requireCanManageWarrantyItems
+// (it can't touch checklist items directly), but it CAN attach evidence to
+// its own filed request — a request has no checklist_item_id until it's
+// approved, so this is the only way for the person who filed it to attach
+// anything at all. warrantyItemRequestId, when passed, is checked against
+// the caller: either they manage warranty items generally, or they filed
+// that specific request themselves.
 export async function addInspectionReport(
   projectId: string,
   fileName: string,
-  storageUrl: string
+  storageUrl: string,
+  warrantyItemRequestId?: string
 ): Promise<ActionResult> {
-  const guard = await requireCanManageWarrantyItems();
-  if (!guard.ok) return { ok: false, error: guard.error };
-
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) {
+    if (!warrantyItemRequestId) return { ok: false, error: guard.error };
+    const { data: request } = await supabase
+      .from("warranty_item_requests")
+      .select("requested_by")
+      .eq("id", warrantyItemRequestId)
+      .maybeSingle();
+    if (!request || request.requested_by !== user.id) {
+      return { ok: false, error: "You can only attach a report to your own request." };
+    }
+  }
+
   const { error, data } = await supabase
     .from("inspection_reports")
-    .insert({ project_id: projectId, file_name: fileName, storage_url: storageUrl, created_by: user.id })
+    .insert({
+      project_id: projectId,
+      file_name: fileName,
+      storage_url: storageUrl,
+      created_by: user.id,
+      warranty_item_request_id: warrantyItemRequestId ?? null,
+    })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
@@ -470,6 +499,93 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
     excludeUserId: guard.userId,
   });
 
+  revalidate(projectId);
+  return { ok: true };
+}
+
+// Independent of status (pending/approved/rejected) above — this is
+// Contractor/Developer/PM tracking the actual work through to done, and
+// can move whether or not the request has been formally approved yet.
+export async function setWarrantyRequestProgress(
+  projectId: string,
+  requestId: string,
+  progress: WarrantyRequestProgress,
+  requestTitle?: string
+): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("warranty_item_requests").update({ progress }).eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
+
+  const label = progress === "in_progress" ? "in progress" : progress === "complete" ? "complete" : "open";
+  await notifyProjectSubscribers(projectId, {
+    subject: "Warranty request status changed",
+    body: `"${requestTitle ?? "A warranty request"}" is now ${label}.`,
+    excludeUserId: guard.userId,
+  });
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
+export async function assignWarrantyRequestSubcontractor(
+  projectId: string,
+  requestId: string,
+  subcontractorId: string | null
+): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("warranty_item_requests").update({ subcontractor_id: subcontractorId }).eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+// Comments/notes on a request — Contractor/Developer/PM can post (enforced
+// in RLS too, see warranty_item_request_comments_insert), the 'warranty'
+// role who filed it can only read them (its own request only, per
+// can_view_warranty_request).
+export async function addWarrantyRequestComment(
+  projectId: string,
+  requestId: string,
+  body: string
+): Promise<ActionResult & { createdAt?: string }> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const trimmed = body.trim();
+  if (!trimmed) return { ok: false, error: "Comment can't be empty." };
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error, data } = await supabase
+    .from("warranty_item_request_comments")
+    .insert({ request_id: requestId, user_id: user.id, sender_email: user.email ?? "unknown", body: trimmed })
+    .select("id, created_at")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await notifyProjectSubscribers(projectId, {
+    subject: "New comment on a warranty request",
+    body: `${user.email ?? "Someone"} commented:\n\n${trimmed}`,
+    excludeUserId: user.id,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: data.id, createdAt: data.created_at };
+}
+
+export async function deleteWarrantyRequestComment(projectId: string, commentId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("warranty_item_request_comments").delete().eq("id", commentId);
+  if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };
 }

@@ -253,11 +253,15 @@ export interface LandscapeDesign {
 
 // Warranty Request tab uploads (app/projects/[id]/warranty-request/) — any
 // file type, stored in the 'project-files' bucket. checklist_item_id is
-// null until attached to a specific warranty item.
+// null until attached to a specific warranty item; warranty_item_request_id
+// is the other, independent attachment point — set when the person who
+// filed the request (or a manager) attaches evidence directly to the
+// request itself, before it's ever been approved into a checklist item.
 export interface InspectionReport {
   id: string;
   project_id: string;
   checklist_item_id: string | null;
+  warranty_item_request_id: string | null;
   file_name: string;
   storage_url: string;
   created_at: string;
@@ -282,6 +286,12 @@ export interface ProjectAlertSubscription {
 
 export type WarrantyItemRequestStatus = "pending" | "approved" | "rejected";
 
+// Independent of WarrantyItemRequestStatus above: `status` is the triage
+// decision (does this become a real checklist item at all); `progress` is
+// Contractor/Developer/PM tracking the actual work on it through to done,
+// and moves separately from (and usually after) that decision.
+export type WarrantyRequestProgress = "open" | "in_progress" | "complete";
+
 export interface WarrantyItemRequest {
   id: string;
   project_id: string;
@@ -289,9 +299,24 @@ export interface WarrantyItemRequest {
   comment: string | null;
   requested_by: string;
   status: WarrantyItemRequestStatus;
+  progress: WarrantyRequestProgress;
+  subcontractor_id: string | null;
   checklist_item_id: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  created_at: string;
+}
+
+// A running comment/notes thread Contractor/Developer/PM keep on a
+// warranty request — the 'warranty' role who filed it can watch this
+// change but never post. sender_email is denormalized at write time, same
+// reasoning as ProjectMessage.sender_email above.
+export interface WarrantyItemRequestComment {
+  id: string;
+  request_id: string;
+  user_id: string;
+  sender_email: string;
+  body: string;
   created_at: string;
 }
 
