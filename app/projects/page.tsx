@@ -85,7 +85,7 @@ export default async function ProjectsPage() {
             Could not load projects: {error.message}
           </div>
         )}
-        <ProjectsClient projects={summaries} />
+        <ProjectsClient projects={summaries} canManageProjects={currentUser?.role === "developer" || currentUser?.role === "contractor"} />
       </main>
     </div>
   );

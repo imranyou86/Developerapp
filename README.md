@@ -1006,6 +1006,57 @@ yet; each one only adds what a given feature needed.
     request from here" form and its messaging were removed from
     `WarrantyRequestClient`/`RequestsSection`, since that component is only
     ever rendered for the roles that manage the queue now.
+  - **Clearer error when a warranty account has the role but not the
+    project access** — a 'warranty' account submitting from the form above
+    got a raw `"new row violates row-level security policy for table
+    \"warranty_item_requests\""` if that specific account had never
+    actually been granted access to the construction it was submitting
+    against. This isn't a bug in the submit path — `warranty_item_requests_insert`'s
+    `has_project_access(project_id)` check (unchanged since migration
+    `034_warranty_item_requests.sql`) is doing exactly what it should:
+    having the `'warranty'` **role** on an account is account-wide, but
+    **access to any specific construction** is a separate grant (a
+    `project_members` row, or ownership) that has to be set up per
+    account per construction — via Admin → Users → that account's
+    **Projects** button, or the per-construction "Projects & invites"
+    section — the same as any other role. `requestWarrantyItem`
+    (`app/projects/[id]/warranty-request/actions.ts`) now recognizes
+    Postgres's RLS-violation SQLSTATE (`42501`) specifically and returns
+    "You don't have access to this construction yet — ask a Developer to
+    add your account to it" instead of the raw database message.
+- **Only Developer or Contractor can create, rename, or delete a
+  construction** (migration `047_restrict_project_management.sql`) —
+  previously any signed-in user could create a project (with themselves as
+  its `user_id` owner) and that owner (or a Developer) could rename/delete
+  it, with no role check anywhere. A new `can_manage_projects()` SQL
+  function (`role in ('developer', 'contractor')`, same security-definer
+  shape as `is_developer()`) now backs all three RLS policies —
+  `projects_insert`/`_update`/`_delete` — and a matching
+  `requireCanManageProjects()` guard in `app/projects/actions.ts` gates
+  `createProject`/`renameProject`/`deleteProject` at the action layer too,
+  for a clear error message instead of a raw RLS one. `projects_insert`
+  deliberately has no `has_project_access(id)` check — the row doesn't
+  exist yet, so there's nothing to already have access to — while
+  `_update`/`_delete` require both `can_manage_projects()` **and**
+  `has_project_access(id)`, so a Contractor can only manage constructions
+  they're actually on, not every construction in the system (a Developer's
+  `is_developer()` check inside `has_project_access` already covers them
+  regardless). `app/projects/projects-client.tsx`'s "+ New construction"
+  button and each card's Rename/Delete buttons are now hidden for any
+  other role (`canManageProjects`, computed in `app/projects/page.tsx`
+  from the real `profiles.role`). Two side effects worth knowing about:
+  converting a Buyers Guide deal into a construction
+  (`app/deals/actions.ts`'s `convertDealToProject`) calls `createProject`
+  under the hood, so that's now Developer/Contractor-only too, matching
+  the same rule; and the Certificate of Occupancy tab's "Save address"
+  field (`certificate-of-occupancy-client.tsx`) reuses `renameProject` to
+  persist just the address, so it's now also gated the same way as a full
+  rename — an Owner/PM filling in the property address there for a permit
+  lookup will now see "Only a Developer or Contractor can manage
+  constructions." This was a deliberate reading of "edit constructions" as
+  covering the whole `projects` row, not just the Projects-list rename
+  dialog specifically — if that address field should stay open to any
+  project member instead, that's a one-line carve-out to make.
 - **Bids tab, separate from Payments** — uploading, reviewing, and deciding
   on a bid is its own tab now; Payments only shows what you've already
   accepted. This split exists because not every uploaded bid is the one you

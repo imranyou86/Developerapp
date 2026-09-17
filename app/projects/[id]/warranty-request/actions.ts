@@ -410,7 +410,18 @@ export async function requestWarrantyItem(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Postgres's raw RLS-violation text ("new row violates row-level
+    // security policy...") means this account isn't actually a member of
+    // (or owner of) this specific construction — having the 'warranty'
+    // role alone doesn't grant that; a Developer has to assign the account
+    // to this construction from Admin's Users list first (the "Projects"
+    // button there, or the "Projects & invites" section).
+    if (error.code === "42501") {
+      return { ok: false, error: "You don't have access to this construction yet — ask a Developer to add your account to it." };
+    }
+    return { ok: false, error: error.message };
+  }
 
   await notifyProjectSubscribers(projectId, {
     subject: "New warranty item request",

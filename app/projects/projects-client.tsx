@@ -24,7 +24,7 @@ function currency(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-export function ProjectsClient({ projects }: { projects: ProjectSummary[] }) {
+export function ProjectsClient({ projects, canManageProjects }: { projects: ProjectSummary[]; canManageProjects: boolean }) {
   const { notify } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ProjectSummary | null>(null);
@@ -35,9 +35,11 @@ export function ProjectsClient({ projects }: { projects: ProjectSummary[] }) {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-blueprint-dark">Constructions</h2>
-        <button className="btn-amber" onClick={() => setCreateOpen(true)}>
-          + New construction
-        </button>
+        {canManageProjects && (
+          <button className="btn-amber" onClick={() => setCreateOpen(true)}>
+            + New construction
+          </button>
+        )}
       </div>
 
       {projects.length === 0 ? (
@@ -92,17 +94,19 @@ export function ProjectsClient({ projects }: { projects: ProjectSummary[] }) {
                   )}
                 </Link>
 
-                <div className="mt-4 flex gap-2 border-t border-blueprint/10 pt-3">
-                  <button className="btn-ghost flex-1 text-xs" onClick={() => setEditing(p)}>
-                    Rename
-                  </button>
-                  <button
-                    className="btn-ghost flex-1 text-xs text-red-600 hover:bg-red-50"
-                    onClick={() => setDeleting(p)}
-                  >
-                    Delete
-                  </button>
-                </div>
+                {canManageProjects && (
+                  <div className="mt-4 flex gap-2 border-t border-blueprint/10 pt-3">
+                    <button className="btn-ghost flex-1 text-xs" onClick={() => setEditing(p)}>
+                      Rename
+                    </button>
+                    <button
+                      className="btn-ghost flex-1 text-xs text-red-600 hover:bg-red-50"
+                      onClick={() => setDeleting(p)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

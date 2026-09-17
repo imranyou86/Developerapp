@@ -868,14 +868,30 @@ as $$
   );
 $$;
 
+-- Only a Developer or Contractor can create/edit/delete a construction
+-- record itself (see can_manage_projects() below) — every other role can
+-- still be a project_member and use whatever tabs it's allowed, just not
+-- manage the construction record.
+create or replace function can_manage_projects()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (select 1 from profiles where id = auth.uid() and role in ('developer', 'contractor'));
+$$;
+
 create policy "projects_select" on projects
   for select using (has_project_access(id));
 create policy "projects_insert" on projects
-  for insert with check (auth.uid() = user_id);
+  -- No has_project_access(id) here — the row doesn't exist yet, so there's
+  -- nothing to have "access" to until after it's created.
+  for insert with check (auth.uid() = user_id and can_manage_projects());
 create policy "projects_update" on projects
-  for update using (auth.uid() = user_id or is_developer()) with check (auth.uid() = user_id or is_developer());
+  for update using (can_manage_projects() and has_project_access(id)) with check (can_manage_projects() and has_project_access(id));
 create policy "projects_delete" on projects
-  for delete using (auth.uid() = user_id or is_developer());
+  for delete using (can_manage_projects() and has_project_access(id));
 
 create policy "plan_pages_member" on plan_pages
   for all using (has_project_access(plan_pages.project_id))
