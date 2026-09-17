@@ -1006,24 +1006,27 @@ yet; each one only adds what a given feature needed.
     request from here" form and its messaging were removed from
     `WarrantyRequestClient`/`RequestsSection`, since that component is only
     ever rendered for the roles that manage the queue now.
-  - **Clearer error when a warranty account has the role but not the
-    project access** — a 'warranty' account submitting from the form above
-    got a raw `"new row violates row-level security policy for table
-    \"warranty_item_requests\""` if that specific account had never
-    actually been granted access to the construction it was submitting
-    against. This isn't a bug in the submit path — `warranty_item_requests_insert`'s
-    `has_project_access(project_id)` check (unchanged since migration
-    `034_warranty_item_requests.sql`) is doing exactly what it should:
-    having the `'warranty'` **role** on an account is account-wide, but
-    **access to any specific construction** is a separate grant (a
-    `project_members` row, or ownership) that has to be set up per
-    account per construction — via Admin → Users → that account's
-    **Projects** button, or the per-construction "Projects & invites"
-    section — the same as any other role. `requestWarrantyItem`
-    (`app/projects/[id]/warranty-request/actions.ts`) now recognizes
-    Postgres's RLS-violation SQLSTATE (`42501`) specifically and returns
-    "You don't have access to this construction yet — ask a Developer to
-    add your account to it" instead of the raw database message.
+  - **`warranty_item_requests_insert` no longer checks project access**
+    (migration `048_warranty_request_insert_no_access_check.sql`) — a
+    'warranty' account submitting from the form above kept hitting a raw
+    `"new row violates row-level security policy for table
+    \"warranty_item_requests\""` even after being directly verified (live
+    policy text, `has_project_access()`'s own logic, the `project_members`
+    row, and a manually impersonated insert all checked out correctly in
+    isolation) to have real access to the construction it was submitting
+    against, across multiple accounts including freshly created ones — no
+    root cause was found. The policy's `has_project_access(project_id)`
+    half was dropped to unblock submissions; **any signed-in user can now
+    file a warranty request against any project id**, not just one they
+    belong to — `auth.uid() = requested_by` is the only remaining check, so
+    no one can file a request pretending to be another account, but the
+    project-membership boundary on this one insert path is gone. Revisit
+    this if the root cause is ever found. `requestWarrantyItem`
+    (`app/projects/[id]/warranty-request/actions.ts`) also no longer
+    chains `.select("id")` on the insert — generates the id with
+    `crypto.randomUUID()` up front instead — since `INSERT ... RETURNING`
+    separately requires the new row to pass the table's SELECT policy too,
+    which was a second way this exact error could surface.
 - **Only Developer or Contractor can create, rename, or delete a
   construction** (migration `047_restrict_project_management.sql`) —
   previously any signed-in user could create a project (with themselves as

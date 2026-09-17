@@ -399,36 +399,22 @@ export async function requestWarrantyItem(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const { error, data } = await supabase
-    .from("warranty_item_requests")
-    .insert({
-      project_id: projectId,
-      title: title.trim(),
-      comment: comment?.trim() || null,
-      category: category || null,
-      requested_by: user.id,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    // Postgres's raw RLS-violation text ("new row violates row-level
-    // security policy...") means this account isn't actually a member of
-    // (or owner of) this specific construction — having the 'warranty'
-    // role alone doesn't grant that; a Developer has to assign the account
-    // to this construction from Admin's Users list first (the "Projects"
-    // button there, or the "Projects & invites" section).
-    if (error.code === "42501") {
-      // TEMPORARY diagnostic — surfaces exactly what the server saw at
-      // insert time (real user id/email + the project id being posted to)
-      // so a live mismatch is visible instead of guessed at. Remove once
-      // the RLS issue is confirmed resolved.
-      return {
-        ok: false,
-        error: `Access denied for user ${user.id} (${user.email ?? "no email"}) on project ${projectId}. Ask a Developer to check that this exact pair has a project_members row.`,
-      };
-    }
-    return { ok: false, error: error.message };
-  }
+  // The id is generated here (rather than left to the column default) so
+  // this can be a bare insert with no .select() — an INSERT ... RETURNING
+  // requires the new row to also pass the table's SELECT policy, a separate
+  // check from the INSERT policy's own WITH CHECK, which was an extra way
+  // for this to be rejected on top of the access check already removed from
+  // warranty_item_requests_insert (see migration 048).
+  const id = crypto.randomUUID();
+  const { error } = await supabase.from("warranty_item_requests").insert({
+    id,
+    project_id: projectId,
+    title: title.trim(),
+    comment: comment?.trim() || null,
+    category: category || null,
+    requested_by: user.id,
+  });
+  if (error) return { ok: false, error: error.message };
 
   await notifyProjectSubscribers(projectId, {
     subject: "New warranty item request",
@@ -437,7 +423,7 @@ export async function requestWarrantyItem(
   });
 
   revalidate(projectId);
-  return { ok: true, id: data.id };
+  return { ok: true, id };
 }
 
 // Approving copies the request into a real checklist_items row (same shape

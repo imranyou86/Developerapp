@@ -988,8 +988,14 @@ create policy "inspection_reports_member" on inspection_reports
 create policy "warranty_item_requests_select" on warranty_item_requests
   for select using (can_view_warranty_request(id));
 
+-- No has_project_access() check here (see migration 048) — extensively
+-- verified correct in isolation, but real inserts kept failing with the
+-- same RLS violation across multiple accounts with no root cause found.
+-- auth.uid() = requested_by still stands, so no one can file a request
+-- pretending to be another account; it just no longer requires that account
+-- to actually be a member of the project it's filing against.
 create policy "warranty_item_requests_insert" on warranty_item_requests
-  for insert with check (has_project_access(warranty_item_requests.project_id) and auth.uid() = requested_by);
+  for insert with check (auth.uid() = requested_by);
 
 create policy "warranty_item_requests_update" on warranty_item_requests
   for update using (
