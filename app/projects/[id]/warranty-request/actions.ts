@@ -418,7 +418,14 @@ export async function requestWarrantyItem(
     // to this construction from Admin's Users list first (the "Projects"
     // button there, or the "Projects & invites" section).
     if (error.code === "42501") {
-      return { ok: false, error: "You don't have access to this construction yet — ask a Developer to add your account to it." };
+      // TEMPORARY diagnostic — surfaces exactly what the server saw at
+      // insert time (real user id/email + the project id being posted to)
+      // so a live mismatch is visible instead of guessed at. Remove once
+      // the RLS issue is confirmed resolved.
+      return {
+        ok: false,
+        error: `Access denied for user ${user.id} (${user.email ?? "no email"}) on project ${projectId}. Ask a Developer to check that this exact pair has a project_members row.`,
+      };
     }
     return { ok: false, error: error.message };
   }
