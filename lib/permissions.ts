@@ -64,6 +64,8 @@ export interface CurrentUser {
   role: UserRole;
   /** The real, stored account role is "developer", regardless of any active preview. */
   isDeveloper: boolean;
+  /** Developer-set friendly name — null if never set, falls back to email wherever shown. */
+  displayName: string | null;
 }
 
 // Cookie a Developer's "preview as" role picker writes/reads (see

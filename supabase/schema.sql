@@ -273,6 +273,10 @@ create table if not exists warranty_item_request_comments (
   request_id uuid not null references warranty_item_requests (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
   sender_email text not null,
+  -- Denormalized display name at write time, same reasoning as
+  -- sender_email (profiles_select only lets a user read their own row) —
+  -- falls back to sender_email in the UI when null.
+  sender_name text,
   body text not null,
   created_at timestamptz not null default now()
 );
@@ -454,6 +458,10 @@ create table if not exists profiles (
   -- account — purely a label (a small "Test" badge in the Users list), no
   -- effect on access or behavior anywhere else.
   is_test boolean not null default false,
+  -- Developer-set friendly name shown in chat and warranty-request comments
+  -- instead of the raw email — nullable, falls back to email wherever
+  -- unset (see project_messages/warranty_item_request_comments below).
+  display_name text,
   created_at timestamptz not null default now()
 );
 
@@ -525,6 +533,10 @@ create table if not exists project_messages (
   project_id uuid not null references projects (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
   sender_email text not null,
+  -- Denormalized display name at write time, same reasoning as
+  -- sender_email (profiles_select only lets a user read their own row) —
+  -- falls back to sender_email in the UI when null.
+  sender_name text,
   body text not null,
   created_at timestamptz not null default now()
 );
@@ -1003,8 +1015,17 @@ create policy "warranty_item_requests_update" on warranty_item_requests
     and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer', 'pm'))
   );
 
+-- The account that filed it can delete its own; Contractor/Developer can
+-- also delete any request outright (see migration 049) — a stronger
+-- action than reject, which just flips status and keeps the row.
 create policy "warranty_item_requests_delete" on warranty_item_requests
-  for delete using (auth.uid() = requested_by);
+  for delete using (
+    auth.uid() = requested_by
+    or (
+      has_project_access(project_id)
+      and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer'))
+    )
+  );
 
 -- A running comment/notes thread — visible to whoever can see the request
 -- itself (can_view_warranty_request, same "warranty sees only its own"

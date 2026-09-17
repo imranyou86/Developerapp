@@ -33,7 +33,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
       requestIds.length > 0
         ? supabase
             .from("warranty_item_request_comments")
-            .select("id, request_id, user_id, sender_email, body, created_at")
+            .select("id, request_id, user_id, sender_email, sender_name, body, created_at")
             .in("request_id", requestIds)
             .order("created_at", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
@@ -107,7 +107,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
     requestIds.length > 0
       ? supabase
           .from("warranty_item_request_comments")
-          .select("id, request_id, user_id, sender_email, body, created_at")
+          .select("id, request_id, user_id, sender_email, sender_name, body, created_at")
           .in("request_id", requestIds)
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [], error: null }),

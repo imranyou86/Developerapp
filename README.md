@@ -1960,3 +1960,42 @@ yet; each one only adds what a given feature needed.
     suggestions, Interior Design's 5 quick-style buttons, and Landscape's 5
     style preset buttons are all gone — style is plain free text on every
     surface now (see the dedicated bullets above and below for each).
+
+## Warranty request delete + account display names
+
+- **Contractor/Developer can delete a warranty request outright**
+  (migration `049_warranty_request_delete_by_manager.sql`) — reject just
+  flips `status` to `'rejected'` and keeps the row for the record; delete
+  now removes it entirely (e.g. for a duplicate or spam submission). Scoped
+  to Contractor/Developer only (not PM, unlike approve/reject/progress/
+  subcontractor/comments) — `requireCanDeleteRequest` in
+  `app/projects/[id]/warranty-request/actions.ts` guards the new
+  `deleteWarrantyItemRequest` action, and `warranty_item_requests_delete`'s
+  RLS policy backs it the same way (the account that filed a request can
+  still delete its own, unchanged). Comments cascade-delete with the
+  request; attached inspection reports fall back to unattached
+  (`warranty_item_request_id ... on delete set null`, unchanged from
+  migration 045) rather than being deleted; an approved request's already-
+  created `checklist_items` row is untouched — only the request/ticket
+  itself goes away. `WarrantyRequestCard` (`warranty-request-client.tsx`,
+  now exported) gained a `canDeleteRequests` prop and a "Delete" button
+  behind a `ConfirmDialog`, independent of the request's `status` (unlike
+  Approve/Reject, which only show while `status === 'pending'`).
+- **Account display names** (migration `050_user_display_names.sql`) — a
+  Developer can set a friendly name per account from Admin's Users list
+  (a new inline `<input>` above each row's email, saving on blur via a new
+  `updateUserDisplayName` action), shown in chat and warranty-request
+  comments instead of the raw email. `profiles.display_name` is nullable;
+  unset falls back to email everywhere. Denormalized onto each
+  `project_messages`/`warranty_item_request_comments` row at write time
+  (`sender_name`, alongside the existing `sender_email`) rather than
+  joined at render time — `profiles_select`'s RLS only lets a user read
+  their own profile row, so a live join to resolve another member's name
+  wouldn't work without loosening that policy app-wide; `sendMessage`/
+  `addWarrantyRequestComment` look up the *sender's own* `display_name`
+  (allowed) and store it alongside `sender_email`, same reasoning
+  `sender_email` itself already follows. A name change only affects new
+  messages/comments going forward, not past ones — same tradeoff
+  `sender_email` already has today. `getCurrentUser()`
+  (`lib/permissions-server.ts`) and `CurrentUser` (`lib/permissions.ts`)
+  gained a `displayName` field for anywhere else that might want it later.

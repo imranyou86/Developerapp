@@ -40,6 +40,21 @@ export async function updateUserRole(userId: string, role: UserRole): Promise<Ac
   return { ok: true };
 }
 
+// Shown in chat and warranty-request comments instead of the raw email
+// (denormalized onto each message/comment at write time — see
+// sendMessage/addWarrantyRequestComment). null clears it back to
+// email-only display.
+export async function updateUserDisplayName(userId: string, displayName: string | null): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("profiles").update({ display_name: displayName }).eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
 export async function updateUserStatus(
   userId: string,
   status: "pending" | "approved" | "rejected"

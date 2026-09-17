@@ -41,6 +41,7 @@ async function requireCanManageWarrantyItems(): Promise<Guard> {
 }
 
 const REQUEST_MANAGER_ROLES = ["contractor", "developer", "pm"];
+const REQUEST_DELETE_ROLES = ["contractor", "developer"];
 
 // Contractor, Developer, or PM can approve/reject a filed request, move its
 // progress, assign a subcontractor, or comment on it — same boundary is
@@ -58,6 +59,24 @@ async function requireApprover(): Promise<Guard> {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (!profile || !REQUEST_MANAGER_ROLES.includes(profile.role)) {
     return { ok: false, error: "Only a Contractor, Developer, or PM can manage a warranty request." };
+  }
+  return { ok: true, userId: user.id };
+}
+
+// Only Contractor/Developer can delete a request outright (not PM) — a
+// stronger action than reject, which just flips status and keeps the row
+// for the record. Same boundary enforced in RLS too (see
+// warranty_item_requests_delete in migration 049).
+async function requireCanDeleteRequest(): Promise<Guard> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (!profile || !REQUEST_DELETE_ROLES.includes(profile.role)) {
+    return { ok: false, error: "Only a Contractor or Developer can delete a warranty request." };
   }
   return { ok: true, userId: user.id };
 }
@@ -518,6 +537,43 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
   return { ok: true };
 }
 
+// Removes the request row outright — unlike reject, which just flips
+// status and keeps it for the record. checklist_item_id isn't touched:
+// deleting a request that was already approved leaves the real
+// checklist_items row (and any work already tracked against it) in place;
+// this only removes the request/ticket itself. Attached inspection
+// reports fall back to unattached rather than being deleted, same as
+// detaching one manually (warranty_item_request_id ... on delete set
+// null). Comments cascade-delete with the request.
+export async function deleteWarrantyItemRequest(projectId: string, requestId: string): Promise<ActionResult> {
+  const guard = await requireCanDeleteRequest();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { data: request, error: fetchError } = await supabase
+    .from("warranty_item_requests")
+    .select("title")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (fetchError) return { ok: false, error: fetchError.message };
+  if (!request) return { ok: false, error: "This request no longer exists." };
+
+  const { error } = await supabase.from("warranty_item_requests").delete().eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "warranty_item_request.deleted",
+    entityType: "warranty_item_requests",
+    entityId: requestId,
+    detail: `Deleted "${request.title}"`,
+  });
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
 // Independent of status (pending/approved/rejected) above — this is
 // Contractor/Developer/PM tracking the actual work through to done, and
 // can move whether or not the request has been formally approved yet.
@@ -580,16 +636,28 @@ export async function addWarrantyRequestComment(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // profiles_select only lets a user read their own row, so this looks up
+  // the sender's own display name to denormalize onto the comment the same
+  // way sender_email already is — see migration 050_user_display_names.sql.
+  const { data: profile } = await supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  const senderName = profile?.display_name || null;
+
   const { error, data } = await supabase
     .from("warranty_item_request_comments")
-    .insert({ request_id: requestId, user_id: user.id, sender_email: user.email ?? "unknown", body: trimmed })
+    .insert({
+      request_id: requestId,
+      user_id: user.id,
+      sender_email: user.email ?? "unknown",
+      sender_name: senderName,
+      body: trimmed,
+    })
     .select("id, created_at")
     .single();
   if (error) return { ok: false, error: error.message };
 
   await notifyProjectSubscribers(projectId, {
     subject: "New comment on a warranty request",
-    body: `${user.email ?? "Someone"} commented:\n\n${trimmed}`,
+    body: `${senderName ?? user.email ?? "Someone"} commented:\n\n${trimmed}`,
     excludeUserId: user.id,
   });
 

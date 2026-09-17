@@ -25,7 +25,7 @@ export default async function AdminPage() {
 
   const [{ data: tabPermissions }, { data: profiles }, { data: projects }, { data: userTabPermissions }] = await Promise.all([
     supabase.from("tab_permissions").select("role, tab, allowed"),
-    supabase.from("profiles").select("id, email, role, status, is_test").order("email"),
+    supabase.from("profiles").select("id, email, role, status, is_test, display_name").order("email"),
     supabase.from("projects").select("id, name, address, user_id").order("name"),
     supabase.from("user_tab_permissions").select("user_id, tab, allowed"),
   ]);
@@ -45,6 +45,7 @@ export default async function AdminPage() {
     role: p.role,
     status: p.status,
     isTest: p.is_test,
+    displayName: p.display_name,
     tabOverrides: userOverrides.get(p.id) ?? {},
   }));
   const projectRows: AdminProject[] = (projects ?? []).map((p) => ({

@@ -22,7 +22,7 @@ export default async function ChatPage({ params }: { params: { id: string } }) {
     // chat-client.tsx's "Load older messages" / loadOlderMessages).
     supabase
       .from("project_messages")
-      .select("id, project_id, user_id, sender_email, body, created_at")
+      .select("id, project_id, user_id, sender_email, sender_name, body, created_at")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false })
       .limit(CHAT_PAGE_SIZE + 1),

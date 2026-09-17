@@ -272,6 +272,9 @@ export interface ProjectMessage {
   project_id: string;
   user_id: string;
   sender_email: string;
+  // Denormalized display name at write time — null falls back to
+  // sender_email wherever this is rendered.
+  sender_name: string | null;
   body: string;
   created_at: string;
 }
@@ -318,6 +321,9 @@ export interface WarrantyItemRequestComment {
   request_id: string;
   user_id: string;
   sender_email: string;
+  // Denormalized display name at write time — null falls back to
+  // sender_email wherever this is rendered.
+  sender_name: string | null;
   body: string;
   created_at: string;
 }
@@ -403,6 +409,7 @@ export interface Profile {
   email: string;
   role: UserRole;
   is_test: boolean;
+  display_name: string | null;
   created_at: string;
 }
 

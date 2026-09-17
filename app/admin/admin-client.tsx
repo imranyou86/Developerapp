@@ -8,6 +8,7 @@ import {
   updateTabPermission,
   updateUserRole,
   updateUserStatus,
+  updateUserDisplayName,
   deleteUser,
   resetUserPassword,
   createAccount,
@@ -48,6 +49,8 @@ export interface AdminUser {
   role: UserRole;
   status: AccountStatus;
   isTest: boolean;
+  /** Shown in chat/warranty comments instead of the raw email — null shows email only. */
+  displayName: string | null;
   /** This account's user_tab_permissions overrides, keyed by tab slug — wins over the role default for that tab only. */
   tabOverrides: Record<string, boolean>;
 }
@@ -320,7 +323,7 @@ function CreateAccountSection({
     }
     setRows((r) => [
       ...r,
-      { id: res.userId!, email: email.trim().toLowerCase(), role, status: "approved", isTest, tabOverrides: {} },
+      { id: res.userId!, email: email.trim().toLowerCase(), role, status: "approved", isTest, displayName: null, tabOverrides: {} },
     ]);
 
     // Assigning to a construction is a second, independent write
@@ -479,6 +482,18 @@ function UsersSection({
     }
   }
 
+  async function handleNameChange(userId: string, displayName: string | null) {
+    const prev = rows;
+    setRows((r) => r.map((u) => (u.id === userId ? { ...u, displayName } : u)));
+    const res = await updateUserDisplayName(userId, displayName);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update name.");
+      setRows(prev);
+    } else {
+      notify("success", "Name updated.");
+    }
+  }
+
   async function handleStatusChange(userId: string, status: AccountStatus) {
     const prev = rows;
     setRows((r) => r.map((u) => (u.id === userId ? { ...u, status } : u)));
@@ -511,11 +526,23 @@ function UsersSection({
             className="flex animate-fade-in-up items-center gap-2 rounded-lg border border-blueprint/10 bg-white p-2 text-sm"
             style={{ animationDelay: `${Math.min(i * 20, 240)}ms` }}
           >
-            <span className="flex-1 truncate">
-              {u.email}
-              {u.id === currentUserId && <span className="ml-2 text-xs text-blueprint/40">(you)</span>}
-              {u.isTest && <span className="badge-sage ml-2 text-xs">Test</span>}
-            </span>
+            <div className="min-w-0 flex-1">
+              <input
+                key={u.displayName ?? ""}
+                className="input w-full py-0.5 text-sm"
+                defaultValue={u.displayName ?? ""}
+                placeholder="Name (shown in chat & warranty notes)"
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  if (value !== (u.displayName ?? "")) handleNameChange(u.id, value || null);
+                }}
+              />
+              <span className="mt-0.5 block truncate text-xs text-blueprint/50">
+                {u.email}
+                {u.id === currentUserId && <span className="ml-2 text-blueprint/40">(you)</span>}
+                {u.isTest && <span className="badge-sage ml-2">Test</span>}
+              </span>
+            </div>
             {u.status !== "approved" && (
               <span className={`text-xs ${u.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>
                 {STATUS_LABELS[u.status]}

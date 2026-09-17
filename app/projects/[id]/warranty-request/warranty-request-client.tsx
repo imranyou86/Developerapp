@@ -18,6 +18,7 @@ import {
   attachInspectionReport,
   deleteInspectionReport,
   deleteWarrantyItem,
+  deleteWarrantyItemRequest,
   deleteWarrantyPhoto,
   deleteWarrantyRequestComment,
   rejectWarrantyItemRequest,
@@ -108,6 +109,10 @@ export function WarrantyRequestClient({
   // move its progress, assign a subcontractor, and comment on it — the
   // 'warranty' role who filed it (and, for now, Owner) only ever watches.
   const canManageRequests = viewerRole === "contractor" || viewerRole === "developer" || viewerRole === "pm";
+  // Only Contractor/Developer can delete a request outright (not PM) — see
+  // requireCanDeleteRequest in actions.ts and warranty_item_requests_delete
+  // in migration 049.
+  const canDeleteRequests = viewerRole === "contractor" || viewerRole === "developer";
 
   function updateItem(id: string, patch: Partial<WarrantyItemRow>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
@@ -194,6 +199,16 @@ export function WarrantyRequestClient({
     setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, status: "rejected" } : r)));
   }
 
+  async function handleDeleteRequest(request: WarrantyItemRequest) {
+    const res = await deleteWarrantyItemRequest(projectId, request.id);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete request.");
+      return;
+    }
+    setRequests((prev) => prev.filter((r) => r.id !== request.id));
+    setComments((prev) => prev.filter((c) => c.request_id !== request.id));
+  }
+
   async function handleSetProgress(request: WarrantyItemRequest, progress: WarrantyRequestProgress) {
     const previous = request.progress;
     setRequests((prev) => prev.map((r) => (r.id === request.id ? { ...r, progress } : r)));
@@ -227,6 +242,7 @@ export function WarrantyRequestClient({
         request_id: requestId,
         user_id: currentUserId ?? "",
         sender_email: "you",
+        sender_name: "you",
         body: body.trim(),
         created_at: res.createdAt ?? new Date().toISOString(),
       },
@@ -316,9 +332,11 @@ export function WarrantyRequestClient({
         reports={reports}
         subcontractors={subcontractors}
         canManageRequests={canManageRequests}
+        canDeleteRequests={canDeleteRequests}
         currentUserId={currentUserId}
         onApprove={handleApprove}
         onReject={handleReject}
+        onDelete={handleDeleteRequest}
         onSetProgress={handleSetProgress}
         onAssignSubcontractor={handleAssignSubcontractor}
         onAddComment={handleAddComment}
@@ -340,9 +358,11 @@ function RequestsSection({
   reports,
   subcontractors,
   canManageRequests,
+  canDeleteRequests,
   currentUserId,
   onApprove,
   onReject,
+  onDelete,
   onSetProgress,
   onAssignSubcontractor,
   onAddComment,
@@ -355,9 +375,11 @@ function RequestsSection({
   reports: InspectionReportRow[];
   subcontractors: SubcontractorOption[];
   canManageRequests: boolean;
+  canDeleteRequests: boolean;
   currentUserId: string | null;
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest) => Promise<void>;
+  onDelete: (request: WarrantyItemRequest) => Promise<void>;
   onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
   onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
   onAddComment: (requestId: string, body: string) => Promise<void>;
@@ -404,9 +426,11 @@ function RequestsSection({
               reports={reports.filter((r) => r.warranty_item_request_id === request.id)}
               subcontractors={subcontractors}
               canManageRequests={canManageRequests}
+              canDeleteRequests={canDeleteRequests}
               currentUserId={currentUserId}
               onApprove={onApprove}
               onReject={onReject}
+              onDelete={onDelete}
               onSetProgress={onSetProgress}
               onAssignSubcontractor={onAssignSubcontractor}
               onAddComment={onAddComment}
@@ -439,9 +463,11 @@ export function WarrantyRequestCard({
   reports,
   subcontractors,
   canManageRequests,
+  canDeleteRequests = false,
   currentUserId,
   onApprove,
   onReject,
+  onDelete,
   onSetProgress,
   onAssignSubcontractor,
   onAddComment,
@@ -454,9 +480,11 @@ export function WarrantyRequestCard({
   reports: InspectionReportRow[];
   subcontractors: SubcontractorOption[];
   canManageRequests: boolean;
+  canDeleteRequests?: boolean;
   currentUserId: string | null;
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest) => Promise<void>;
+  onDelete?: (request: WarrantyItemRequest) => Promise<void>;
   onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
   onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
   onAddComment: (requestId: string, body: string) => Promise<void>;
@@ -465,6 +493,8 @@ export function WarrantyRequestCard({
 }) {
   const { notify } = useToast();
   const [acting, setActing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -534,31 +564,58 @@ export function WarrantyRequestCard({
         </div>
       </div>
 
-      {request.status === "pending" && canManageRequests && (
+      {((request.status === "pending" && canManageRequests) || canDeleteRequests) && (
         <div className="mt-2 flex gap-3">
-          <button
-            className="text-xs text-sage-dark hover:underline"
-            disabled={acting}
-            onClick={async () => {
-              setActing(true);
-              await onApprove(request);
-              setActing(false);
-            }}
-          >
-            Approve
-          </button>
-          <button
-            className="text-xs text-red-500 hover:underline"
-            disabled={acting}
-            onClick={async () => {
-              setActing(true);
-              await onReject(request);
-              setActing(false);
-            }}
-          >
-            Reject
-          </button>
+          {request.status === "pending" && canManageRequests && (
+            <>
+              <button
+                className="text-xs text-sage-dark hover:underline"
+                disabled={acting}
+                onClick={async () => {
+                  setActing(true);
+                  await onApprove(request);
+                  setActing(false);
+                }}
+              >
+                Approve
+              </button>
+              <button
+                className="text-xs text-red-500 hover:underline"
+                disabled={acting}
+                onClick={async () => {
+                  setActing(true);
+                  await onReject(request);
+                  setActing(false);
+                }}
+              >
+                Reject
+              </button>
+            </>
+          )}
+          {canDeleteRequests && (
+            <button className="text-xs text-red-500 hover:underline" disabled={deleting} onClick={() => setConfirmDelete(true)}>
+              Delete
+            </button>
+          )}
         </div>
+      )}
+
+      {canDeleteRequests && (
+        <ConfirmDialog
+          open={confirmDelete}
+          title="Delete this warranty request?"
+          message={`"${request.title}" will be permanently removed, along with its comment thread. This can't be undone.`}
+          confirmLabel="Delete"
+          danger
+          busy={deleting}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => {
+            setDeleting(true);
+            await onDelete?.(request);
+            setDeleting(false);
+            setConfirmDelete(false);
+          }}
+        />
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-blueprint/10 pt-2.5">
@@ -649,7 +706,7 @@ export function WarrantyRequestCard({
             {comments.map((c) => (
               <div key={c.id} className="group rounded bg-concrete px-2 py-1.5 text-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-blueprint-dark">{c.sender_email}</span>
+                  <span className="font-medium text-blueprint-dark">{c.sender_name || c.sender_email}</span>
                   <span className="flex items-center gap-2 text-blueprint/40">
                     {new Date(c.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
                     {c.user_id === currentUserId && (

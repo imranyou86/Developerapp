@@ -115,7 +115,7 @@ export function ChatClient({
     // a no-op against this same entry (see the dedupe above).
     setMessages((prev) => [
       ...prev,
-      { id, project_id: projectId, user_id: currentUserId, sender_email: "", body, created_at: new Date().toISOString() },
+      { id, project_id: projectId, user_id: currentUserId, sender_email: "", sender_name: null, body, created_at: new Date().toISOString() },
     ]);
     setDraft("");
     setSending(true);
@@ -166,7 +166,7 @@ export function ChatClient({
               return (
                 <div key={m.id} className={`flex animate-fade-in-up ${isOwn ? "justify-end" : "justify-start"}`}>
                   <div className={`group max-w-[75%] rounded-lg px-3 py-2 text-sm ${isOwn ? "bg-blueprint text-white" : "bg-concrete text-blueprint-dark"}`}>
-                    {!isOwn && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender_email}</p>}
+                    {!isOwn && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender_name || m.sender_email}</p>}
                     <p className="whitespace-pre-wrap break-words">{m.body}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <span className={`text-[10px] ${isOwn ? "text-white/60" : "text-blueprint/40"}`}>{formatTimestamp(m.created_at)}</span>

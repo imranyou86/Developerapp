@@ -18,7 +18,7 @@ export async function loadOlderMessages(
   const supabase = createClient();
   const { data } = await supabase
     .from("project_messages")
-    .select("id, project_id, user_id, sender_email, body, created_at")
+    .select("id, project_id, user_id, sender_email, sender_name, body, created_at")
     .eq("project_id", projectId)
     .lt("created_at", beforeCreatedAt)
     .order("created_at", { ascending: false })
@@ -43,6 +43,13 @@ export async function sendMessage(projectId: string, id: string, body: string): 
   const trimmed = body.trim();
   if (!trimmed) return { ok: false, error: "Message can't be empty." };
 
+  // profiles_select only lets a user read their own row, so this looks up
+  // the sender's own display name (set, if at all, from Admin) to
+  // denormalize onto the message the same way sender_email already is —
+  // see migration 050_user_display_names.sql.
+  const { data: profile } = await supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
+  const senderName = profile?.display_name || null;
+
   // id is generated client-side (crypto.randomUUID()) rather than left to
   // the column default, so the sender can recognize their own message when
   // it comes back over the Realtime subscription and reconcile it with the
@@ -53,13 +60,14 @@ export async function sendMessage(projectId: string, id: string, body: string): 
     project_id: projectId,
     user_id: user.id,
     sender_email: user.email ?? "unknown",
+    sender_name: senderName,
     body: trimmed,
   });
   if (error) return { ok: false, error: error.message };
 
   await notifyProjectSubscribers(projectId, {
     subject: "New chat message",
-    body: `${user.email ?? "Someone"} wrote:\n\n${trimmed}`,
+    body: `${senderName ?? user.email ?? "Someone"} wrote:\n\n${trimmed}`,
     excludeUserId: user.id,
   });
 

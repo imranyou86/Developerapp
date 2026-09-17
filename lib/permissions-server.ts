@@ -20,7 +20,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("role, display_name").eq("id", user.id).maybeSingle();
   const realRole = (profile?.role as UserRole) ?? "owner";
   const isDeveloper = realRole === "developer";
 
@@ -32,7 +32,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     }
   }
 
-  return { id: user.id, email: user.email ?? null, role, isDeveloper };
+  return { id: user.id, email: user.email ?? null, role, isDeveloper, displayName: profile?.display_name ?? null };
 }
 
 // A Developer always has every tab, regardless of what's stored — the
