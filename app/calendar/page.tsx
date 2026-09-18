@@ -25,6 +25,18 @@ interface WarrantyVisitRow {
   subcontractors: { company_name: string }[] | null;
 }
 
+interface CalendarEventRow {
+  id: string;
+  project_id: string;
+  title: string;
+  notes: string | null;
+  event_date: string;
+  time_start: string | null;
+  time_end: string | null;
+  created_by: string;
+  projects: { name: string }[] | null;
+}
+
 // Not gated by tab_permissions — same reasoning as /search, this is a
 // utility view over data every visible entry's own RLS already scopes.
 export default async function CalendarPage() {
@@ -35,7 +47,12 @@ export default async function CalendarPage() {
   const currentUser = await getCurrentUser();
   const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
-  const [{ data: projects }, { data: taskRows, error }, { data: visitRows, error: visitsError }] = await Promise.all([
+  const [
+    { data: projects },
+    { data: taskRows, error },
+    { data: visitRows, error: visitsError },
+    { data: eventRows, error: eventsError },
+  ] = await Promise.all([
     supabase.from("projects").select("id, name").order("name"),
     supabase
       .from("tasks")
@@ -56,6 +73,12 @@ export default async function CalendarPage() {
       .not("scheduled_date", "is", null)
       .neq("progress", "complete")
       .order("scheduled_date"),
+    // has_project_access RLS (calendar_events_select, migration 056) scopes
+    // this to constructions the signed-in user actually has access to.
+    supabase
+      .from("calendar_events")
+      .select("id, project_id, title, notes, event_date, time_start, time_end, created_by, projects(name)")
+      .order("event_date"),
   ]);
 
   // Only room tasks carry a real due date anywhere else in this app
@@ -93,7 +116,22 @@ export default async function CalendarPage() {
     href: `/projects/${v.project_id}/warranty-request`,
   }));
 
-  const entries = [...taskEntries, ...visitEntries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const eventEntries: CalendarEntry[] = ((eventRows ?? []) as unknown as CalendarEventRow[]).map((ev) => ({
+    id: `event-${ev.id}`,
+    kind: "event",
+    eventId: ev.id,
+    title: ev.title,
+    dueDate: ev.event_date,
+    timeStart: ev.time_start,
+    timeEnd: ev.time_end,
+    subLabel: ev.projects?.[0]?.name ?? "Untitled construction",
+    notes: ev.notes,
+    createdBy: ev.created_by,
+    projectId: ev.project_id,
+    href: null,
+  }));
+
+  const entries = [...taskEntries, ...visitEntries, ...eventEntries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -126,17 +164,22 @@ export default async function CalendarPage() {
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-blueprint-dark">Calendar</h2>
           <p className="text-sm text-blueprint/50">
-            Every open room task with a due date, plus every scheduled warranty visit (🔧), across every construction
-            you have access to — overdue first, then this week, then everything later. Pick a construction below to
-            narrow it to just that one.
+            Every open room task with a due date, every scheduled warranty visit (🔧), and every meeting or site visit
+            (📅) anyone&apos;s added — across every construction you have access to. Overdue first, then this week,
+            then everything later. Pick a construction below to narrow it to just that one.
           </p>
         </div>
-        {(error || visitsError) && (
+        {(error || visitsError || eventsError) && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load the calendar: {(error ?? visitsError)?.message}
+            Could not load the calendar: {(error ?? visitsError ?? eventsError)?.message}
           </div>
         )}
-        <CalendarClient entries={entries} projects={projects ?? []} />
+        <CalendarClient
+          entries={entries}
+          projects={projects ?? []}
+          currentUserId={currentUser?.id ?? null}
+          canAddEvents={!!currentUser && currentUser.role !== "warranty"}
+        />
       </main>
     </div>
   );

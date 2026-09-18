@@ -2433,3 +2433,35 @@ yet; each one only adds what a given feature needed.
   `scheduled_time_end` to `warranty_item_requests` (no new RLS — the
   existing Contractor/Developer/PM update policy already covers these
   columns) and seeds the new notification action.
+
+## Fix: warranty request file attachments silently dropping
+
+- **"Photos or files" on the Create a Warranty Request form did nothing** —
+  picking a file never showed up in the attached-files list. Cause:
+  `e.target.files` is a *live* `FileList`; it was handed straight into a
+  `setFiles` updater function, but the very next line reset the input's
+  `value`, which in WebKit clears that same live list before React gets
+  around to reading it. Every other file input in the app was unaffected —
+  they all extract the actual `File` object(s) synchronously in the change
+  handler itself rather than deferring through a closure. Fixed by
+  snapshotting into a plain `File[]` array synchronously, before the reset.
+- No migration.
+
+## Manual calendar items (meetings, site visits) + Calendar page updates
+
+- **Calendar previously only showed two machine-generated kinds of dates**
+  (open room task due dates, and — as of the entry above — scheduled
+  warranty visits). There was no way to just write something into it, like
+  a meeting or a site walkthrough. A "+ Add calendar item" button now lets
+  anyone with access to a construction (every role except the read-only
+  'warranty' homeowner role) add one directly: a title, the construction it
+  belongs to, a date, an optional time window, and optional notes.
+- **Visible to everyone assigned to that construction** — same
+  `has_project_access` read boundary every other per-construction table in
+  this app uses, marked with a 📅 in the combined list (🔧 stays for
+  warranty visits). Only whoever added an item (or a Developer) can remove
+  it.
+- **Migration 056** adds the `calendar_events` table (project_id, title,
+  notes, event_date, time_start, time_end, created_by) with RLS: read
+  requires project access, insert requires project access and not the
+  'warranty' role, update/delete requires being the creator or a Developer.

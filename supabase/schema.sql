@@ -618,6 +618,23 @@ create table if not exists notification_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Manually-added calendar items (meetings, site visits, anything that
+-- isn't a room task due date or a warranty visit) — shown on /calendar
+-- alongside those, visible to anyone with access to that construction.
+create table if not exists calendar_events (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  title text not null,
+  notes text,
+  event_date date not null,
+  time_start time,
+  time_end time,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_calendar_events_project on calendar_events (project_id, event_date);
+
 -- Shared subcontractor directory — not scoped to a single project, so
 -- anyone can look up a vetted sub while working any construction. Any
 -- signed-in user can read the whole list (see the RLS policy below); only
@@ -896,6 +913,7 @@ alter table user_tab_permissions enable row level security;
 alter table project_alert_subscriptions enable row level security;
 alter table push_subscriptions enable row level security;
 alter table notification_settings enable row level security;
+alter table calendar_events enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
@@ -1309,6 +1327,27 @@ create policy "notification_settings_select" on notification_settings
   for select using (is_developer());
 create policy "notification_settings_write" on notification_settings
   for all using (is_developer()) with check (is_developer());
+
+-- Same read boundary as everything else scoped to a construction.
+create policy "calendar_events_select" on calendar_events
+  for select using (has_project_access(project_id));
+
+-- Everyone with access to the construction can add one, except the
+-- 'warranty' role — view-only everywhere outside its own request queue,
+-- same carve-out as requireCanManageWarrantyItems.
+create policy "calendar_events_insert" on calendar_events
+  for insert with check (
+    has_project_access(project_id)
+    and not exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'warranty')
+  );
+
+-- Only whoever added an item (or a Developer) can edit or remove it.
+create policy "calendar_events_update" on calendar_events
+  for update using (created_by = auth.uid() or is_developer())
+  with check (created_by = auth.uid() or is_developer());
+
+create policy "calendar_events_delete" on calendar_events
+  for delete using (created_by = auth.uid() or is_developer());
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,

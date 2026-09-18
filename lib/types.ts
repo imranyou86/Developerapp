@@ -335,6 +335,20 @@ export interface WarrantyItemRequest {
   created_at: string;
 }
 
+// A manually-added calendar item (meeting, site visit, anything that isn't
+// a room task due date or a warranty visit) — see app/calendar/actions.ts.
+export interface CalendarEvent {
+  id: string;
+  project_id: string;
+  title: string;
+  notes: string | null;
+  event_date: string;
+  time_start: string | null;
+  time_end: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 // A running comment/notes thread Contractor/Developer/PM keep on a
 // warranty request — the 'warranty' role who filed it can watch this
 // change but never post. sender_email is denormalized at write time, same
