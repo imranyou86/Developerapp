@@ -2082,3 +2082,24 @@ yet; each one only adds what a given feature needed.
   `chat-client.tsx` already had (one event per deleted row), so no new
   Realtime wiring was needed. `app/projects/[id]/chat/page.tsx` now also
   fetches `getCurrentUser()` to pass `isDeveloper` down to `ChatClient`.
+
+## One-time welcome animation after login
+
+- **A "Welcome to Alaia Homes" overlay shows once, right after a real
+  sign-in** — never on an ordinary page load or refresh of `/projects`.
+  New `components/WelcomeOverlay.tsx`: a full-screen animated splash
+  (backdrop `animate-fade-in`, card `animate-scale-in`, heading/message/
+  button staggered with `animate-fade-in-up` + `animationDelay`, same
+  tokens the rest of the app already uses) with the app's logo and a
+  message about managing plans, budgets, checklists, payments, and the
+  whole team in one place. Auto-dismisses after 6 seconds, or on a click
+  anywhere (backdrop or the "Let's get started" button).
+  - Triggered by a one-shot `?welcome=1` query flag, not a persisted
+    "seen it before" flag — set right before the redirect to `/projects`
+    on every successful sign-in path: the password login's client-side
+    `window.location.href` in `app/login/page.tsx`, and the magic-link/
+    sign-up server-side `redirect()` in `app/auth/confirm/route.ts`.
+    `app/projects/page.tsx` reads it via its `searchParams` prop and
+    passes `show` to `WelcomeOverlay`, which immediately strips the flag
+    from the URL (`router.replace(pathname)`) so refreshing the same page
+    never re-triggers it.

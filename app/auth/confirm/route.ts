@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
     const supabase = createClient();
     const { error } = await supabase.auth.verifyOtp({ type, token_hash });
     if (!error) {
-      redirect(next);
+      // Same one-time welcome-overlay flag the password login path sets —
+      // see app/login/page.tsx and components/WelcomeOverlay.tsx.
+      const separator = next.includes("?") ? "&" : "?";
+      redirect(`${next}${separator}welcome=1`);
     }
   }
 

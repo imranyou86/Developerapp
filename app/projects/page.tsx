@@ -2,12 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { ProjectsClient, type ProjectSummary } from "@/app/projects/projects-client";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
+import { WelcomeOverlay } from "@/components/WelcomeOverlay";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({ searchParams }: { searchParams: { welcome?: string } }) {
   const supabase = createClient();
   const {
     data: { user },
@@ -54,6 +55,7 @@ export default async function ProjectsPage() {
 
   return (
     <div className="min-h-screen bg-concrete">
+      <WelcomeOverlay show={searchParams.welcome === "1"} />
       <header className="border-b border-blueprint/10 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">

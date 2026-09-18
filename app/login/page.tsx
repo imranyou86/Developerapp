@@ -67,7 +67,12 @@ function LoginForm() {
       setStatus({ kind: "error", message: error.message });
       return;
     }
-    window.location.href = next;
+    // A one-time welcome overlay (components/WelcomeOverlay.tsx, rendered
+    // from app/projects/page.tsx) reads this query flag on landing and
+    // strips it right away, so it only ever shows immediately after a
+    // real sign-in, never on an ordinary page load/refresh.
+    const separator = next.includes("?") ? "&" : "?";
+    window.location.href = `${next}${separator}welcome=1`;
   }
 
   return (
