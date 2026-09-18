@@ -2304,3 +2304,23 @@ yet; each one only adds what a given feature needed.
 - New env vars (see `.env.example`): `NEXT_PUBLIC_VAPID_PUBLIC_KEY`,
   `VAPID_PRIVATE_KEY`, optional `VAPID_SUBJECT`. Generate a keypair with
   `npx web-push generate-vapid-keys`.
+
+## Warranty request submitted: notifies Contractor/Developer directly, push suppresses email
+
+- **A new warranty item request now always notifies the Contractor(s) and
+  Developer(s) on that construction**, regardless of whether they've
+  opted into "Get alerts" — a request awaiting review isn't optional the
+  way a general project update is. New `notifyProjectRoles(projectId,
+  roles, ...)` in `lib/alerts.ts` finds every account with a matching
+  `profiles.role` that actually has access to that specific construction
+  (its owner, a `project_members` row on it, or any Developer — a
+  Developer always has access to everything). `requestWarrantyItem`
+  (`app/projects/[id]/warranty-request/actions.ts`) now calls this
+  instead of the general opt-in `notifyProjectSubscribers`, narrowed to
+  just `contractor`/`developer` (not PM).
+- **When push is enabled, email is suppressed for that person** — both
+  `notifyProjectSubscribers` and `notifyProjectRoles` now share one
+  delivery path (`deliverAlert`) that checks each recipient for an
+  enabled push subscription first; only recipients with none still get
+  the email. No more double notification once you've turned push on.
+- No migration — this only changes how existing tables are queried.

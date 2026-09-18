@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
-import { notifyProjectSubscribers } from "@/lib/alerts";
+import { notifyProjectSubscribers, notifyProjectRoles } from "@/lib/alerts";
 import { logActivity } from "@/lib/activityLog";
 import type { WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 
@@ -478,9 +478,16 @@ export async function requestWarrantyItem(
   });
   if (error) return { ok: false, error: error.message };
 
-  await notifyProjectSubscribers(projectId, {
+  // Goes only to whoever can actually act on it (REQUEST_DELETE_ROLES'
+  // contractor/developer, not PM — those are the ones the warranty tab's
+  // "approve" flow gates on for delete; approve/reject also allows PM, but
+  // this notice is intentionally narrower), and to all of them on this
+  // construction regardless of whether they've opted into "Get alerts" —
+  // a new request needing review isn't optional the way a general project
+  // update is.
+  await notifyProjectRoles(projectId, REQUEST_DELETE_ROLES, {
     subject: "New warranty item request",
-    body: `A warranty item was requested${category ? ` (${category})` : ""}: "${title.trim()}" — awaiting Contractor/Developer/PM approval.`,
+    body: `A warranty item was requested${category ? ` (${category})` : ""}: "${title.trim()}" — awaiting your approval.`,
     excludeUserId: user.id,
   });
 
