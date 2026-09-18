@@ -2215,3 +2215,21 @@ yet; each one only adds what a given feature needed.
   bulk actions changed — same select-all, mark-done/paid, and
   delete-selected behavior — just one checkbox doing one job at a time
   instead of two checkboxes always showing side by side.
+
+## Per-project Activity tab
+
+- **The `activity_log` audit trail (recorded since migration 038) never
+  had anywhere to actually view it.** Added a new "Activity" tab, visible
+  to every role except `warranty` (same visibility rule as the
+  management-facing tabs), that lists the highest-stakes actions on a
+  construction — bid accept/decline/delete, warranty item/request
+  delete/approve/reject, removing a team member, revoking an invite, and
+  file deletes — newest first.
+- **Migration 052** adds `activity_log.actor_name`, a denormalized display
+  name/email captured at write time (same reasoning as
+  `project_messages.sender_name` — `profiles_select`'s RLS only lets a
+  user read their own row, so the tab can't resolve another member's name
+  via a live join), and the usual `tab_permissions`/`user_tab_permissions`
+  row for a new tab. `lib/activityLog.ts`'s `logActivity` now looks the
+  actor's name up itself (using the caller's own session, reading their
+  own profile row) rather than requiring every call site to pass it in.

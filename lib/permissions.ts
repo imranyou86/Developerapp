@@ -35,6 +35,7 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "house-book", label: "House Book" },
   { slug: "chat", label: "Chat" },
   { slug: "warranty-request", label: "Warranty Request" },
+  { slug: "activity", label: "Activity" },
 ];
 
 // Top-level (not per-project) sections gated the same way as project tabs.

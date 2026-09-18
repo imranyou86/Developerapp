@@ -280,6 +280,22 @@ export interface ProjectMessage {
   created_at: string;
 }
 
+export interface ActivityLogEntry {
+  id: string;
+  project_id: string;
+  user_id: string | null;
+  // Denormalized display name (or email) at write time, same reasoning as
+  // ProjectMessage.sender_name — profiles_select only lets a user read
+  // their own row, so a live join to resolve another member's name
+  // wouldn't work here. Null on a row logged before this column existed.
+  actor_name: string | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
 export interface ProjectAlertSubscription {
   id: string;
   project_id: string;

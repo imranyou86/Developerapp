@@ -482,7 +482,7 @@ create table if not exists profiles (
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
   role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request', 'activity')),
   allowed boolean not null default true,
   primary key (role, tab)
 );
@@ -498,7 +498,7 @@ create table if not exists tab_permissions (
 -- same invariant as tab_permissions.
 create table if not exists user_tab_permissions (
   user_id uuid not null references auth.users (id) on delete cascade,
-  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request')),
+  tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request', 'activity')),
   allowed boolean not null,
   primary key (user_id, tab)
 );
@@ -684,6 +684,11 @@ create table if not exists activity_log (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   user_id uuid references auth.users (id) on delete set null,
+  -- Denormalized display name/email at write time (see lib/activityLog.ts)
+  -- — profiles_select only lets a user read their own row, so the
+  -- per-project Activity tab can't resolve another member's name via a
+  -- live join.
+  actor_name text,
   action text not null,
   entity_type text,
   entity_id text,
@@ -754,7 +759,7 @@ select r.role, t.tab, case
   else true
 end
 from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty')) as r(role)
-cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request')) as t(tab)
+cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request'), ('activity')) as t(tab)
 on conflict (role, tab) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
