@@ -8,16 +8,17 @@ import {
 } from "@/app/projects/[id]/warranty-request/warranty-request-client";
 import type { WarrantyItemRequest, WarrantyItemRequestComment } from "@/lib/types";
 
-// Read-only tracking for the 'warranty' role's own filed requests —
+// Read-only tracking for the 'warranty' role — every request filed on this
+// construction, not just ones this account filed itself (see migration
+// 058: two warranty accounts on the same construction share one queue),
 // organized into the same trade sections the Contractor/Developer/PM
 // dashboard uses (GroupedRequestCards), showing status, progress, assigned
 // subcontractor, and the comment thread a Contractor/Developer/PM leaves on
-// each one, plus the ability to attach more evidence to a request already
-// filed (WarrantyRequestCard's "+ Attach report" is unconditional, matching
-// addInspectionReport's own carve-out for the account that filed the
-// request). Every mutation handler besides the upload one is a no-op —
-// canManageRequests=false already hides every control that would call
-// them, so they're never actually invoked from here.
+// each one, plus the ability to attach more evidence to any request here
+// (WarrantyRequestCard's "+ Attach report" is unconditional). Every
+// mutation handler besides the upload one is a no-op — canManageRequests=
+// false already hides every control that would call them, so they're never
+// actually invoked from here.
 export function MyWarrantyRequests({
   projectId,
   requests,
@@ -41,8 +42,8 @@ export function MyWarrantyRequests({
 
   return (
     <div className="card p-5">
-      <h2 className="mb-1 font-semibold text-blueprint-dark">Your Warranty Requests</h2>
-      <p className="mb-4 text-sm text-blueprint/60">Here&apos;s what you&apos;ve filed and where it stands.</p>
+      <h2 className="mb-1 font-semibold text-blueprint-dark">Warranty Requests</h2>
+      <p className="mb-4 text-sm text-blueprint/60">Everything filed for this construction and where it stands.</p>
       <GroupedRequestCards
         projectId={projectId}
         requests={requests}

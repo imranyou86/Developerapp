@@ -855,9 +855,9 @@ export async function setWarrantyRequestSchedule(
 }
 
 // Comments/notes on a request — Contractor/Developer/PM can post (enforced
-// in RLS too, see warranty_item_request_comments_insert), the 'warranty'
-// role who filed it can only read them (its own request only, per
-// can_view_warranty_request).
+// in RLS too, see warranty_item_request_comments_insert); a 'warranty'
+// account can only read them, for any request on a construction it's
+// assigned to (per can_view_warranty_request — see migration 058).
 export async function addWarrantyRequestComment(
   projectId: string,
   requestId: string,

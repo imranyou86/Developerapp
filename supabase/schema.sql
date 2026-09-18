@@ -959,9 +959,11 @@ as $$
 $$;
 
 -- Security definer so it can be called from warranty_item_requests' own
--- select policy without recursing back through it. A 'warranty' role only
--- ever sees a request it filed itself; every other role with project
--- access sees all of them.
+-- select policy without recursing back through it. Visibility is purely
+-- "assigned to this construction" (has_project_access) — same boundary
+-- every other role already has — not "this is the specific account that
+-- filed it" (see migration 058): two 'warranty' accounts on the same
+-- construction see the exact same shared queue.
 create or replace function can_view_warranty_request(rid uuid)
 returns boolean
 language sql
@@ -973,10 +975,6 @@ as $$
     select 1 from warranty_item_requests r
     where r.id = rid
     and has_project_access(r.project_id)
-    and (
-      r.requested_by = auth.uid()
-      or not exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'warranty')
-    )
   );
 $$;
 

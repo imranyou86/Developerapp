@@ -17,18 +17,21 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
   const viewerRole = currentUser?.role ?? "owner";
 
   // The 'warranty' role gets a single-purpose submission form plus a
-  // read-only view of its own filed requests — not the Contractor/
-  // Developer/PM tracking dashboard below (no other warranty account's
-  // requests, no checklist, no editing controls). Branching here (not just
-  // hiding sections client-side) means the full-project data queried below
-  // is never sent to this viewer in the first place.
+  // shared, read-only view of every warranty request on this construction
+  // — not just the ones this specific account filed (see migration 058:
+  // visibility is "assigned to this construction with this role," the same
+  // boundary every other role already has, not "this is the account that
+  // filed it" — so two warranty accounts on the same construction see the
+  // exact same queue) — and not the Contractor/Developer/PM tracking
+  // dashboard below (no checklist, no editing controls). Branching here
+  // (not just hiding sections client-side) means that dashboard's data is
+  // never sent to this viewer in the first place.
   if (viewerRole === "warranty") {
     const supabase = createClient();
     const { data: requests, error: requestsError } = await supabase
       .from("warranty_item_requests")
       .select(REQUEST_COLUMNS)
       .eq("project_id", params.id)
-      .eq("requested_by", currentUser?.id ?? "")
       .order("created_at", { ascending: false });
 
     const requestIds = (requests ?? []).map((r) => r.id);
@@ -40,20 +43,19 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
             .in("request_id", requestIds)
             .order("created_at", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
-      // By who uploaded it, not by request attachment — a report uploaded
-      // for AI extraction (WarrantyInspectionUpload) has no
+      // Every report on this construction, not just this account's own
+      // uploads — same shared-visibility reasoning as requests above. A
+      // report uploaded for AI extraction (WarrantyInspectionUpload) has no
       // warranty_item_request_id at all until (if ever) manually attached,
-      // so scoping to requestIds alone would hide it from the very account
-      // that just uploaded it.
+      // so this can't be scoped through requestIds either.
       supabase
         .from("inspection_reports")
         .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
-        .eq("project_id", params.id)
-        .eq("created_by", currentUser?.id ?? ""),
+        .eq("project_id", params.id),
     ]);
 
-    // Resolved by whatever subcontractor_id is actually assigned to one of
-    // this account's own requests — not by project_subcontractors links —
+    // Resolved by whatever subcontractor_id is actually assigned to any
+    // request on this construction — not by project_subcontractors links —
     // since a Contractor/Developer/PM can now assign any subcontractor
     // from the shared directory, not just ones already linked to this
     // project.
@@ -75,7 +77,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
         <CreateWarrantyRequestForm projectId={params.id} />
         {(requestsError || commentsError) && (
           <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load your requests: {(requestsError ?? commentsError)?.message}
+            Could not load warranty requests: {(requestsError ?? commentsError)?.message}
           </div>
         )}
         <MyWarrantyRequests

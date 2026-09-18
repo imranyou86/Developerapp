@@ -2511,3 +2511,22 @@ yet; each one only adds what a given feature needed.
   `requested_by` to someone else when filing on their behalf (verified
   server-side against that project's actual warranty members — see
   `resolveRequester` in `app/projects/[id]/warranty-request/actions.ts`).
+
+## Warranty visibility: shared by role + construction, not by individual account
+
+- **A 'warranty' account previously only saw the requests it personally
+  filed** — every other role already saw everything on a construction it
+  had access to, regardless of who created it. Two homeowners (or a
+  homeowner and a property manager) both assigned as 'warranty' on the same
+  construction would each see only their own half of the picture. Fixed so
+  a 'warranty' account now sees every warranty request, comment, and
+  inspection report on a construction it's assigned to — the same
+  "assigned to this construction" boundary every other role already has,
+  not "this is the specific account that filed it." Filing is still
+  per-account (each person's own submissions are attributed to them), only
+  *visibility* changed.
+- **Migration 058** replaces `can_view_warranty_request`'s definition
+  (`requested_by = auth.uid() or caller isn't 'warranty'`) with a plain
+  `has_project_access(project_id)` check — no new tables or policies, this
+  is the one function every warranty-scoped RLS policy and read query
+  already goes through.
