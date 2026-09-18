@@ -2233,3 +2233,24 @@ yet; each one only adds what a given feature needed.
   row for a new tab. `lib/activityLog.ts`'s `logActivity` now looks the
   actor's name up itself (using the caller's own session, reading their
   own profile row) rather than requiring every call site to pass it in.
+
+## Global search
+
+- **New "Search" link in the top nav** (`/search`) — a single box that
+  searches across every construction you have access to at once: the
+  constructions themselves, checklist items, warranty items, rooms, room
+  tasks, bids, payment schedule lines, subcontractors, and Buyers Guide
+  deals. Debounced as you type, results grouped by category, each one a
+  direct link to the tab it lives on.
+- `app/api/search/route.ts` queries each table with the caller's own
+  session client, not the admin client — every table's existing RLS
+  (`has_project_access`, subcontractors' shared-directory policy, deals'
+  `auth.uid() = user_id`) already scopes results to exactly what that
+  user can see, so there's no separate authorization step needed. A
+  multi-column match (constructions by name/address, subcontractors by
+  company/trade/contact) runs as separate per-column queries merged by
+  id rather than a single `.or(...)` filter — `.or()` takes one PostgREST
+  filter string where commas separate conditions, so a search term
+  containing a literal comma would otherwise corrupt that string and
+  silently break the filter.
+- No new tables or migration — this only reads what already exists.
