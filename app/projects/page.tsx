@@ -3,6 +3,7 @@ import { ProjectsClient, type ProjectSummary } from "@/app/projects/projects-cli
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
+import { PushNotificationToggle } from "@/components/PushNotificationToggle";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
@@ -65,11 +66,14 @@ export default async function ProjectsPage({ searchParams }: { searchParams: { w
               <p className="text-xs text-blueprint/50">{user?.email}</p>
             </div>
           </div>
-          <form action="/auth/signout" method="post">
-            <button type="submit" className="btn-ghost">
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <PushNotificationToggle />
+            <form action="/auth/signout" method="post">
+              <button type="submit" className="btn-ghost">
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
         <TopNav
           showAdmin={currentUser?.isDeveloper}

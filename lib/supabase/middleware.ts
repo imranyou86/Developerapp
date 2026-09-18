@@ -21,10 +21,20 @@ export async function updateSession(request: NextRequest) {
   // and getting redirected straight back to /projects before the route
   // handler ever ran — supabase.auth.signOut() never executed, so sign-out
   // silently did nothing.
+  //
+  // /manifest.json and /sw.js need the same bypass for a different reason:
+  // the root layout's <link rel="manifest"> means every page — including
+  // the logged-out /login screen — has the browser fetch these on its own,
+  // and the root middleware.ts matcher only excludes image extensions, not
+  // .json/.js, so without this they'd get redirected to /login instead of
+  // served, breaking "Add to Home Screen" and service worker registration
+  // for anyone not already authenticated in that exact request.
   if (
     request.nextUrl.pathname.startsWith("/share") ||
     request.nextUrl.pathname.startsWith("/api/alerts/unsubscribe") ||
-    request.nextUrl.pathname.startsWith("/auth/signout")
+    request.nextUrl.pathname.startsWith("/auth/signout") ||
+    request.nextUrl.pathname === "/manifest.json" ||
+    request.nextUrl.pathname === "/sw.js"
   ) {
     return NextResponse.next({ request });
   }

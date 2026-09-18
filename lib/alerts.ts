@@ -14,6 +14,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/email";
 import { getSiteOrigin } from "@/lib/site";
+import { isPushConfigured, sendPush } from "@/lib/webPush";
 
 export async function notifyProjectSubscribers(
   projectId: string,
@@ -65,7 +66,54 @@ export async function notifyProjectSubscribers(
         }).catch((err) => console.warn(`notifyProjectSubscribers: failed to email ${s.email}:`, err));
       })
     );
+
+    // Push is opt-in per device (enabling it has nothing to do with this
+    // project alert subscription), so this only ever reaches someone who's
+    // both subscribed to this project's alerts AND separately enabled push
+    // on at least one browser. Silently skipped whenever VAPID keys aren't
+    // configured, same as email silently no-ops without RESEND_API_KEY.
+    if (isPushConfigured()) {
+      await notifyPushSubscribers(admin, recipients.map((s) => s.user_id), {
+        title: projectName,
+        body: options.body.slice(0, 180),
+        url: origin ? `${origin}/projects/${projectId}` : undefined,
+      });
+    }
   } catch (err) {
     console.warn("notifyProjectSubscribers failed (non-fatal):", err);
+  }
+}
+
+async function notifyPushSubscribers(
+  admin: ReturnType<typeof createAdminClient>,
+  userIds: string[],
+  payload: { title: string; body: string; url?: string }
+): Promise<void> {
+  const { data: subs, error } = await admin
+    .from("push_subscriptions")
+    .select("id, endpoint, p256dh, auth_key")
+    .in("user_id", userIds);
+  if (error) {
+    console.warn("notifyPushSubscribers: could not read subscriptions:", error.message);
+    return;
+  }
+  if (!subs || subs.length === 0) return;
+
+  const goneIds: string[] = [];
+  await Promise.all(
+    subs.map(async (sub) => {
+      const result = await sendPush(sub, payload);
+      if (!result.ok) {
+        if (result.gone) goneIds.push(sub.id);
+        else console.warn(`notifyPushSubscribers: failed to push to subscription ${sub.id}:`, result.error);
+      }
+    })
+  );
+
+  // A gone subscription (the browser/OS permanently invalidated it) will
+  // never succeed again — clean it up so future dispatches stop paying for
+  // the failed attempt.
+  if (goneIds.length > 0) {
+    await admin.from("push_subscriptions").delete().in("id", goneIds);
   }
 }

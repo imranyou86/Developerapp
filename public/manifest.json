@@ -1,0 +1,14 @@
+{
+  "name": "Alaia Homes Dev",
+  "short_name": "Alaia Homes",
+  "description": "Construction project management for home developers.",
+  "start_url": "/projects",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F4F7F6",
+  "theme_color": "#1D63C4",
+  "icons": [
+    { "src": "/icon.png", "sizes": "420x420", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

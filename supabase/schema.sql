@@ -585,6 +585,19 @@ create table if not exists project_alert_subscriptions (
   unique (project_id, user_id)
 );
 
+-- Web Push subscriptions — one row per browser/device a user has enabled
+-- notifications on. Dispatch (lib/webPush.ts, called from lib/alerts.ts
+-- alongside the existing email alert) reads these via the service-role
+-- admin client, same reasoning as project_alert_subscriptions above.
+create table if not exists push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth_key text not null,
+  created_at timestamptz not null default now()
+);
+
 -- Shared subcontractor directory — not scoped to a single project, so
 -- anyone can look up a vetted sub while working any construction. Any
 -- signed-in user can read the whole list (see the RLS policy below); only
@@ -727,6 +740,7 @@ create index if not exists idx_project_invites_project on project_invites (proje
 create index if not exists idx_project_invites_token on project_invites (token);
 create index if not exists idx_project_messages_project on project_messages (project_id, created_at);
 create index if not exists idx_project_alert_subscriptions_project on project_alert_subscriptions (project_id);
+create index if not exists idx_push_subscriptions_user on push_subscriptions (user_id);
 create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
 create index if not exists idx_subcontractors_company_name on subcontractors (company_name);
 create index if not exists idx_project_subcontractors_project on project_subcontractors (project_id);
@@ -843,6 +857,7 @@ alter table project_messages enable row level security;
 alter table project_chat_reads enable row level security;
 alter table user_tab_permissions enable row level security;
 alter table project_alert_subscriptions enable row level security;
+alter table push_subscriptions enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
@@ -1237,6 +1252,16 @@ create policy "project_alert_subscriptions_select" on project_alert_subscription
 create policy "project_alert_subscriptions_insert" on project_alert_subscriptions
   for insert with check (has_project_access(project_id) and auth.uid() = user_id);
 create policy "project_alert_subscriptions_delete" on project_alert_subscriptions
+  for delete using (auth.uid() = user_id);
+
+-- Same self-service-only shape as project_alert_subscriptions above — push
+-- dispatch reads every user's subscriptions via the service-role admin
+-- client, bypassing RLS entirely.
+create policy "push_subscriptions_select" on push_subscriptions
+  for select using (auth.uid() = user_id);
+create policy "push_subscriptions_insert" on push_subscriptions
+  for insert with check (auth.uid() = user_id);
+create policy "push_subscriptions_delete" on push_subscriptions
   for delete using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------

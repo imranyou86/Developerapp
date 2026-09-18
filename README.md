@@ -2267,3 +2267,40 @@ yet; each one only adds what a given feature needed.
   aggregates; each row links back to that construction's Rooms tab.
 - No migration — read-only against the existing `tasks` table, scoped by
   its existing RLS the same way every other query in the app is.
+
+## PWA + Web Push notifications
+
+- **The app is now installable** — `public/manifest.json` (name, icons,
+  standalone display, brand theme color) and `app/layout.tsx`'s new
+  `manifest`/`appleWebApp`/`viewport` metadata mean "Add to Home Screen"
+  on mobile (and desktop Chrome's install prompt) gives it its own icon
+  and a standalone window with no browser chrome, the way a native app
+  would look.
+- **"Enable notifications" on the Constructions page**
+  (`components/PushNotificationToggle.tsx`) registers `public/sw.js` and
+  subscribes the browser to Web Push, saving the subscription via
+  `app/push/actions.ts`. Renders nothing if the server has no VAPID key
+  configured or the browser doesn't support Push (notably Safari on iOS
+  before 16.4, and only once added to the home screen even after).
+- **Push rides alongside the existing email alert**, not instead of it —
+  `lib/alerts.ts`'s `notifyProjectSubscribers` (already the one place
+  every chat/checklist/warranty notification funnels through) now also
+  pushes to every recipient's enabled devices, using `lib/webPush.ts`.
+  Getting push still requires being subscribed to that construction's
+  alerts in the first place — enabling push on a device doesn't change
+  who gets notified about what, only how they're reached.
+- **Migration 053** adds `push_subscriptions` (one row per browser/device),
+  RLS-scoped to its own owner for self-service, read via the service-role
+  admin client for dispatch — same shape as `project_alert_subscriptions`.
+- A 404/410 from a push send means the browser/OS permanently invalidated
+  that subscription (uninstalled, permission revoked) — those rows get
+  deleted automatically rather than retried forever.
+- `lib/supabase/middleware.ts` also had to add `/manifest.json` and
+  `/sw.js` to its early-bypass list: the root layout's manifest link
+  means the browser fetches both on every page load, including the
+  logged-out `/login` screen, and the root `middleware.ts` matcher only
+  excludes image extensions — without this bypass both were getting
+  redirected to `/login` instead of served.
+- New env vars (see `.env.example`): `NEXT_PUBLIC_VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY`, optional `VAPID_SUBJECT`. Generate a keypair with
+  `npx web-push generate-vapid-keys`.
