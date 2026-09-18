@@ -278,6 +278,17 @@ create table if not exists warranty_item_requests (
   scheduled_date date,
   scheduled_time_start time,
   scheduled_time_end time,
+  -- Set when a Contractor/Developer/PM rejects the request — shown to the
+  -- homeowner who filed it.
+  rejection_note text,
+  -- Groups multiple tasks filed under one trade into a single ticket (e.g.
+  -- "Electrical" with 4 tasks inside it, each approved/rejected on its own,
+  -- sharing one subcontractor/schedule instead of needing 4 separate
+  -- requests) — see migration 057 for the full reasoning. is_group=true
+  -- marks a parent row; group_id on a task row points back to its parent
+  -- and stays null for an ordinary standalone single-issue request.
+  is_group boolean not null default false,
+  group_id uuid references warranty_item_requests (id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
@@ -763,6 +774,7 @@ create index if not exists idx_checklist_photos_item on checklist_photos (checkl
 create index if not exists idx_inspection_reports_project on inspection_reports (project_id, created_at desc);
 create index if not exists idx_inspection_reports_checklist_item on inspection_reports (checklist_item_id);
 create index if not exists idx_warranty_item_requests_project on warranty_item_requests (project_id, status, created_at);
+create index if not exists idx_warranty_item_requests_group on warranty_item_requests (group_id);
 create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
 create index if not exists idx_project_shares_project on project_shares (project_id);
@@ -1133,14 +1145,24 @@ create policy "inspection_reports_member" on inspection_reports
 create policy "warranty_item_requests_select" on warranty_item_requests
   for select using (can_view_warranty_request(id));
 
--- No has_project_access() check here (see migration 048) — extensively
--- verified correct in isolation, but real inserts kept failing with the
--- same RLS violation across multiple accounts with no root cause found.
--- auth.uid() = requested_by still stands, so no one can file a request
--- pretending to be another account; it just no longer requires that account
--- to actually be a member of the project it's filing against.
+-- Self-filing (auth.uid() = requested_by) needs no has_project_access()
+-- check (see migration 048) — extensively verified correct in isolation,
+-- but real inserts kept failing with the same RLS violation across
+-- multiple accounts with no root cause found, so that check was dropped
+-- for this branch specifically; requested_by still has to be the filer's
+-- own id, so no one can pretend to be another account this way.
+-- The second branch (migration 057) is the one deliberate exception: a
+-- Contractor/Developer/PM with project access can set requested_by to a
+-- different user, to file "on behalf of" a homeowner who doesn't know how
+-- to use the form themselves (see requestWarrantyItems' onBehalfOfUserId).
 create policy "warranty_item_requests_insert" on warranty_item_requests
-  for insert with check (auth.uid() = requested_by);
+  for insert with check (
+    auth.uid() = requested_by
+    or (
+      has_project_access(warranty_item_requests.project_id)
+      and exists (select 1 from profiles p where p.id = auth.uid() and p.role in ('contractor', 'developer', 'pm'))
+    )
+  );
 
 create policy "warranty_item_requests_update" on warranty_item_requests
   for update using (

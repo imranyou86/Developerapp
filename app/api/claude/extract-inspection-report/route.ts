@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { enforceRateLimit } from "@/lib/rateLimit";
 import { getAnthropicClient, CLAUDE_MODEL, extractJson, fetchImageForClaude } from "@/lib/anthropic";
+import { WARRANTY_REQUEST_CATEGORIES } from "@/lib/warrantyRequestCategories";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -9,6 +10,7 @@ export const maxDuration = 60;
 interface ExtractedFinding {
   title: string;
   detail: string | null;
+  category: string | null;
 }
 
 interface ExtractInspectionReportResult {
@@ -31,13 +33,16 @@ For each item:
 - "detail": any extra context worth keeping as a note — severity, the inspector's
   recommendation, a code reference, measurements. Use null if there's nothing beyond the
   title worth keeping.
+- "category": which trade would fix this — exactly one of: ${WARRANTY_REQUEST_CATEGORIES.join(", ")}.
+  Pick the closest match (e.g. a cracked tile is "Flooring", a GFCI outlet is "Electrical", a
+  water heater is "Plumbing"). Use "Other" only when nothing else reasonably fits.
 
 Do not include passed/satisfactory items, general observations with no action needed, or
 boilerplate report text (cover pages, inspector credentials, disclaimers). If the same
 issue is mentioned in a summary AND in a detail section, list it once.
 
 Respond with ONLY a JSON object matching this shape exactly:
-{ "items": [{ "title": string, "detail": string | null }] }
+{ "items": [{ "title": string, "detail": string | null, "category": string }] }
 If no actionable issues are found, respond with { "items": [] }.`;
 
 export async function POST(req: Request) {

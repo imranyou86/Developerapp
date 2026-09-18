@@ -1,9 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { signRowsUrl } from "@/lib/storage";
 import { getCurrentUser } from "@/lib/permissions-server";
-import { WarrantyRequestClient } from "@/app/projects/[id]/warranty-request/warranty-request-client";
+import { WarrantyRequestClient, type WarrantyMemberOption } from "@/app/projects/[id]/warranty-request/warranty-request-client";
 import { CreateWarrantyRequestForm } from "@/app/projects/[id]/warranty-request/create-warranty-request-form";
+import { WarrantyInspectionUpload } from "@/app/projects/[id]/warranty-request/warranty-inspection-upload";
 import { MyWarrantyRequests } from "@/app/projects/[id]/warranty-request/my-warranty-requests";
+
+const REQUEST_COLUMNS =
+  "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, rejection_note, is_group, group_id, created_at";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +26,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
     const supabase = createClient();
     const { data: requests, error: requestsError } = await supabase
       .from("warranty_item_requests")
-      .select(
-        "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, created_at"
-      )
+      .select(REQUEST_COLUMNS)
       .eq("project_id", params.id)
       .eq("requested_by", currentUser?.id ?? "")
       .order("created_at", { ascending: false });
@@ -37,12 +40,16 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
             .in("request_id", requestIds)
             .order("created_at", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
-      requestIds.length > 0
-        ? supabase
-            .from("inspection_reports")
-            .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
-            .in("warranty_item_request_id", requestIds)
-        : Promise.resolve({ data: [] }),
+      // By who uploaded it, not by request attachment — a report uploaded
+      // for AI extraction (WarrantyInspectionUpload) has no
+      // warranty_item_request_id at all until (if ever) manually attached,
+      // so scoping to requestIds alone would hide it from the very account
+      // that just uploaded it.
+      supabase
+        .from("inspection_reports")
+        .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
+        .eq("project_id", params.id)
+        .eq("created_by", currentUser?.id ?? ""),
     ]);
 
     // Resolved by whatever subcontractor_id is actually assigned to one of
@@ -64,6 +71,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
 
     return (
       <div className="mx-auto max-w-lg space-y-6">
+        <WarrantyInspectionUpload projectId={params.id} />
         <CreateWarrantyRequestForm projectId={params.id} />
         {(requestsError || commentsError) && (
           <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -97,13 +105,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
         .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
         .eq("project_id", params.id)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("warranty_item_requests")
-        .select(
-          "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, created_at"
-        )
-        .eq("project_id", params.id)
-        .order("created_at", { ascending: false }),
+      supabase.from("warranty_item_requests").select(REQUEST_COLUMNS).eq("project_id", params.id).order("created_at", { ascending: false }),
     ]);
 
   const requestIds = (requests ?? []).map((r) => r.id);
@@ -113,7 +115,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
   // read the whole directory) — a Contractor/Developer/PM fixing a
   // warranty item may want to bring in a sub who hasn't worked this
   // construction before.
-  const [{ data: comments, error: commentsError }, { data: subcontractors }] = await Promise.all([
+  const [{ data: comments, error: commentsError }, { data: subcontractors }, { data: warrantyMemberRows }] = await Promise.all([
     requestIds.length > 0
       ? supabase
           .from("warranty_item_request_comments")
@@ -122,7 +124,25 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
     supabase.from("subcontractors").select("id, company_name, contact_name, trade, phone, email").order("company_name"),
+    // project_members_select's RLS (has_project_access) already scopes this
+    // to a project the viewer actually belongs to.
+    supabase.from("project_members").select("user_id").eq("project_id", params.id).eq("role", "warranty"),
   ]);
+
+  // profiles_select only lets a user read their own row, so the warranty
+  // members' email/display name (for the "File on behalf of" picker) can't
+  // be resolved via the caller's own session — the admin client bypasses
+  // that, scoped here to exactly the ids project_members_select already
+  // confirmed belong to this project.
+  const warrantyUserIds = (warrantyMemberRows ?? []).map((m) => m.user_id);
+  const warrantyMembers: WarrantyMemberOption[] =
+    warrantyUserIds.length > 0
+      ? await createAdminClient()
+          .from("profiles")
+          .select("id, email, display_name")
+          .in("id", warrantyUserIds)
+          .then(({ data }) => (data ?? []).map((p) => ({ id: p.id, email: p.email, displayName: p.display_name })))
+      : [];
 
   const [signedItems, signedReports] = await Promise.all([
     Promise.all(
@@ -148,6 +168,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
         initialRequests={requests ?? []}
         initialComments={comments ?? []}
         subcontractors={subcontractors ?? []}
+        warrantyMembers={warrantyMembers}
         viewerRole={viewerRole}
         currentUserId={currentUser?.id ?? null}
       />

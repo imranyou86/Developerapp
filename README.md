@@ -2465,3 +2465,49 @@ yet; each one only adds what a given feature needed.
   notes, event_date, time_start, time_end, created_by) with RLS: read
   requires project access, insert requires project access and not the
   'warranty' role, update/delete requires being the creator or a Developer.
+
+## Warranty requests: AI-extracted trade grouping, manual bulk filing, delegation, rejection notes
+
+- **A homeowner can now upload an inspection report themselves** ("Upload
+  an Inspection Report" on the Warranty Request tab) — read with the same
+  Claude extraction route the Contractor/Developer/PM dashboard already
+  used, but now each finding is also classified by trade (Electrical,
+  Plumbing, Roof/Leaks, etc. — see `lib/warrantyRequestCategories.ts`) and
+  filed as a pending request automatically, instead of the homeowner
+  retyping every issue by hand.
+- **Multiple tasks under the same trade become one request, not several.**
+  If a report turns up 4 electrical issues, that's one "Electrical" ticket
+  with 4 individually-approvable tasks inside it — not 4 separate tickets
+  each needing its own subcontractor and schedule. The same applies to
+  manually filing a batch: the "Create a Warranty Request" form (and the
+  Contractor/Developer/PM "File on behalf of a homeowner" form) now let you
+  add several task rows under one category in a single submission. A
+  single task by itself still files as an ordinary standalone request,
+  exactly as before.
+- **Each task is approved or rejected on its own**, and the group ticket
+  itself stays regardless of what happens to any one task in it — so
+  everyone can see at a glance which tasks in, say, "Plumbing" are
+  approved, pending, or rejected. The group carries one shared
+  subcontractor assignment and scheduled visit window for the whole trade
+  (since in practice one subcontractor visit covers every task in it), one
+  inspection-reports thread, and one comment thread.
+- **Both dashboards (the Contractor/Developer/PM view and the homeowner's
+  own "Your Warranty Requests") are now organized into sections by trade**
+  instead of one long list, each section showing a live pending/approved/
+  rejected count.
+- **A Contractor/Developer/PM can reassign a request's (or a group's)
+  category** if it was filed under the wrong trade — the select right next
+  to the title, not a separate edit flow.
+- **A Contractor/Developer/PM can now file a request on behalf of a
+  homeowner** who doesn't know how to use the form themselves — picks the
+  homeowner from a dropdown of warranty accounts on that construction, and
+  it shows up in that homeowner's own "Your Warranty Requests" exactly as
+  if they'd filed it themselves.
+- **Rejecting a request now takes an optional reason**, shown to the
+  homeowner on that request going forward.
+- **Migration 057** adds `rejection_note`, `is_group`, and `group_id`
+  (self-referencing, `on delete cascade`) to `warranty_item_requests`, and
+  relaxes its insert policy so a Contractor/Developer/PM can set
+  `requested_by` to someone else when filing on their behalf (verified
+  server-side against that project's actual warranty members — see
+  `resolveRequester` in `app/projects/[id]/warranty-request/actions.ts`).

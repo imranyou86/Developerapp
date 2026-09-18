@@ -332,6 +332,15 @@ export interface WarrantyItemRequest {
   scheduled_date: string | null;
   scheduled_time_start: string | null;
   scheduled_time_end: string | null;
+  // Set when a Contractor/Developer/PM rejects the request — shown to the
+  // homeowner who filed it.
+  rejection_note: string | null;
+  // Groups multiple tasks filed under one trade into a single ticket — see
+  // requestWarrantyItems. true on the parent row (its own status/
+  // checklist_item_id/rejection_note go unused); group_id on a task row
+  // points back to its parent and is null for a standalone single request.
+  is_group: boolean;
+  group_id: string | null;
   created_at: string;
 }
 

@@ -7,6 +7,7 @@ import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 import { notifyForAction } from "@/lib/alerts";
 import { logActivity } from "@/lib/activityLog";
 import type { WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
+import { WARRANTY_REQUEST_CATEGORIES } from "@/lib/warrantyRequestCategories";
 
 // Warranty requests are checklist_items/checklist_photos rows with
 // phase = "warranty" — same shape (title/done/comment/photos) as the
@@ -294,13 +295,13 @@ export async function deleteWarrantyPhoto(projectId: string, photoId: string): P
 // attachInspectionReport can move it between items or detach it later
 // rather than being fixed to the item it was uploaded under.
 //
-// A 'warranty' account is normally blocked by requireCanManageWarrantyItems
-// (it can't touch checklist items directly), but it CAN attach evidence to
-// its own filed request — a request has no checklist_item_id until it's
-// approved, so this is the only way for the person who filed it to attach
-// anything at all. warrantyItemRequestId, when passed, is checked against
-// the caller: either they manage warranty items generally, or they filed
-// that specific request themselves.
+// Any signed-in user with access to the project can upload one — a
+// 'warranty' account included, whether it's an inspection report they
+// received themselves (unattached, read for AI extraction — see
+// requestWarrantyItems) or evidence attached to a request they filed. No
+// extra application-level gate beyond that: inspection_reports_member's RLS
+// (has_project_access) is the real authorization boundary here, same as
+// every other read/write on this table.
 export async function addInspectionReport(
   projectId: string,
   fileName: string,
@@ -312,19 +313,6 @@ export async function addInspectionReport(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-
-  const guard = await requireCanManageWarrantyItems();
-  if (!guard.ok) {
-    if (!warrantyItemRequestId) return { ok: false, error: guard.error };
-    const { data: request } = await supabase
-      .from("warranty_item_requests")
-      .select("requested_by")
-      .eq("id", warrantyItemRequestId)
-      .maybeSingle();
-    if (!request || request.requested_by !== user.id) {
-      return { ok: false, error: "You can only attach a report to your own request." };
-    }
-  }
 
   const { error, data } = await supabase
     .from("inspection_reports")
@@ -444,6 +432,48 @@ export async function addWarrantyItemsFromReport(
   return { ok: true, items: data };
 }
 
+export interface WarrantyRequestInput {
+  title: string;
+  comment?: string | null;
+  category?: string | null;
+}
+
+// Resolves who a batch of requests should be filed as: normally the caller
+// themselves (a 'warranty' account filing its own request — blocked from
+// calling addWarrantyItem directly by requireCanManageWarrantyItems, so it
+// comes through here instead), or, when onBehalfOfUserId is given, a
+// specific homeowner a Contractor/Developer/PM is filing for because that
+// account doesn't know how to use the form itself. The RLS insert policy
+// (migration 057) allows either shape; this also verifies the target is an
+// actual 'warranty' member of this project, so a manager can't accidentally
+// (or otherwise) attribute a request to an unrelated account.
+async function resolveRequester(
+  projectId: string,
+  onBehalfOfUserId?: string
+): Promise<{ ok: true; requestedBy: string; actingUserId: string } | { ok: false; error: string }> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  if (!onBehalfOfUserId) return { ok: true, requestedBy: user.id, actingUserId: user.id };
+
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: "Only a Contractor, Developer, or PM can file a request on behalf of someone else." };
+
+  const { data: member } = await supabase
+    .from("project_members")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("user_id", onBehalfOfUserId)
+    .eq("role", "warranty")
+    .maybeSingle();
+  if (!member) return { ok: false, error: "That account isn't a warranty member of this construction." };
+
+  return { ok: true, requestedBy: onBehalfOfUserId, actingUserId: guard.userId };
+}
+
 // A 'warranty' user files here instead of calling addWarrantyItem directly
 // (requireCanManageWarrantyItems blocks that role from it) — a Contractor
 // or Developer then reviews the queue and approves or rejects it below.
@@ -451,46 +481,130 @@ export async function requestWarrantyItem(
   projectId: string,
   title: string,
   comment?: string,
-  category?: string | null
+  category?: string | null,
+  onBehalfOfUserId?: string
 ): Promise<ActionResult> {
-  if (!title.trim()) return { ok: false, error: "Description is required." };
+  const res = await requestWarrantyItems(projectId, [{ title, comment, category }], onBehalfOfUserId);
+  if (!res.ok || !res.ids?.[0]) return { ok: false, error: res.error };
+  return { ok: true, id: res.ids[0] };
+}
+
+function normalizeCategory(category?: string | null): string | null {
+  return category && (WARRANTY_REQUEST_CATEGORIES as readonly string[]).includes(category) ? category : null;
+}
+
+// Bulk version — one call, covered by one notification instead of N. Used
+// for: AI extraction from an uploaded inspection report (each finding
+// already carries its own trade classification, which may span several
+// trades in one report), and a manually-typed batch of tasks filed under
+// one shared trade category ("list everything electrical needs" without a
+// report to extract from).
+//
+// Items sharing a category are bucketed together: 2+ items in the same
+// bucket become one "group" request (is_group=true) — a single ticket for
+// that trade, with its own subcontractor/schedule shared by every task
+// inside it, since in practice one subcontractor visit covers all of them
+// and there's no reason to track N separate tickets for it — with a
+// child task row per item, each independently approved/rejected. A bucket
+// with exactly one item is just an ordinary standalone request, same as
+// filing a single issue has always worked.
+export async function requestWarrantyItems(
+  projectId: string,
+  items: WarrantyRequestInput[],
+  onBehalfOfUserId?: string
+): Promise<ActionResult & { ids?: string[] }> {
+  const usable = items.filter((i) => i.title.trim());
+  if (usable.length === 0) return { ok: false, error: "At least one description is required." };
+
+  const requester = await resolveRequester(projectId, onBehalfOfUserId);
+  if (!requester.ok) return { ok: false, error: requester.error };
 
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
 
-  // The id is generated here (rather than left to the column default) so
-  // this can be a bare insert with no .select() — an INSERT ... RETURNING
-  // requires the new row to also pass the table's SELECT policy, a separate
-  // check from the INSERT policy's own WITH CHECK, which was an extra way
-  // for this to be rejected on top of the access check already removed from
-  // warranty_item_requests_insert (see migration 048).
-  const id = crypto.randomUUID();
-  const { error } = await supabase.from("warranty_item_requests").insert({
-    id,
-    project_id: projectId,
-    title: title.trim(),
-    comment: comment?.trim() || null,
-    category: category || null,
-    requested_by: user.id,
-  });
+  const buckets = new Map<string, WarrantyRequestInput[]>();
+  for (const item of usable) {
+    const key = normalizeCategory(item.category) ?? "";
+    const list = buckets.get(key) ?? [];
+    list.push(item);
+    buckets.set(key, list);
+  }
+
+  const allRows: { id: string; title: string; category: string | null; is_group: boolean }[] = [];
+  const insertRows: Record<string, unknown>[] = [];
+
+  for (const [key, bucketItems] of buckets) {
+    const category = key || null;
+    if (bucketItems.length === 1) {
+      const id = crypto.randomUUID();
+      insertRows.push({
+        id,
+        project_id: projectId,
+        title: bucketItems[0].title.trim(),
+        comment: bucketItems[0].comment?.trim() || null,
+        category,
+        requested_by: requester.requestedBy,
+      });
+      allRows.push({ id, title: bucketItems[0].title.trim(), category, is_group: false });
+    } else {
+      const groupId = crypto.randomUUID();
+      insertRows.push({
+        id: groupId,
+        project_id: projectId,
+        title: category ?? "Warranty items",
+        category,
+        is_group: true,
+        requested_by: requester.requestedBy,
+      });
+      allRows.push({ id: groupId, title: category ?? "Warranty items", category, is_group: true });
+      for (const item of bucketItems) {
+        const taskId = crypto.randomUUID();
+        insertRows.push({
+          id: taskId,
+          project_id: projectId,
+          title: item.title.trim(),
+          comment: item.comment?.trim() || null,
+          category,
+          group_id: groupId,
+          requested_by: requester.requestedBy,
+        });
+        allRows.push({ id: taskId, title: item.title.trim(), category, is_group: false });
+      }
+    }
+  }
+
+  // Bare insert with no .select() — same reasoning as the old single-row
+  // insert had (see migration 048): an INSERT ... RETURNING also has to
+  // pass the table's SELECT policy, a separate check from the INSERT
+  // policy's own WITH CHECK, and that's an extra way for this to be
+  // rejected for no reason when filing on behalf of someone else (the
+  // caller can insert as that user but can't necessarily read their rows
+  // back through can_view_warranty_request). ids are generated client-side
+  // above instead.
+  const { error } = await supabase.from("warranty_item_requests").insert(insertRows);
   if (error) return { ok: false, error: error.message };
+
+  const taskCount = allRows.filter((r) => !r.is_group).length;
+  const categories = Array.from(new Set(allRows.map((r) => r.category).filter((c): c is string => !!c)));
+  const summary =
+    taskCount === 1
+      ? `A warranty item was requested${allRows[0].category ? ` (${allRows[0].category})` : ""}: "${allRows.find((r) => !r.is_group)!.title}" — awaiting your approval.`
+      : `${taskCount} warranty items were requested${categories.length ? ` (${categories.join(", ")})` : ""} — awaiting your approval.`;
 
   // Roles force-notified for "warranty_request_submitted" default to
   // contractor/developer (Admin-configurable — see
   // lib/notificationCatalog.ts) regardless of whether they've opted into
   // "Get alerts" — a new request needing review isn't optional the way a
-  // general project update is.
+  // general project update is. excludeUserId is whoever actually filed it
+  // (the manager, when filing on behalf of someone else) so they don't get
+  // notified about their own submission.
   await notifyForAction(projectId, "warranty_request_submitted", {
-    subject: "New warranty item request",
-    body: `A warranty item was requested${category ? ` (${category})` : ""}: "${title.trim()}" — awaiting your approval.`,
-    excludeUserId: user.id,
+    subject: taskCount === 1 ? "New warranty item request" : "New warranty item requests",
+    body: summary,
+    excludeUserId: requester.actingUserId,
   });
 
   revalidate(projectId);
-  return { ok: true, id };
+  return { ok: true, ids: allRows.map((r) => r.id) };
 }
 
 // Approving copies the request into a real checklist_items row (same shape
@@ -547,7 +661,7 @@ export async function approveWarrantyItemRequest(projectId: string, requestId: s
   return { ok: true, id: item.id };
 }
 
-export async function rejectWarrantyItemRequest(projectId: string, requestId: string): Promise<ActionResult> {
+export async function rejectWarrantyItemRequest(projectId: string, requestId: string, note?: string): Promise<ActionResult> {
   const guard = await requireApprover();
   if (!guard.ok) return { ok: false, error: guard.error };
 
@@ -560,9 +674,10 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
   if (fetchError) return { ok: false, error: fetchError.message };
   if (request.status !== "pending") return { ok: false, error: "This request has already been reviewed." };
 
+  const trimmedNote = note?.trim() || null;
   const { error } = await supabase
     .from("warranty_item_requests")
-    .update({ status: "rejected", reviewed_by: guard.userId, reviewed_at: new Date().toISOString() })
+    .update({ status: "rejected", rejection_note: trimmedNote, reviewed_by: guard.userId, reviewed_at: new Date().toISOString() })
     .eq("id", requestId);
   if (error) return { ok: false, error: error.message };
 
@@ -572,15 +687,40 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
     action: "warranty_item_request.rejected",
     entityType: "warranty_item_requests",
     entityId: requestId,
-    detail: `Rejected "${request.title}"`,
+    detail: trimmedNote ? `Rejected "${request.title}": ${trimmedNote}` : `Rejected "${request.title}"`,
   });
 
   await notifyForAction(projectId, "warranty_request_rejected", {
     subject: "Warranty request rejected",
-    body: `"${request.title}" was not approved as a warranty item.`,
+    body: trimmedNote
+      ? `"${request.title}" was not approved as a warranty item: ${trimmedNote}`
+      : `"${request.title}" was not approved as a warranty item.`,
     excludeUserId: guard.userId,
   });
 
+  revalidate(projectId);
+  return { ok: true };
+}
+
+// Lets a Contractor/Developer/PM fix a miscategorized request (or add a
+// category one never had) — the trade grouping on both dashboards
+// (RequestsSection, MyWarrantyRequests) is computed straight from this
+// column, so reassigning it moves the request into the right group
+// immediately. null clears it back to "Uncategorized".
+export async function updateWarrantyRequestCategory(
+  projectId: string,
+  requestId: string,
+  category: string | null
+): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (category && !(WARRANTY_REQUEST_CATEGORIES as readonly string[]).includes(category)) {
+    return { ok: false, error: "Not a recognized category." };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.from("warranty_item_requests").update({ category }).eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };
 }
