@@ -79,12 +79,28 @@ export async function toggleTask(projectId: string, taskId: string, done: boolea
   return { ok: true };
 }
 
+export async function toggleTasks(projectId: string, taskIds: string[], done: boolean): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("tasks").update({ done }).in("id", taskIds);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
 export async function deleteTask(projectId: string, taskId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("tasks").delete().eq("id", taskId);
   if (error) return { ok: false, error: error.message };
   revalidate(projectId);
   return { ok: true };
+}
+
+export async function deleteTasks(projectId: string, taskIds: string[]): Promise<ActionResult & { deletedIds?: string[] }> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("tasks").delete().in("id", taskIds).select("id");
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true, deletedIds: (data ?? []).map((d) => d.id) };
 }
 
 export async function saveRendering(

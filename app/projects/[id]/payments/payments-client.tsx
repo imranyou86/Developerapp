@@ -5,7 +5,15 @@ import { useToast } from "@/components/Toast";
 import { Modal } from "@/components/Modal";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteBid } from "@/app/projects/[id]/bids/actions";
-import { addPaymentLine, deletePaymentLine, markPaymentPaid, updatePaymentLine } from "@/app/projects/[id]/payments/actions";
+import {
+  addPaymentLine,
+  deletePaymentLine,
+  deletePaymentLines,
+  markPaymentPaid,
+  markPaymentsPaid,
+  updatePaymentLine,
+} from "@/app/projects/[id]/payments/actions";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import { stripLeadingZero } from "@/lib/numberInput";
 
 interface PaymentLine {
@@ -134,6 +142,10 @@ function BidCard({
   const [editingLine, setEditingLine] = useState<PaymentLine | null>(null);
   const [deletingLine, setDeletingLine] = useState<PaymentLine | null>(null);
   const [deletingLineBusy, setDeletingLineBusy] = useState(false);
+  const [selectedLines, setSelectedLines] = usePersistedSelection(`payment-lines-selected:${projectId}:${bid.id}`, () => new Set());
+  const [confirmBulkDeleteLines, setConfirmBulkDeleteLines] = useState(false);
+  const [bulkLinesBusy, setBulkLinesBusy] = useState(false);
+  const allLinesSelected = bid.payment_schedule_items.length > 0 && bid.payment_schedule_items.every((l) => selectedLines.has(l.id));
 
   async function handleToggle(lineId: string, next: boolean) {
     onPaidChanged(lineId, next);
@@ -142,6 +154,70 @@ function BidCard({
       notify("error", res.error ?? "Could not update payment status.");
       onPaidChanged(lineId, !next);
     }
+  }
+
+  function toggleSelectLine(lineId: string) {
+    setSelectedLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(lineId)) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
+
+  function selectAllLines(check: boolean) {
+    setSelectedLines((prev) => {
+      const next = new Set(prev);
+      bid.payment_schedule_items.forEach((l) => (check ? next.add(l.id) : next.delete(l.id)));
+      return next;
+    });
+  }
+
+  async function handleBulkMarkPaid(nextPaid: boolean) {
+    const ids = bid.payment_schedule_items.filter((l) => selectedLines.has(l.id)).map((l) => l.id);
+    if (ids.length === 0) return;
+    setBulkLinesBusy(true);
+    const idSet = new Set(ids);
+    onBidUpdated({
+      ...bid,
+      payment_schedule_items: bid.payment_schedule_items.map((l) => (idSet.has(l.id) ? { ...l, paid: nextPaid } : l)),
+    });
+    const res = await markPaymentsPaid(projectId, ids, nextPaid);
+    setBulkLinesBusy(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update payment status.");
+      onBidUpdated({
+        ...bid,
+        payment_schedule_items: bid.payment_schedule_items.map((l) => (idSet.has(l.id) ? { ...l, paid: !nextPaid } : l)),
+      });
+      return;
+    }
+    notify("success", `${ids.length} item${ids.length === 1 ? "" : "s"} marked ${nextPaid ? "paid" : "not paid"}.`);
+  }
+
+  async function handleBulkDeleteLines() {
+    const ids = bid.payment_schedule_items.filter((l) => selectedLines.has(l.id)).map((l) => l.id);
+    if (ids.length === 0) return;
+    setBulkLinesBusy(true);
+    const res = await deletePaymentLines(projectId, bid.id, ids);
+    setBulkLinesBusy(false);
+    setConfirmBulkDeleteLines(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete items.");
+      return;
+    }
+    const deletedIds = new Set(res.deletedIds ?? ids);
+    onBidUpdated({
+      ...bid,
+      total_amount: res.newTotal ?? bid.total_amount,
+      payment_schedule_items: bid.payment_schedule_items.filter((l) => !deletedIds.has(l.id)),
+    });
+    setSelectedLines((prev) => {
+      const next = new Set(prev);
+      deletedIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    notify("success", `${deletedIds.size} item${deletedIds.size === 1 ? "" : "s"} removed.`);
   }
 
   return (
@@ -170,9 +246,38 @@ function BidCard({
         </button>
       </div>
 
+      {bid.payment_schedule_items.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
+          <label className="flex items-center gap-1.5 text-blueprint/60">
+            <input type="checkbox" checked={allLinesSelected} onChange={(e) => selectAllLines(e.target.checked)} />
+            {selectedLines.size > 0 ? `${selectedLines.size} selected` : "Select all"}
+          </label>
+          {selectedLines.size > 0 && (
+            <>
+              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(true)} disabled={bulkLinesBusy}>
+                Mark paid
+              </button>
+              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(false)} disabled={bulkLinesBusy}>
+                Mark not paid
+              </button>
+              <button
+                className="text-red-500 hover:underline"
+                onClick={() => setConfirmBulkDeleteLines(true)}
+                disabled={bulkLinesBusy}
+              >
+                Remove selected
+              </button>
+              <button className="text-blueprint/40 hover:underline" onClick={() => selectAllLines(false)} disabled={bulkLinesBusy}>
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <div className="space-y-1">
         {bid.payment_schedule_items.map((line) => (
           <div key={line.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
+            <input type="checkbox" checked={selectedLines.has(line.id)} onChange={() => toggleSelectLine(line.id)} title="Select for bulk actions" />
             <input type="checkbox" checked={line.paid} onChange={(e) => handleToggle(line.id, e.target.checked)} />
             <span className={`flex-1 text-sm ${line.paid ? "text-blueprint/40 line-through" : ""}`}>{line.label}</span>
             <span className="text-sm font-medium">{currency(line.amount)}</span>
@@ -272,6 +377,17 @@ function BidCard({
           }
           setDeletingLine(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDeleteLines}
+        title="Remove selected items?"
+        message={`${selectedLines.size} payment schedule item${selectedLines.size === 1 ? "" : "s"} will be removed, and the bid total reduced by the same amount.`}
+        confirmLabel="Remove"
+        danger
+        busy={bulkLinesBusy}
+        onCancel={() => setConfirmBulkDeleteLines(false)}
+        onConfirm={handleBulkDeleteLines}
       />
     </div>
   );

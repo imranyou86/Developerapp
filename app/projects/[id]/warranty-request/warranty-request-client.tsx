@@ -19,15 +19,18 @@ import {
   deleteInspectionReport,
   deleteWarrantyItem,
   deleteWarrantyItemRequest,
+  deleteWarrantyItems,
   deleteWarrantyPhoto,
   deleteWarrantyRequestComment,
   rejectWarrantyItemRequest,
   setWarrantyRequestProgress,
   setWarrantyStatus,
   toggleWarrantyItem,
+  toggleWarrantyItems,
   updateWarrantyComment,
   type CreatedWarrantyItem,
 } from "@/app/projects/[id]/warranty-request/actions";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { UserRole, WarrantyItemRequest, WarrantyItemRequestComment, WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
@@ -114,14 +117,73 @@ export function WarrantyRequestClient({
   // in migration 049.
   const canDeleteRequests = viewerRole === "contractor" || viewerRole === "developer";
 
+  const [selectedItems, setSelectedItems] = usePersistedSelection(`warranty-items-selected:${projectId}`, () => new Set());
+  const [confirmBulkDeleteItems, setConfirmBulkDeleteItems] = useState(false);
+  const [bulkItemsBusy, setBulkItemsBusy] = useState(false);
+  const allItemsSelected = items.length > 0 && items.every((i) => selectedItems.has(i.id));
+
   function updateItem(id: string, patch: Partial<WarrantyItemRow>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }
-  function removeItem(id: string) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+
+  function toggleSelectItem(id: string) {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllItems(check: boolean) {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      items.forEach((i) => (check ? next.add(i.id) : next.delete(i.id)));
+      return next;
+    });
+  }
+
+  async function handleBulkToggleItems(markDone: boolean) {
+    const ids = items.filter((i) => selectedItems.has(i.id)).map((i) => i.id);
+    if (ids.length === 0) return;
+    setBulkItemsBusy(true);
+    ids.forEach((id) => updateItem(id, { done: markDone }));
+    const res = await toggleWarrantyItems(projectId, ids, markDone);
+    setBulkItemsBusy(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update items.");
+      ids.forEach((id) => updateItem(id, { done: !markDone }));
+      return;
+    }
+    notify("success", `${ids.length} item${ids.length === 1 ? "" : "s"} marked ${markDone ? "fixed" : "not fixed"}.`);
+  }
+
+  async function handleBulkDeleteItems() {
+    const ids = items.filter((i) => selectedItems.has(i.id)).map((i) => i.id);
+    if (ids.length === 0) return;
+    setBulkItemsBusy(true);
+    const res = await deleteWarrantyItems(projectId, ids);
+    setBulkItemsBusy(false);
+    setConfirmBulkDeleteItems(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete items.");
+      return;
+    }
+    const deletedIds = res.deletedIds ?? ids;
+    removeItems(deletedIds);
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      deletedIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    notify("success", `${deletedIds.length} item${deletedIds.length === 1 ? "" : "s"} deleted.`);
+  }
+  function removeItems(ids: string[]) {
+    const removed = new Set(ids);
+    setItems((prev) => prev.filter((i) => !removed.has(i.id)));
     // Mirrors the DB's "on delete set null" on inspection_reports.checklist_item_id —
     // a report attached to a deleted item goes back to unattached, not orphaned.
-    setReports((prev) => prev.map((r) => (r.checklist_item_id === id ? { ...r, checklist_item_id: null } : r)));
+    setReports((prev) => prev.map((r) => (r.checklist_item_id && removed.has(r.checklist_item_id) ? { ...r, checklist_item_id: null } : r)));
   }
   function updateReport(id: string, patch: Partial<InspectionReportRow>) {
     setReports((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -292,6 +354,35 @@ export function WarrantyRequestClient({
           />
         </div>
 
+        {canManage && items.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-blueprint/10 pb-2 text-xs">
+            <label className="flex items-center gap-1.5 text-blueprint/60">
+              <input type="checkbox" checked={allItemsSelected} onChange={(e) => selectAllItems(e.target.checked)} />
+              {selectedItems.size > 0 ? `${selectedItems.size} selected` : "Select all"}
+            </label>
+            {selectedItems.size > 0 && (
+              <>
+                <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(true)} disabled={bulkItemsBusy}>
+                  Mark fixed
+                </button>
+                <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(false)} disabled={bulkItemsBusy}>
+                  Mark not fixed
+                </button>
+                <button
+                  className="text-red-500 hover:underline"
+                  onClick={() => setConfirmBulkDeleteItems(true)}
+                  disabled={bulkItemsBusy}
+                >
+                  Delete selected
+                </button>
+                <button className="text-blueprint/40 hover:underline" onClick={() => selectAllItems(false)} disabled={bulkItemsBusy}>
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 space-y-2">
           {items.length === 0 && <p className="text-sm text-blueprint/40">No warranty items yet.</p>}
           {items.map((item, i) => (
@@ -302,12 +393,25 @@ export function WarrantyRequestClient({
                 reports={reports.filter((r) => r.checklist_item_id === item.id)}
                 canManage={canManage}
                 onUpdate={updateItem}
-                onRemove={removeItem}
+                onRemove={(id) => removeItems([id])}
                 onDetachReport={(reportId) => handleAttach(reportId, null)}
+                selected={selectedItems.has(item.id)}
+                onToggleSelect={() => toggleSelectItem(item.id)}
               />
             </div>
           ))}
         </div>
+
+        <ConfirmDialog
+          open={confirmBulkDeleteItems}
+          title="Delete selected items?"
+          message={`${selectedItems.size} warranty item${selectedItems.size === 1 ? "" : "s"} will be permanently removed.`}
+          confirmLabel="Delete"
+          danger
+          busy={bulkItemsBusy}
+          onCancel={() => setConfirmBulkDeleteItems(false)}
+          onConfirm={handleBulkDeleteItems}
+        />
 
         {canManage && (
           <div className="mt-3 flex gap-2">
@@ -1030,6 +1134,8 @@ function WarrantyItem({
   onUpdate,
   onRemove,
   onDetachReport,
+  selected,
+  onToggleSelect,
 }: {
   projectId: string;
   item: WarrantyItemRow;
@@ -1038,6 +1144,8 @@ function WarrantyItem({
   onUpdate: (id: string, patch: Partial<WarrantyItemRow>) => void;
   onRemove: (id: string) => void;
   onDetachReport: (reportId: string) => void;
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
@@ -1132,6 +1240,7 @@ function WarrantyItem({
   return (
     <div className="rounded-lg border border-blueprint/10">
       <div className="flex items-center gap-2 px-2 py-1.5">
+        {canManage && <input type="checkbox" checked={selected} onChange={onToggleSelect} title="Select for bulk actions" />}
         <input
           type="checkbox"
           checked={item.done}

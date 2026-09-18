@@ -109,6 +109,37 @@ export async function deleteChecklistItem(projectId: string, itemId: string): Pr
   return { ok: true };
 }
 
+export async function deleteChecklistItems(
+  projectId: string,
+  itemIds: string[]
+): Promise<ActionResult & { deletedIds?: string[] }> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("checklist_items").delete().in("id", itemIds).select("id");
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true, deletedIds: (data ?? []).map((d) => d.id) };
+}
+
+export async function toggleChecklistItems(projectId: string, itemIds: string[], done: boolean): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("checklist_items").update({ done }).in("id", itemIds);
+  if (error) return { ok: false, error: error.message };
+
+  if (done) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    await notifyProjectSubscribers(projectId, {
+      subject: "Checklist items done",
+      body: `${itemIds.length} checklist item${itemIds.length === 1 ? " was" : "s were"} marked done.`,
+      excludeUserId: user?.id,
+    });
+  }
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
 export async function addChecklistPhoto(
   projectId: string,
   itemId: string,

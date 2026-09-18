@@ -8,9 +8,12 @@ import { formatFeetInches } from "@/lib/feetInches";
 import {
   addTask,
   deleteTask,
+  deleteTasks,
   toggleTask,
+  toggleTasks,
   updateRoomDimensions,
 } from "@/app/projects/[id]/rooms/actions";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import { RenderingPanel } from "@/app/projects/[id]/rooms/rendering-panel";
 import { FinishesPanel } from "@/app/projects/[id]/rooms/finishes-panel";
 import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
@@ -39,6 +42,10 @@ export function RoomCard({
   const [newTaskDue, setNewTaskDue] = useState("");
   const [addingTask, startAddingTask] = useTransition();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [selectedTasks, setSelectedTasks] = usePersistedSelection(`room-tasks-selected:${projectId}:${room.id}`, () => new Set());
+  const [confirmBulkDeleteTasks, setConfirmBulkDeleteTasks] = useState(false);
+  const [bulkTasksBusy, setBulkTasksBusy] = useState(false);
+  const allTasksSelected = room.tasks.length > 0 && room.tasks.every((t) => selectedTasks.has(t.id));
 
   const tasksDone = room.tasks.filter((t) => t.done).length;
 
@@ -81,6 +88,60 @@ export function RoomCard({
       notify("error", res.error ?? "Could not update task.");
       onRoomUpdated({ ...room, tasks: room.tasks.map((t) => (t.id === taskId ? { ...t, done: !done } : t)) });
     }
+  }
+
+  function toggleSelectTask(taskId: string) {
+    setSelectedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+
+  function selectAllTasks(check: boolean) {
+    setSelectedTasks((prev) => {
+      const next = new Set(prev);
+      room.tasks.forEach((t) => (check ? next.add(t.id) : next.delete(t.id)));
+      return next;
+    });
+  }
+
+  async function handleBulkToggleTasks(markDone: boolean) {
+    const ids = room.tasks.filter((t) => selectedTasks.has(t.id)).map((t) => t.id);
+    if (ids.length === 0) return;
+    setBulkTasksBusy(true);
+    const idSet = new Set(ids);
+    onRoomUpdated({ ...room, tasks: room.tasks.map((t) => (idSet.has(t.id) ? { ...t, done: markDone } : t)) });
+    const res = await toggleTasks(projectId, ids, markDone);
+    setBulkTasksBusy(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update tasks.");
+      onRoomUpdated({ ...room, tasks: room.tasks.map((t) => (idSet.has(t.id) ? { ...t, done: !markDone } : t)) });
+      return;
+    }
+    notify("success", `${ids.length} task${ids.length === 1 ? "" : "s"} marked ${markDone ? "done" : "not done"}.`);
+  }
+
+  async function handleBulkDeleteTasks() {
+    const ids = room.tasks.filter((t) => selectedTasks.has(t.id)).map((t) => t.id);
+    if (ids.length === 0) return;
+    setBulkTasksBusy(true);
+    const res = await deleteTasks(projectId, ids);
+    setBulkTasksBusy(false);
+    setConfirmBulkDeleteTasks(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete tasks.");
+      return;
+    }
+    const deletedIds = new Set(res.deletedIds ?? ids);
+    onRoomUpdated({ ...room, tasks: room.tasks.filter((t) => !deletedIds.has(t.id)) });
+    setSelectedTasks((prev) => {
+      const next = new Set(prev);
+      deletedIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    notify("success", `${deletedIds.size} task${deletedIds.size === 1 ? "" : "s"} deleted.`);
   }
 
   return (
@@ -144,9 +205,38 @@ export function RoomCard({
 
           <div>
             <h4 className="mb-2 text-sm font-semibold text-blueprint-dark">Tasks</h4>
+            {room.tasks.length > 0 && (
+              <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
+                <label className="flex items-center gap-1.5 text-blueprint/60">
+                  <input type="checkbox" checked={allTasksSelected} onChange={(e) => selectAllTasks(e.target.checked)} />
+                  {selectedTasks.size > 0 ? `${selectedTasks.size} selected` : "Select all"}
+                </label>
+                {selectedTasks.size > 0 && (
+                  <>
+                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(true)} disabled={bulkTasksBusy}>
+                      Mark done
+                    </button>
+                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(false)} disabled={bulkTasksBusy}>
+                      Mark not done
+                    </button>
+                    <button
+                      className="text-red-500 hover:underline"
+                      onClick={() => setConfirmBulkDeleteTasks(true)}
+                      disabled={bulkTasksBusy}
+                    >
+                      Delete selected
+                    </button>
+                    <button className="text-blueprint/40 hover:underline" onClick={() => selectAllTasks(false)} disabled={bulkTasksBusy}>
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <div className="space-y-1">
               {room.tasks.map((t) => (
                 <div key={t.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
+                  <input type="checkbox" checked={selectedTasks.has(t.id)} onChange={() => toggleSelectTask(t.id)} title="Select for bulk actions" />
                   <input
                     type="checkbox"
                     checked={t.done}
@@ -208,6 +298,17 @@ export function RoomCard({
           }
           setDeletingTaskId(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDeleteTasks}
+        title="Delete selected tasks?"
+        message={`${selectedTasks.size} task${selectedTasks.size === 1 ? "" : "s"} will be permanently removed.`}
+        confirmLabel="Delete"
+        danger
+        busy={bulkTasksBusy}
+        onCancel={() => setConfirmBulkDeleteTasks(false)}
+        onConfirm={handleBulkDeleteTasks}
       />
     </div>
   );

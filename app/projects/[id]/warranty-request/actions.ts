@@ -142,6 +142,26 @@ export async function toggleWarrantyItem(
   return { ok: true };
 }
 
+export async function toggleWarrantyItems(projectId: string, itemIds: string[], done: boolean): Promise<ActionResult> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("checklist_items").update({ done }).in("id", itemIds);
+  if (error) return { ok: false, error: error.message };
+
+  if (done) {
+    await notifyProjectSubscribers(projectId, {
+      subject: "Warranty items fixed",
+      body: `${itemIds.length} warranty item${itemIds.length === 1 ? " was" : "s were"} marked fixed.`,
+      excludeUserId: guard.userId,
+    });
+  }
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
 export async function setWarrantyStatus(
   projectId: string,
   itemId: string,
@@ -201,6 +221,29 @@ export async function deleteWarrantyItem(projectId: string, itemId: string, item
 
   revalidate(projectId);
   return { ok: true };
+}
+
+export async function deleteWarrantyItems(
+  projectId: string,
+  itemIds: string[]
+): Promise<ActionResult & { deletedIds?: string[] }> {
+  const guard = await requireCanManageWarrantyItems();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.from("checklist_items").delete().in("id", itemIds).select("id");
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, {
+    projectId,
+    userId: guard.userId,
+    action: "warranty_item.deleted",
+    entityType: "checklist_items",
+    detail: `Deleted ${itemIds.length} warranty item${itemIds.length === 1 ? "" : "s"}`,
+  });
+
+  revalidate(projectId);
+  return { ok: true, deletedIds: (data ?? []).map((d) => d.id) };
 }
 
 export async function addWarrantyPhoto(

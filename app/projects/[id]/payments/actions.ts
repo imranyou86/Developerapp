@@ -16,6 +16,14 @@ export async function markPaymentPaid(projectId: string, lineId: string, paid: b
   return { ok: true };
 }
 
+export async function markPaymentsPaid(projectId: string, lineIds: string[], paid: boolean): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("payment_schedule_items").update({ paid }).in("id", lineIds);
+  if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
 // Adding/editing/removing a line on an already-accepted bid keeps the bid's
 // total_amount in sync by the same delta rather than recomputing it as
 // sum(lines) outright — total_amount can legitimately differ from the sum
@@ -115,4 +123,29 @@ export async function deletePaymentLine(
 
   revalidate(projectId);
   return { ok: true, newTotal: totalRes.newTotal };
+}
+
+export async function deletePaymentLines(
+  projectId: string,
+  bidId: string,
+  lineIds: string[]
+): Promise<ActionResult & { newTotal?: number; deletedIds?: string[] }> {
+  const supabase = createClient();
+  const { data: existing, error: fetchError } = await supabase
+    .from("payment_schedule_items")
+    .select("id, amount")
+    .in("id", lineIds);
+  if (fetchError) return { ok: false, error: fetchError.message };
+
+  const removedTotal = (existing ?? []).reduce((sum, l) => sum + Number(l.amount), 0);
+
+  const { data, error } = await supabase.from("payment_schedule_items").delete().in("id", lineIds).select("id");
+  if (error) return { ok: false, error: error.message };
+  const deletedIds = (data ?? []).map((d) => d.id);
+
+  const totalRes = await adjustBidTotal(supabase, bidId, -removedTotal);
+  if (!totalRes.ok) return { ok: true, deletedIds, error: `Items removed, but updating the bid total failed: ${totalRes.error}` };
+
+  revalidate(projectId);
+  return { ok: true, deletedIds, newTotal: totalRes.newTotal };
 }

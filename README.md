@@ -2018,3 +2018,39 @@ yet; each one only adds what a given feature needed.
   assigned sub's name always resolves correctly for the submitter
   regardless of whether that sub has a `project_subcontractors` row for
   this construction.
+
+## Bulk select on every checklist-style list
+
+- **Checklist tab, Warranty items, Room tasks, and Payment schedule lines
+  all now support bulk select + bulk actions** — the only place with this
+  before was the Files tab library. Each list gets a header row with a
+  "select all"/count checkbox and, once something's selected, inline
+  action links (Mark done/not done or Mark paid/not paid, Delete/Remove
+  selected, Clear), backed by `lib/usePersistedSelection.ts` (the same
+  sessionStorage-backed `Set<string>` hook the Files tab already used) so
+  a selection survives switching tabs and back. Each row also gets a
+  second checkbox specifically for selection, separate from its existing
+  done/paid checkbox.
+  - **Checklist tab** (`app/projects/[id]/checklist/checklist-client.tsx`) —
+    selection is scoped per phase column (Rough-in/Finish each get their
+    own `checklist-selected:${projectId}:${phase}` key), backed by new
+    `toggleChecklistItems`/`deleteChecklistItems` bulk actions
+    (`app/projects/[id]/checklist/actions.ts`) mirroring
+    `deleteProjectFiles`'s shape — one `.in("id", ids)` query, returns
+    `deletedIds` for reconciliation.
+  - **Warranty Request's checklist items** (same `checklist_items` table,
+    `phase = 'warranty'`, in `warranty-request-client.tsx`) — same
+    treatment, gated behind `canManage` (Contractor/Developer/PM/Owner;
+    the 'warranty' role never reaches this dashboard). New
+    `toggleWarrantyItems`/`deleteWarrantyItems` bulk actions in
+    `warranty-request/actions.ts`, guarded by the same
+    `requireCanManageWarrantyItems()` every other mutation there uses.
+  - **Room & Tasks** (`app/projects/[id]/rooms/room-card.tsx`) — scoped
+    per room (`room-tasks-selected:${projectId}:${room.id}`). New
+    `toggleTasks`/`deleteTasks` bulk actions in `rooms/actions.ts`.
+  - **Payments** (`app/projects/[id]/payments/payments-client.tsx`) —
+    scoped per bid (`payment-lines-selected:${projectId}:${bid.id}`). New
+    `markPaymentsPaid`/`deletePaymentLines` bulk actions in
+    `payments/actions.ts` — bulk delete sums every selected line's
+    `amount` and adjusts the bid's `total_amount` once via the existing
+    `adjustBidTotal` helper, rather than one adjustment per line.

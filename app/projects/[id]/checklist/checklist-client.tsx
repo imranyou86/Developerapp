@@ -10,10 +10,13 @@ import {
   addChecklistItem,
   addChecklistPhoto,
   deleteChecklistItem,
+  deleteChecklistItems,
   deleteChecklistPhoto,
   toggleChecklistItem,
+  toggleChecklistItems,
   updateChecklistComment,
 } from "@/app/projects/[id]/checklist/actions";
+import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { ChecklistPhase } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
@@ -47,8 +50,9 @@ export function ChecklistClient({
   function updateItem(id: string, patch: Partial<ChecklistItemRow>) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }
-  function removeItem(id: string) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  function removeItems(ids: string[]) {
+    const removed = new Set(ids);
+    setItems((prev) => prev.filter((i) => !removed.has(i.id)));
   }
   function addItem(item: ChecklistItemRow) {
     setItems((prev) => [...prev, item]);
@@ -62,7 +66,7 @@ export function ChecklistClient({
         title="Rough-in"
         items={rough}
         onUpdate={updateItem}
-        onRemove={removeItem}
+        onRemove={removeItems}
         onAdd={addItem}
       />
       <ChecklistPhaseColumn
@@ -71,7 +75,7 @@ export function ChecklistClient({
         title="Finish"
         items={finish}
         onUpdate={updateItem}
-        onRemove={removeItem}
+        onRemove={removeItems}
         onAdd={addItem}
       />
     </div>
@@ -92,13 +96,17 @@ function ChecklistPhaseColumn({
   title: string;
   items: ChecklistItemRow[];
   onUpdate: (id: string, patch: Partial<ChecklistItemRow>) => void;
-  onRemove: (id: string) => void;
+  onRemove: (ids: string[]) => void;
   onAdd: (item: ChecklistItemRow) => void;
 }) {
   const { notify } = useToast();
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = usePersistedSelection(`checklist-selected:${projectId}:${phase}`, () => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const done = items.filter((i) => i.done).length;
+  const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
 
   async function handleAdd() {
     if (!newTitle.trim()) return;
@@ -111,6 +119,64 @@ function ChecklistPhaseColumn({
       setNewTitle("");
     }
     setAdding(false);
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll(check: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      items.forEach((i) => (check ? next.add(i.id) : next.delete(i.id)));
+      return next;
+    });
+  }
+
+  function clearSelectedIn(ids: string[]) {
+    const removed = new Set(ids);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      removed.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
+
+  async function handleBulkToggle(markDone: boolean) {
+    const ids = items.filter((i) => selected.has(i.id)).map((i) => i.id);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    ids.forEach((id) => onUpdate(id, { done: markDone }));
+    const res = await toggleChecklistItems(projectId, ids, markDone);
+    setBulkBusy(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not update items.");
+      ids.forEach((id) => onUpdate(id, { done: !markDone }));
+      return;
+    }
+    notify("success", `${ids.length} item${ids.length === 1 ? "" : "s"} marked ${markDone ? "done" : "not done"}.`);
+  }
+
+  async function handleBulkDelete() {
+    const ids = items.filter((i) => selected.has(i.id)).map((i) => i.id);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    const res = await deleteChecklistItems(projectId, ids);
+    setBulkBusy(false);
+    setConfirmBulkDelete(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete items.");
+      return;
+    }
+    const deletedIds = res.deletedIds ?? ids;
+    onRemove(deletedIds);
+    clearSelectedIn(deletedIds);
+    notify("success", `${deletedIds.length} item${deletedIds.length === 1 ? "" : "s"} deleted.`);
   }
 
   return (
@@ -128,10 +194,46 @@ function ChecklistPhaseColumn({
         />
       </div>
 
+      {items.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-blueprint/10 pb-2 text-xs">
+          <label className="flex items-center gap-1.5 text-blueprint/60">
+            <input type="checkbox" checked={allSelected} onChange={(e) => selectAll(e.target.checked)} />
+            {selected.size > 0 ? `${selected.size} selected` : "Select all"}
+          </label>
+          {selected.size > 0 && (
+            <>
+              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(true)} disabled={bulkBusy}>
+                Mark done
+              </button>
+              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(false)} disabled={bulkBusy}>
+                Mark not done
+              </button>
+              <button
+                className="text-red-500 hover:underline"
+                onClick={() => setConfirmBulkDelete(true)}
+                disabled={bulkBusy}
+              >
+                Delete selected
+              </button>
+              <button className="text-blueprint/40 hover:underline" onClick={() => selectAll(false)} disabled={bulkBusy}>
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 space-y-2">
         {items.map((item, i) => (
           <div key={item.id} className="animate-fade-in-up" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
-            <ChecklistItemRow projectId={projectId} item={item} onUpdate={onUpdate} onRemove={onRemove} />
+            <ChecklistItemRow
+              projectId={projectId}
+              item={item}
+              onUpdate={onUpdate}
+              onRemove={(id) => onRemove([id])}
+              selected={selected.has(item.id)}
+              onToggleSelect={() => toggleSelect(item.id)}
+            />
           </div>
         ))}
       </div>
@@ -148,6 +250,17 @@ function ChecklistPhaseColumn({
           Add
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Delete selected items?"
+        message={`${selected.size} checklist item${selected.size === 1 ? "" : "s"} will be permanently removed.`}
+        confirmLabel="Delete"
+        danger
+        busy={bulkBusy}
+        onCancel={() => setConfirmBulkDelete(false)}
+        onConfirm={handleBulkDelete}
+      />
     </div>
   );
 }
@@ -157,11 +270,15 @@ function ChecklistItemRow({
   item,
   onUpdate,
   onRemove,
+  selected,
+  onToggleSelect,
 }: {
   projectId: string;
   item: ChecklistItemRow;
   onUpdate: (id: string, patch: Partial<ChecklistItemRow>) => void;
   onRemove: (id: string) => void;
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
@@ -239,6 +356,7 @@ function ChecklistItemRow({
   return (
     <div className="rounded-lg border border-blueprint/10">
       <div className="flex items-center gap-2 px-2 py-1.5">
+        <input type="checkbox" checked={selected} onChange={onToggleSelect} title="Select for bulk actions" />
         <input type="checkbox" checked={item.done} onChange={(e) => handleToggle(e.target.checked)} />
         <button
           className={`flex-1 text-left text-sm ${item.done ? "text-blueprint/40 line-through" : "text-blueprint-dark"}`}
