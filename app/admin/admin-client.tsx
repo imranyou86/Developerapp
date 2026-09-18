@@ -13,6 +13,7 @@ import {
   resetUserPassword,
   createAccount,
   updateUserTabPermission,
+  updateNotificationSetting,
 } from "@/app/admin/actions";
 import { setPreviewRole } from "@/app/admin/preview-actions";
 import {
@@ -68,16 +69,26 @@ interface MatrixRole {
   tabs: { slug: string; label: string; allowed: boolean }[];
 }
 
+export interface NotificationSettingRow {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  roles: UserRole[];
+}
+
 export function AdminClient({
   matrix,
   users,
   projects,
+  notificationSettings,
   currentUserId,
   currentPreviewRole,
 }: {
   matrix: MatrixRole[];
   users: AdminUser[];
   projects: AdminProject[];
+  notificationSettings: NotificationSettingRow[];
   currentUserId: string;
   /** Effective role right now — "developer" means no preview active. */
   currentPreviewRole: UserRole;
@@ -89,6 +100,7 @@ export function AdminClient({
       <AccessRequestsSection rows={rows} setRows={setRows} currentUserId={currentUserId} />
       <PreviewRoleSection currentPreviewRole={currentPreviewRole} />
       <TabPermissionMatrix initial={matrix} />
+      <NotificationSettingsSection initial={notificationSettings} />
       <CreateAccountSection setRows={setRows} projects={projects} />
       <UsersSection rows={rows} setRows={setRows} projects={projects} currentUserId={currentUserId} />
       <ProjectsSection projects={projects} />
@@ -255,6 +267,89 @@ function TabPermissionMatrix({ initial }: { initial: MatrixRole[] }) {
                       type="checkbox"
                       checked={t.allowed}
                       onChange={(e) => toggle(row.role, t.slug, e.target.checked)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// Controls lib/alerts.ts's notifyForAction — see lib/notificationCatalog.ts
+// for what each action means. "Enabled" mutes the notification entirely
+// (no email or push, even for someone personally subscribed via "Get
+// alerts"). A checked role is force-notified on every matching event
+// regardless of individual opt-in; unchecking a role doesn't block anyone
+// who's personally subscribed, it only stops the automatic, no-opt-in-
+// required notice for that role.
+function NotificationSettingsSection({ initial }: { initial: NotificationSettingRow[] }) {
+  const { notify } = useToast();
+  const [rows, setRows] = useState(initial);
+
+  async function toggleEnabled(key: string, next: boolean) {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, enabled: next } : r)));
+    const res = await updateNotificationSetting(key, { enabled: next });
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save.");
+      setRows((prev) => prev.map((r) => (r.key === key ? { ...r, enabled: !next } : r)));
+    }
+  }
+
+  async function toggleRole(key: string, role: UserRole, checked: boolean) {
+    const row = rows.find((r) => r.key === key);
+    if (!row) return;
+    const nextRoles = checked ? [...row.roles, role] : row.roles.filter((r) => r !== role);
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, roles: nextRoles } : r)));
+    const res = await updateNotificationSetting(key, { roles: nextRoles });
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save.");
+      setRows((prev) => prev.map((r) => (r.key === key ? { ...r, roles: row.roles } : r)));
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold text-blueprint-dark">Notifications</h2>
+      <p className="mb-3 text-xs text-blueprint/50">
+        Control which events send a notification at all, and which roles get it automatically — regardless of
+        whether that person has personally clicked &quot;Get alerts&quot; on a construction. Push is used instead
+        of email for anyone who&apos;s enabled push notifications on a device.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-blueprint/10 bg-white">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-blueprint/10 text-left text-xs text-blueprint/50">
+              <th className="px-3 py-2 font-medium">Action</th>
+              <th className="px-3 py-2 text-center font-medium">Enabled</th>
+              {ROLE_VALUES.map((role) => (
+                <th key={role} className="px-3 py-2 text-center font-medium">
+                  {ROLE_LABELS[role]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} className="border-b border-blueprint/5 last:border-0">
+                <td className="px-3 py-2">
+                  <p className="font-medium text-blueprint-dark">{row.label}</p>
+                  <p className="text-xs text-blueprint/50">{row.description}</p>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <input type="checkbox" checked={row.enabled} onChange={(e) => toggleEnabled(row.key, e.target.checked)} />
+                </td>
+                {ROLE_VALUES.map((role) => (
+                  <td key={role} className="px-3 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={row.roles.includes(role)}
+                      disabled={!row.enabled}
+                      onChange={(e) => toggleRole(row.key, role, e.target.checked)}
+                      title={`Always notify ${ROLE_LABELS[role]}, regardless of "Get alerts"`}
                     />
                   </td>
                 ))}

@@ -5,7 +5,8 @@ import { BrandMark } from "@/components/BrandMark";
 import { AdminClient, type AdminProject, type AdminUser } from "@/app/admin/admin-client";
 import { ROLE_VALUES, ALL_TABS } from "@/lib/permissions";
 import { getCurrentUser } from "@/lib/permissions-server";
-import type { TabPermission, UserTabPermission } from "@/lib/types";
+import { NOTIFICATION_ACTIONS } from "@/lib/notificationCatalog";
+import type { TabPermission, UserTabPermission, UserRole } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,14 @@ export default async function AdminPage() {
   const currentUser = await getCurrentUser();
   if (!currentUser?.isDeveloper) redirect("/projects");
 
-  const [{ data: tabPermissions }, { data: profiles }, { data: projects }, { data: userTabPermissions }] = await Promise.all([
-    supabase.from("tab_permissions").select("role, tab, allowed"),
-    supabase.from("profiles").select("id, email, role, status, is_test, display_name").order("email"),
-    supabase.from("projects").select("id, name, address, user_id").order("name"),
-    supabase.from("user_tab_permissions").select("user_id, tab, allowed"),
-  ]);
+  const [{ data: tabPermissions }, { data: profiles }, { data: projects }, { data: userTabPermissions }, { data: notificationSettings }] =
+    await Promise.all([
+      supabase.from("tab_permissions").select("role, tab, allowed"),
+      supabase.from("profiles").select("id, email, role, status, is_test, display_name").order("email"),
+      supabase.from("projects").select("id, name, address, user_id").order("name"),
+      supabase.from("user_tab_permissions").select("user_id, tab, allowed"),
+      supabase.from("notification_settings").select("action, enabled, roles"),
+    ]);
 
   // Grouped by user so each row's "Permissions" panel already has its own
   // overrides on hand without a fetch of its own.
@@ -64,6 +67,22 @@ export default async function AdminPage() {
     tabs: ALL_TABS.map((t) => ({ slug: t.slug, label: t.label, allowed: permMap.get(`${role}:${t.slug}`) ?? true })),
   }));
 
+  // Same "ensure every row exists" merge as the tab_permissions matrix
+  // above — a catalog entry with no notification_settings row yet (a
+  // fresh action whose seed migration hasn't run) still renders with its
+  // catalog default instead of disappearing from the list.
+  const notificationSettingsByAction = new Map((notificationSettings ?? []).map((n) => [n.action, n]));
+  const notificationRows = NOTIFICATION_ACTIONS.map((a) => {
+    const row = notificationSettingsByAction.get(a.key);
+    return {
+      key: a.key,
+      label: a.label,
+      description: a.description,
+      enabled: row?.enabled ?? true,
+      roles: (row?.roles ?? a.defaultRoles) as UserRole[],
+    };
+  });
+
   return (
     <div className="min-h-screen bg-concrete">
       <header className="border-b border-blueprint/10 bg-white">
@@ -89,6 +108,7 @@ export default async function AdminPage() {
           matrix={matrix}
           users={users}
           projects={projectRows}
+          notificationSettings={notificationRows}
           currentUserId={user.id}
           currentPreviewRole={currentUser.role}
         />

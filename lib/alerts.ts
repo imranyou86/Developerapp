@@ -1,23 +1,29 @@
 // Server-only. Fires an alert whenever something worth knowing about
 // happens on a project — a chat message, a checklist/warranty item added
-// or marked fixed, a warranty item's review status changing — either to
-// everyone who's opted in via "Get alerts" (notifyProjectSubscribers) or,
-// for a couple of role-specific events, to whoever's actually responsible
-// for acting on it regardless of opt-in (notifyProjectRoles).
+// or marked fixed, a warranty item's review status changing, and so on.
+// Every call site goes through notifyForAction(projectId, actionKey, ...),
+// which looks up that action's row in notification_settings (Developer-
+// editable from the Admin page's Notifications section) to decide two
+// things: whether this notification fires at all, and which roles get it
+// regardless of their own "Get alerts" opt-in. See
+// lib/notificationCatalog.ts for the canonical action list and what each
+// one means.
 //
-// Reads subscribers/profiles via the service-role admin client
+// Reads subscribers/settings/profiles via the service-role admin client
 // (lib/supabase/admin.ts) rather than the caller's own session —
-// project_alert_subscriptions_select only allows a user to see their own
-// subscription row, since dispatch is a system operation, not something
-// any one caller should be able to read other members' rows through.
-// Best-effort throughout: a broken RESEND_API_KEY/VAPID key or a delivery
-// failure never breaks the action that triggered the alert — see every
-// catch below.
+// project_alert_subscriptions_select and notification_settings_select
+// only allow a user to see their own row (or, for settings, require
+// Developer), since dispatch is a system operation, not something any one
+// caller should be able to read other members' rows through. Best-effort
+// throughout: a broken RESEND_API_KEY/VAPID key or a delivery failure
+// never breaks the action that triggered the alert — see every catch
+// below.
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/email";
 import { getSiteOrigin } from "@/lib/site";
 import { isPushConfigured, sendPush } from "@/lib/webPush";
+import { NOTIFICATION_ACTIONS } from "@/lib/notificationCatalog";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -25,87 +31,79 @@ interface AlertRecipient {
   userId: string;
   email: string;
   // The project_alert_subscriptions row's own id, when this recipient came
-  // from that table — doubles as the unsubscribe token. Recipients from
-  // notifyProjectRoles (a mandatory, role-targeted notice, not an opt-in
-  // subscription) have no such row and so get no unsubscribe link.
+  // from that table — doubles as the unsubscribe token. A recipient who
+  // only qualifies via notification_settings' forced roles (not a personal
+  // subscription) has no such row and so gets no unsubscribe link — there
+  // being nothing they personally subscribed to.
   unsubscribeId?: string;
 }
 
-export async function notifyProjectSubscribers(
+export async function notifyForAction(
   projectId: string,
+  action: string,
   options: { subject: string; body: string; excludeUserId?: string }
 ): Promise<void> {
   try {
     const admin = createAdminClient();
-    const [{ data: subs, error: subsError }, { data: project, error: projectError }] = await Promise.all([
-      admin.from("project_alert_subscriptions").select("id, user_id, email").eq("project_id", projectId),
-      admin.from("projects").select("name").eq("id", projectId).maybeSingle(),
-    ]);
-    // These two used to be silently treated as "no subscribers" on any
-    // failure (a bad/mismatched SUPABASE_SERVICE_ROLE_KEY, RLS somehow
-    // still applying, etc.) — logging them here is the only way a broken
-    // admin-client query surfaces at all, since this function's outer catch
-    // only fires on a thrown exception, not a query that merely errors.
-    if (subsError) console.warn("notifyProjectSubscribers: could not read subscribers:", subsError.message);
-    if (projectError) console.warn("notifyProjectSubscribers: could not read project name:", projectError.message);
-    if (!subs || subs.length === 0) return;
-
-    const recipients: AlertRecipient[] = subs
-      .filter((s) => s.user_id !== options.excludeUserId)
-      .map((s) => ({ userId: s.user_id, email: s.email, unsubscribeId: s.id }));
-
-    await deliverAlert(admin, recipients, project?.name ?? "your construction", projectId, options);
-  } catch (err) {
-    console.warn("notifyProjectSubscribers failed (non-fatal):", err);
-  }
-}
-
-// Notifies whoever's actually responsible for acting on something,
-// regardless of whether they've opted into that project's alerts —
-// currently just "a new warranty request needs Contractor/Developer
-// review." `roles` are account-wide profiles.role values; a 'developer'
-// always has access to every project (same is_developer() shortcut
-// has_project_access uses), so every developer qualifies. Any other role
-// (e.g. 'contractor') only qualifies if they actually have access to THIS
-// project — its owner, or a project_members row on it.
-export async function notifyProjectRoles(
-  projectId: string,
-  roles: string[],
-  options: { subject: string; body: string; excludeUserId?: string }
-): Promise<void> {
-  try {
-    const admin = createAdminClient();
-    const [{ data: project, error: projectError }, { data: members, error: membersError }, { data: profiles, error: profilesError }] =
+    const [{ data: setting, error: settingError }, { data: subs, error: subsError }, { data: project, error: projectError }] =
       await Promise.all([
+        admin.from("notification_settings").select("enabled, roles").eq("action", action).maybeSingle(),
+        admin.from("project_alert_subscriptions").select("id, user_id, email").eq("project_id", projectId),
         admin.from("projects").select("name, user_id").eq("id", projectId).maybeSingle(),
+      ]);
+    if (settingError) console.warn(`notifyForAction(${action}): could not read notification_settings:`, settingError.message);
+    if (subsError) console.warn(`notifyForAction(${action}): could not read subscribers:`, subsError.message);
+    if (projectError) console.warn(`notifyForAction(${action}): could not read project:`, projectError.message);
+
+    // No row yet (a fresh action added to the catalog before its migration
+    // seed ran, or the settings table itself missing) falls back to that
+    // action's catalog default rather than silently going quiet.
+    const catalogDefault = NOTIFICATION_ACTIONS.find((a) => a.key === action);
+    const enabled = setting?.enabled ?? true;
+    const roles = setting?.roles ?? catalogDefault?.defaultRoles ?? [];
+    if (!enabled) return;
+
+    const recipientsByUser = new Map<string, AlertRecipient>();
+
+    for (const s of subs ?? []) {
+      if (s.user_id === options.excludeUserId) continue;
+      recipientsByUser.set(s.user_id, { userId: s.user_id, email: s.email, unsubscribeId: s.id });
+    }
+
+    if (roles.length > 0) {
+      const [{ data: members, error: membersError }, { data: profiles, error: profilesError }] = await Promise.all([
         admin.from("project_members").select("user_id").eq("project_id", projectId),
         admin.from("profiles").select("id, email, role").in("role", roles),
       ]);
-    if (projectError) console.warn("notifyProjectRoles: could not read project:", projectError.message);
-    if (membersError) console.warn("notifyProjectRoles: could not read project members:", membersError.message);
-    if (profilesError) console.warn("notifyProjectRoles: could not read profiles:", profilesError.message);
-    if (!profiles || profiles.length === 0) return;
+      if (membersError) console.warn(`notifyForAction(${action}): could not read project members:`, membersError.message);
+      if (profilesError) console.warn(`notifyForAction(${action}): could not read profiles:`, profilesError.message);
 
-    const accessibleUserIds = new Set([project?.user_id, ...(members ?? []).map((m) => m.user_id)].filter(Boolean));
-    const recipients: AlertRecipient[] = profiles
-      .filter((p) => p.id !== options.excludeUserId)
-      // A 'developer' profile always has access (same is_developer()
-      // shortcut has_project_access uses); every other role only qualifies
-      // if it's actually the owner or a member of this specific project.
-      .filter((p) => p.role === "developer" || accessibleUserIds.has(p.id))
-      .map((p) => ({ userId: p.id, email: p.email }));
+      const accessibleUserIds = new Set([project?.user_id, ...(members ?? []).map((m) => m.user_id)].filter(Boolean));
+      for (const p of profiles ?? []) {
+        if (p.id === options.excludeUserId) continue;
+        // A 'developer' profile always has access (same is_developer()
+        // shortcut has_project_access uses); every other role only
+        // qualifies if it's actually the owner or a member of this project.
+        if (p.role !== "developer" && !accessibleUserIds.has(p.id)) continue;
+        // A personal subscription (added above) already carries an
+        // unsubscribe link — don't overwrite it with a forced-role entry
+        // that has none.
+        if (!recipientsByUser.has(p.id)) recipientsByUser.set(p.id, { userId: p.id, email: p.email });
+      }
+    }
 
+    const recipients = Array.from(recipientsByUser.values());
     await deliverAlert(admin, recipients, project?.name ?? "your construction", projectId, options);
   } catch (err) {
-    console.warn("notifyProjectRoles failed (non-fatal):", err);
+    console.warn(`notifyForAction(${action}) failed (non-fatal):`, err);
   }
 }
 
-// Shared by both dispatch paths above: emails everyone, EXCEPT a recipient
-// who has at least one enabled push subscription gets pushed instead —
-// "when push notifications are enabled, disable emails" for that person.
-// A recipient with no push subscription (or when push isn't configured at
-// all) still gets the email exactly as before.
+// Shared by notifyForAction: emails everyone, EXCEPT a recipient who has
+// at least one enabled push subscription gets pushed instead — "when push
+// notifications are enabled, disable emails" for that person. A recipient
+// with no push subscription (or when push isn't configured at all) still
+// gets the email exactly as before.
 async function deliverAlert(
   admin: AdminClient,
   recipients: AlertRecipient[],
@@ -151,9 +149,9 @@ async function deliverAlert(
     emailRecipients.map((r) => {
       // The subscription row's own id (a random uuid) doubles as the
       // unsubscribe token — same "unguessable id in a public link" pattern
-      // project_shares/project_invites already use. Recipients with no such
-      // row (notifyProjectRoles) get no unsubscribe line — there's nothing
-      // to unsubscribe from.
+      // project_shares/project_invites already use. A recipient with no
+      // such id (forced by role, not personally subscribed) gets no
+      // unsubscribe line — there's nothing to unsubscribe from.
       const unsubscribeLine = r.unsubscribeId && origin
         ? `\n\nNo longer want these emails? Unsubscribe: ${origin}/api/alerts/unsubscribe?sub=${r.unsubscribeId}`
         : "";

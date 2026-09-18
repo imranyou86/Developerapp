@@ -2324,3 +2324,32 @@ yet; each one only adds what a given feature needed.
   enabled push subscription first; only recipients with none still get
   the email. No more double notification once you've turned push on.
 - No migration — this only changes how existing tables are queried.
+
+## Admin-configurable notification settings ("who gets notified for what")
+
+- **New "Notifications" section on the Admin page** lists every event
+  that can trigger a project notification (chat message, checklist item
+  added/done, warranty item added/done/status changed, warranty items
+  bulk-added from an inspection report, warranty request submitted/
+  approved/rejected/status changed/commented on — see
+  `lib/notificationCatalog.ts`). For each one, a Developer can:
+  - **Toggle it off entirely** — no email or push fires for that event
+    at all, even for someone personally subscribed via "Get alerts."
+  - **Force-notify specific roles** — check a role to have everyone with
+    that role (and access to the construction) get notified
+    automatically, regardless of their own opt-in. Unchecking a role
+    doesn't block anyone who's personally subscribed; it only removes
+    the automatic notice for that role.
+- **`lib/alerts.ts`'s `notifyForAction(projectId, actionKey, ...)`**
+  replaces the previous `notifyProjectSubscribers`/`notifyProjectRoles`
+  split with one unified path: recipients are the union of (a) anyone
+  personally subscribed to that construction's alerts and (b) anyone
+  whose role is force-listed for that action and who has access to that
+  construction. Both still go through the same push-suppresses-email
+  delivery. Every call site across chat/checklist/warranty-request
+  actions now passes an action key from the catalog.
+- **Migration 054** adds `notification_settings` (Developer-only RLS,
+  read and written), seeded with every catalog action enabled and purely
+  opt-in (empty forced-roles list) except `warranty_request_submitted`,
+  which defaults to forcing Contractor/Developer — the existing behavior
+  from the previous change, now configurable instead of hardcoded.

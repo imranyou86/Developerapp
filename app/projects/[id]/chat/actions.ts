@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
-import { notifyProjectSubscribers } from "@/lib/alerts";
+import { notifyForAction } from "@/lib/alerts";
 import { CHAT_PAGE_SIZE } from "@/lib/pagination";
 import type { ProjectMessage } from "@/lib/types";
 
@@ -69,7 +69,7 @@ export async function sendMessage(projectId: string, id: string, body: string): 
   // subscribed account gets emailed about every new chat message,
   // including its own, so someone watching a project's chat by email sees
   // a complete thread rather than a gapped one missing their own replies.
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "chat_message", {
     subject: "New chat message",
     body: `${senderName ?? user.email ?? "Someone"} sent a chat message:\n\n${trimmed}`,
   });

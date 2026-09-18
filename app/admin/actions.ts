@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ActionResult } from "@/app/projects/actions";
+import { ROLE_VALUES } from "@/lib/permissions";
 import type { UserRole } from "@/lib/types";
 
 async function requireDeveloper(): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
@@ -147,6 +148,29 @@ export async function updateUserTabPermission(userId: string, tab: string, allow
     const { error } = await supabase.from("user_tab_permissions").upsert({ user_id: userId, tab, allowed }, { onConflict: "user_id,tab" });
     if (error) return { ok: false, error: error.message };
   }
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+// Controls lib/alerts.ts's notifyForAction: `enabled` mutes the
+// notification app-wide (no email or push, even for someone personally
+// subscribed via "Get alerts"); `roles` force-notifies those account
+// roles regardless of individual opt-in — see lib/notificationCatalog.ts.
+export async function updateNotificationSetting(
+  action: string,
+  patch: { enabled?: boolean; roles?: UserRole[] }
+): Promise<ActionResult> {
+  const auth = await requireDeveloper();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (patch.roles && patch.roles.some((r) => !ROLE_VALUES.includes(r))) {
+    return { ok: false, error: "Invalid role." };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("notification_settings")
+    .upsert({ action, ...patch, updated_at: new Date().toISOString() }, { onConflict: "action" });
+  if (error) return { ok: false, error: error.message };
   revalidatePath("/admin");
   return { ok: true };
 }

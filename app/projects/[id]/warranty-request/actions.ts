@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
-import { notifyProjectSubscribers, notifyProjectRoles } from "@/lib/alerts";
+import { notifyForAction } from "@/lib/alerts";
 import { logActivity } from "@/lib/activityLog";
 import type { WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 
@@ -104,7 +104,7 @@ export async function addWarrantyItem(projectId: string, title: string): Promise
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_item_added", {
     subject: "New warranty request",
     body: `A new warranty item was filed: "${title.trim()}"`,
     excludeUserId: user?.id,
@@ -131,7 +131,7 @@ export async function toggleWarrantyItem(
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    await notifyProjectSubscribers(projectId, {
+    await notifyForAction(projectId, "warranty_item_done", {
       subject: "Warranty item fixed",
       body: `"${itemTitle ?? "A warranty item"}" was marked fixed.`,
       excludeUserId: user?.id,
@@ -151,7 +151,7 @@ export async function toggleWarrantyItems(projectId: string, itemIds: string[], 
   if (error) return { ok: false, error: error.message };
 
   if (done) {
-    await notifyProjectSubscribers(projectId, {
+    await notifyForAction(projectId, "warranty_item_done", {
       subject: "Warranty items fixed",
       body: `${itemIds.length} warranty item${itemIds.length === 1 ? " was" : "s were"} marked fixed.`,
       excludeUserId: guard.userId,
@@ -180,7 +180,7 @@ export async function setWarrantyStatus(
       data: { user },
     } = await supabase.auth.getUser();
     const label = status === "validated" ? "validated" : "marked not covered by warranty";
-    await notifyProjectSubscribers(projectId, {
+    await notifyForAction(projectId, "warranty_item_status_changed", {
       subject: "Warranty item status changed",
       body: `"${itemTitle ?? "A warranty item"}" was ${label}.`,
       excludeUserId: user?.id,
@@ -434,7 +434,7 @@ export async function addWarrantyItemsFromReport(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_items_from_report", {
     subject: "New warranty requests from an inspection report",
     body: `${data.length} new warranty item${data.length === 1 ? "" : "s"} added:\n${data.map((it) => `- ${it.title}`).join("\n")}`,
     excludeUserId: user?.id,
@@ -478,14 +478,12 @@ export async function requestWarrantyItem(
   });
   if (error) return { ok: false, error: error.message };
 
-  // Goes only to whoever can actually act on it (REQUEST_DELETE_ROLES'
-  // contractor/developer, not PM — those are the ones the warranty tab's
-  // "approve" flow gates on for delete; approve/reject also allows PM, but
-  // this notice is intentionally narrower), and to all of them on this
-  // construction regardless of whether they've opted into "Get alerts" —
-  // a new request needing review isn't optional the way a general project
-  // update is.
-  await notifyProjectRoles(projectId, REQUEST_DELETE_ROLES, {
+  // Roles force-notified for "warranty_request_submitted" default to
+  // contractor/developer (Admin-configurable — see
+  // lib/notificationCatalog.ts) regardless of whether they've opted into
+  // "Get alerts" — a new request needing review isn't optional the way a
+  // general project update is.
+  await notifyForAction(projectId, "warranty_request_submitted", {
     subject: "New warranty item request",
     body: `A warranty item was requested${category ? ` (${category})` : ""}: "${title.trim()}" — awaiting your approval.`,
     excludeUserId: user.id,
@@ -539,7 +537,7 @@ export async function approveWarrantyItemRequest(projectId: string, requestId: s
     detail: `Approved "${request.title}"`,
   });
 
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_request_approved", {
     subject: "Warranty request approved",
     body: `"${request.title}" was approved and added to the warranty list.`,
     excludeUserId: guard.userId,
@@ -577,7 +575,7 @@ export async function rejectWarrantyItemRequest(projectId: string, requestId: st
     detail: `Rejected "${request.title}"`,
   });
 
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_request_rejected", {
     subject: "Warranty request rejected",
     body: `"${request.title}" was not approved as a warranty item.`,
     excludeUserId: guard.userId,
@@ -641,7 +639,7 @@ export async function setWarrantyRequestProgress(
   if (error) return { ok: false, error: error.message };
 
   const label = progress === "in_progress" ? "in progress" : progress === "complete" ? "complete" : "open";
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_request_status_changed", {
     subject: "Warranty request status changed",
     body: `"${requestTitle ?? "A warranty request"}" is now ${label}.`,
     excludeUserId: guard.userId,
@@ -705,7 +703,7 @@ export async function addWarrantyRequestComment(
     .single();
   if (error) return { ok: false, error: error.message };
 
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "warranty_request_comment", {
     subject: "New comment on a warranty request",
     body: `${senderName ?? user.email ?? "Someone"} commented:\n\n${trimmed}`,
     excludeUserId: user.id,

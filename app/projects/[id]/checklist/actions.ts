@@ -6,7 +6,7 @@ import type { ActionResult } from "@/app/projects/actions";
 import type { ChecklistPhase } from "@/lib/types";
 import { CHECKLIST_SEED } from "@/lib/checklist-seed";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
-import { notifyProjectSubscribers } from "@/lib/alerts";
+import { notifyForAction } from "@/lib/alerts";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/checklist`);
@@ -44,7 +44,7 @@ export async function toggleChecklistItem(
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    await notifyProjectSubscribers(projectId, {
+    await notifyForAction(projectId, "checklist_item_done", {
       subject: "Checklist item done",
       body: `"${itemTitle ?? "A checklist item"}" was marked done.`,
       excludeUserId: user?.id,
@@ -91,7 +91,7 @@ export async function addChecklistItem(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  await notifyProjectSubscribers(projectId, {
+  await notifyForAction(projectId, "checklist_item_added", {
     subject: "New checklist item",
     body: `"${title.trim()}" was added to the checklist.`,
     excludeUserId: user?.id,
@@ -129,7 +129,7 @@ export async function toggleChecklistItems(projectId: string, itemIds: string[],
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    await notifyProjectSubscribers(projectId, {
+    await notifyForAction(projectId, "checklist_item_done", {
       subject: "Checklist items done",
       body: `${itemIds.length} checklist item${itemIds.length === 1 ? " was" : "s were"} marked done.`,
       excludeUserId: user?.id,

@@ -598,6 +598,20 @@ create table if not exists push_subscriptions (
   created_at timestamptz not null default now()
 );
 
+-- Admin-configurable notification settings — see lib/notificationCatalog.ts
+-- for the canonical action list this is seeded from below, and
+-- lib/alerts.ts's notifyForAction for how it's read at dispatch time.
+create table if not exists notification_settings (
+  action text primary key,
+  enabled boolean not null default true,
+  -- Roles force-notified for this action regardless of individual
+  -- "Get alerts" opt-in — empty means purely opt-in. No DB-level CHECK on
+  -- the role values (an array CHECK is awkward in Postgres); the Admin
+  -- action that writes this validates against ROLE_VALUES instead.
+  roles text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
 -- Shared subcontractor directory — not scoped to a single project, so
 -- anyone can look up a vetted sub while working any construction. Any
 -- signed-in user can read the whole list (see the RLS policy below); only
@@ -776,6 +790,22 @@ from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty')) as 
 cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request'), ('activity')) as t(tab)
 on conflict (role, tab) do nothing;
 
+-- Seeded from lib/notificationCatalog.ts — keep these two in sync.
+insert into notification_settings (action, enabled, roles) values
+  ('chat_message', true, '{}'),
+  ('checklist_item_added', true, '{}'),
+  ('checklist_item_done', true, '{}'),
+  ('warranty_item_added', true, '{}'),
+  ('warranty_item_done', true, '{}'),
+  ('warranty_item_status_changed', true, '{}'),
+  ('warranty_items_from_report', true, '{}'),
+  ('warranty_request_submitted', true, '{contractor,developer}'),
+  ('warranty_request_approved', true, '{}'),
+  ('warranty_request_rejected', true, '{}'),
+  ('warranty_request_status_changed', true, '{}'),
+  ('warranty_request_comment', true, '{}')
+on conflict (action) do nothing;
+
 -- Backfill a profile for any auth user that predates this table; new
 -- signups get one via the trigger below. Pre-existing accounts are
 -- grandfathered straight to 'approved' — only signups going through the
@@ -858,6 +888,7 @@ alter table project_chat_reads enable row level security;
 alter table user_tab_permissions enable row level security;
 alter table project_alert_subscriptions enable row level security;
 alter table push_subscriptions enable row level security;
+alter table notification_settings enable row level security;
 alter table subcontractors enable row level security;
 alter table project_subcontractors enable row level security;
 alter table certificate_of_occupancy_checks enable row level security;
@@ -1263,6 +1294,14 @@ create policy "push_subscriptions_insert" on push_subscriptions
   for insert with check (auth.uid() = user_id);
 create policy "push_subscriptions_delete" on push_subscriptions
   for delete using (auth.uid() = user_id);
+
+-- Developer-only in both directions — a shared, account-wide policy only
+-- the Admin page edits; dispatch always reads it via the service-role
+-- admin client anyway (bypassing RLS), so no other role needs read access.
+create policy "notification_settings_select" on notification_settings
+  for select using (is_developer());
+create policy "notification_settings_write" on notification_settings
+  for all using (is_developer()) with check (is_developer());
 
 -- ---------------------------------------------------------------------------
 -- Storage buckets — plan pages, rendering photos, checklist photos, bid PDFs,
