@@ -2103,3 +2103,20 @@ yet; each one only adds what a given feature needed.
     passes `show` to `WelcomeOverlay`, which immediately strips the flag
     from the URL (`router.replace(pathname)`) so refreshing the same page
     never re-triggers it.
+
+## Fixed: sign out redirecting to a broken page
+
+- **`/auth/signout` was returning a 307, not a 303** — `redirect("/login")`
+  from `next/navigation`, called in a plain Route Handler, defaults to a
+  307 Temporary Redirect, which preserves the original request's HTTP
+  method. Since sign-out is triggered by a raw `<form method="post">`
+  (`app/projects/page.tsx` and the project layout), the browser was
+  re-issuing a **POST to `/login`** on that redirect — a page with no POST
+  handler — so sign-out silently succeeded server-side (the Supabase
+  session really was cleared) while the user's browser landed on a broken
+  request instead of the login page. Switched to a manual
+  `NextResponse.redirect(new URL("/login", request.url), { status: 303 })`,
+  which forces the browser to follow up with a GET regardless of the
+  original method — the standard fix for this exact class of bug in
+  Route Handlers (Server Actions get this right automatically; plain
+  Route Handlers don't).
