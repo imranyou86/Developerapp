@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter, usePathname } from "next/navigation";
 import { BrandMark } from "@/components/BrandMark";
 
 // Shown once, immediately after a real sign-in — never on an ordinary page
@@ -12,12 +11,15 @@ import { BrandMark } from "@/components/BrandMark";
 // the URL right away so refreshing this same page never re-triggers it.
 export function WelcomeOverlay({ show }: { show: boolean }) {
   const [visible, setVisible] = useState(show);
-  const router = useRouter();
-  const pathname = usePathname();
 
   useEffect(() => {
-    if (show) router.replace(pathname);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!show) return;
+    // A plain History API call, not next/navigation's router.replace() —
+    // that would re-fetch this force-dynamic page's server data and can
+    // remount this component with the now-gone query flag, hiding it
+    // (sometimes near-instantly) before it's ever actually seen. This only
+    // rewrites the address bar, leaving the current render/state alone.
+    window.history.replaceState(null, "", window.location.pathname);
   }, [show]);
 
   useEffect(() => {

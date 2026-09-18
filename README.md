@@ -2120,3 +2120,18 @@ yet; each one only adds what a given feature needed.
   original method — the standard fix for this exact class of bug in
   Route Handlers (Server Actions get this right automatically; plain
   Route Handlers don't).
+
+## Fixed: welcome animation never actually appearing
+
+- **`WelcomeOverlay` was hiding itself almost as soon as it mounted** — it
+  stripped the one-shot `?welcome=1` flag with `router.replace(pathname)`
+  (next/navigation), which on `/projects` (`export const dynamic =
+  "force-dynamic"`) re-fetches the page's server data. That re-render can
+  remount the overlay with the now-gone query flag, resetting its
+  `visible` state back to `false` — often fast enough that the animation
+  was never actually perceived, which is why it looked like it "never
+  showed" despite the `?welcome=1` flag correctly reaching the page every
+  time. Switched to `window.history.replaceState(null, "", ...)` — a
+  plain browser History API call that only rewrites the address bar text,
+  triggering no Next.js navigation, re-fetch, or re-render at all, so the
+  component's own state is left completely alone.
