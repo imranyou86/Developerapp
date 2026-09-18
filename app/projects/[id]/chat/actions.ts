@@ -84,6 +84,27 @@ export async function deleteMessage(messageId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+// Wipes the entire thread for this construction — a stronger action than
+// deleting a single message, so it's Developer-only (matches
+// project_messages_delete's RLS: auth.uid() = user_id or is_developer(),
+// which already lets a Developer delete any message, not just their own).
+// Every other viewer's chat clears live via the existing Realtime DELETE
+// listener in chat-client.tsx, one event per deleted row.
+export async function clearChat(projectId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "developer") return { ok: false, error: "Only a Developer can clear this chat." };
+
+  const { error } = await supabase.from("project_messages").delete().eq("project_id", projectId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // Marks this project's chat as read up to now for the current user — called
 // by ProjectTabs (app/projects/[id]/project-tabs.tsx) whenever it's the
 // active tab, including on every new Realtime message that arrives while

@@ -2065,3 +2065,20 @@ yet; each one only adds what a given feature needed.
   thread instead of one missing their own replies. Also reworded the
   notification body from "wrote:" to "sent a chat message:" for clarity
   in the inbox.
+
+## Clear chat (Developer only)
+
+- **A Developer can wipe an entire construction's chat thread** — a
+  "Clear chat" link above the message list (only visible to a Developer,
+  and only when there's something to clear) opens a `ConfirmDialog`
+  ("this cannot be undone") before calling a new `clearChat(projectId)`
+  action (`app/projects/[id]/chat/actions.ts`), which deletes every
+  `project_messages` row for that project in one query. Guarded to
+  `profiles.role === 'developer'` server-side, matching
+  `project_messages_delete`'s existing RLS (`auth.uid() = user_id or
+  is_developer()`), which already let a Developer delete any single
+  message — this just extends that to "all of them at once." Every other
+  viewer's chat clears live through the Realtime `DELETE` listener
+  `chat-client.tsx` already had (one event per deleted row), so no new
+  Realtime wiring was needed. `app/projects/[id]/chat/page.tsx` now also
+  fetches `getCurrentUser()` to pass `isDeveloper` down to `ChatClient`.

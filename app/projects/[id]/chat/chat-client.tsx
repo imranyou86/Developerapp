@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
-import { sendMessage, deleteMessage, loadOlderMessages } from "@/app/projects/[id]/chat/actions";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { sendMessage, deleteMessage, clearChat, loadOlderMessages } from "@/app/projects/[id]/chat/actions";
 import type { ProjectMessage } from "@/lib/types";
 
 function formatTimestamp(iso: string): string {
@@ -19,11 +20,13 @@ export function ChatClient({
   currentUserId,
   initialMessages,
   initialHasMore,
+  isDeveloper,
 }: {
   projectId: string;
   currentUserId: string;
   initialMessages: ProjectMessage[];
   initialHasMore: boolean;
+  isDeveloper: boolean;
 }) {
   const { notify } = useToast();
   const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages);
@@ -32,6 +35,8 @@ export function ChatClient({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasLoadedOlder = useRef(false);
@@ -145,8 +150,30 @@ export function ChatClient({
     setDeletingId(null);
   }
 
+  async function handleClearChat() {
+    setClearing(true);
+    const previous = messages;
+    setMessages([]);
+    const res = await clearChat(projectId);
+    setClearing(false);
+    setConfirmClear(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not clear the chat.");
+      setMessages(previous);
+      return;
+    }
+    notify("success", "Chat cleared.");
+  }
+
   return (
     <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col">
+      {isDeveloper && messages.length > 0 && (
+        <div className="mb-2 flex justify-end">
+          <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmClear(true)}>
+            Clear chat
+          </button>
+        </div>
+      )}
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-blueprint/10 bg-white p-4">
         {messages.length === 0 ? (
           <p className="text-center text-sm text-blueprint/50">
@@ -201,6 +228,17 @@ export function ChatClient({
           Send
         </button>
       </form>
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear this chat?"
+        message="Every message in this construction's chat will be permanently removed for everyone. This cannot be undone."
+        confirmLabel="Clear chat"
+        danger
+        busy={clearing}
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={handleClearChat}
+      />
     </div>
   );
 }

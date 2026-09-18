@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { CHAT_PAGE_SIZE } from "@/lib/pagination";
 import { ChatClient } from "@/app/projects/[id]/chat/chat-client";
+import { getCurrentUser } from "@/lib/permissions-server";
 import type { ProjectMessage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,11 @@ export default async function ChatPage({ params }: { params: { id: string } }) {
     {
       data: { user },
     },
+    currentUser,
     { data: messages, error },
   ] = await Promise.all([
     supabase.auth.getUser(),
+    getCurrentUser(),
     // Most recent page only — fetched newest-first so `.limit()` keeps the
     // latest messages rather than the oldest, then reversed back to
     // ascending for display. Older history loads on demand (see
@@ -37,7 +40,13 @@ export default async function ChatPage({ params }: { params: { id: string } }) {
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">Could not load chat: {error.message}</div>
       )}
-      <ChatClient projectId={projectId} currentUserId={user?.id ?? ""} initialMessages={initialMessages} initialHasMore={hasMore} />
+      <ChatClient
+        projectId={projectId}
+        currentUserId={user?.id ?? ""}
+        initialMessages={initialMessages}
+        initialHasMore={hasMore}
+        isDeveloper={currentUser?.isDeveloper ?? false}
+      />
     </div>
   );
 }
