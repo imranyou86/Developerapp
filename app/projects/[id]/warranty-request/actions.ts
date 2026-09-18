@@ -532,6 +532,16 @@ export async function requestWarrantyItems(
   const allRows: { id: string; title: string; category: string | null; is_group: boolean }[] = [];
   const insertRows: Record<string, unknown>[] = [];
 
+  // Every object pushed to insertRows carries the exact same set of keys
+  // (comment/is_group/group_id explicitly null where not applicable) even
+  // though the three row shapes below don't all need every column — a
+  // single .insert() call with a batch of objects becomes one INSERT
+  // statement whose column list PostgREST derives from the union of keys
+  // across the whole array; any row missing a key gets an explicit NULL for
+  // that column rather than falling back to the table's default, which
+  // trips the "is_group" not-null constraint the moment a batch mixes a
+  // standalone row (no is_group key at all) with a group/task row that has
+  // one.
   for (const [key, bucketItems] of buckets) {
     const category = key || null;
     if (bucketItems.length === 1) {
@@ -543,6 +553,8 @@ export async function requestWarrantyItems(
         comment: bucketItems[0].comment?.trim() || null,
         category,
         requested_by: requester.requestedBy,
+        is_group: false,
+        group_id: null,
       });
       allRows.push({ id, title: bucketItems[0].title.trim(), category, is_group: false });
     } else {
@@ -551,9 +563,11 @@ export async function requestWarrantyItems(
         id: groupId,
         project_id: projectId,
         title: category ?? "Warranty items",
+        comment: null,
         category,
-        is_group: true,
         requested_by: requester.requestedBy,
+        is_group: true,
+        group_id: null,
       });
       allRows.push({ id: groupId, title: category ?? "Warranty items", category, is_group: true });
       for (const item of bucketItems) {
@@ -564,8 +578,9 @@ export async function requestWarrantyItems(
           title: item.title.trim(),
           comment: item.comment?.trim() || null,
           category,
-          group_id: groupId,
           requested_by: requester.requestedBy,
+          is_group: false,
+          group_id: groupId,
         });
         allRows.push({ id: taskId, title: item.title.trim(), category, is_group: false });
       }
