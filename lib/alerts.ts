@@ -21,10 +21,17 @@ export async function notifyProjectSubscribers(
 ): Promise<void> {
   try {
     const admin = createAdminClient();
-    const [{ data: subs }, { data: project }] = await Promise.all([
+    const [{ data: subs, error: subsError }, { data: project, error: projectError }] = await Promise.all([
       admin.from("project_alert_subscriptions").select("id, user_id, email").eq("project_id", projectId),
       admin.from("projects").select("name").eq("id", projectId).maybeSingle(),
     ]);
+    // These two used to be silently treated as "no subscribers" on any
+    // failure (a bad/mismatched SUPABASE_SERVICE_ROLE_KEY, RLS somehow
+    // still applying, etc.) — logging them here is the only way a broken
+    // admin-client query surfaces at all, since this function's outer catch
+    // only fires on a thrown exception, not a query that merely errors.
+    if (subsError) console.warn("notifyProjectSubscribers: could not read subscribers:", subsError.message);
+    if (projectError) console.warn("notifyProjectSubscribers: could not read project name:", projectError.message);
     if (!subs || subs.length === 0) return;
 
     const projectName = project?.name ?? "your construction";
