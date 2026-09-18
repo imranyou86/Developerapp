@@ -38,6 +38,25 @@ export const PROJECT_TABS: ProjectTabDef[] = [
   { slug: "activity", label: "Activity" },
 ];
 
+// How the project tab strip (app/projects/[id]/project-tabs.tsx) actually
+// renders PROJECT_TABS above — grouped into a few dropdowns instead of 13
+// tabs across the screen. Purely a display grouping: it doesn't affect
+// tab_permissions/allowedSlugs at all, a group just disappears if none of
+// its slugs are in allowedSlugs, and an individual tab inside a visible
+// group is still hidden if that slug specifically isn't allowed.
+export type ProjectNavItem =
+  | { type: "tab"; slug: string; label: string }
+  | { type: "group"; label: string; slugs: string[] };
+
+export const PROJECT_NAV: ProjectNavItem[] = [
+  { type: "tab", slug: "plan", label: "Plan" },
+  { type: "tab", slug: "rooms", label: "Rooms & Tasks" },
+  { type: "tab", slug: "checklist", label: "Checklist" },
+  { type: "group", label: "Money", slugs: ["budget", "bids", "payments", "bank-transactions"] },
+  { type: "group", label: "Docs", slugs: ["files", "certificate-of-occupancy", "house-book"] },
+  { type: "group", label: "Team", slugs: ["chat", "warranty-request", "activity"] },
+];
+
 // Top-level (not per-project) sections gated the same way as project tabs.
 // Shared with components/TopNav.tsx, app/deals/layout.tsx,
 // app/interior-design/layout.tsx, and app/construction-cost/layout.tsx.

@@ -2353,3 +2353,30 @@ yet; each one only adds what a given feature needed.
   opt-in (empty forced-roles list) except `warranty_request_submitted`,
   which defaults to forcing Contractor/Developer — the existing behavior
   from the previous change, now configurable instead of hardcoded.
+
+## Concise navigation: tabs grouped into dropdowns
+
+- **The per-project tab strip had grown to 13 tabs** (Plan, Rooms & Tasks,
+  Checklist, Budget, Bids, Payments, Accounting, Files, Certificate of
+  Occupancy, House Book, Chat, Warranty Request, Activity) — all spread
+  across the header at once. It's now grouped into `Plan`/`Rooms & Tasks`/
+  `Checklist` staying flat, plus three dropdowns: **Money** (Budget, Bids,
+  Payments, Accounting), **Docs** (Files, Certificate of Occupancy, House
+  Book), and **Team** (Chat, Warranty Request, Activity) — 6 nav items
+  instead of 13. The grouping (`PROJECT_NAV` in `lib/permissions.ts`) is
+  purely presentational — it doesn't touch `tab_permissions` at all, a
+  group just disappears if none of its tabs are allowed for that role, and
+  a single remaining tab in an otherwise-hidden group renders as a plain
+  link instead of a one-item dropdown.
+- **Adaptive, not forced** — a role that only ever sees a handful of tabs
+  (a `warranty` account's fixed Chat + Warranty Request, or any narrowly
+  scoped role) still gets the old flat list with zero dropdowns; grouping
+  only kicks in once there are more than 6 visible tabs, so it never adds
+  an extra click for a nav that was never crowded to begin with.
+- **The top nav** (Constructions, Calendar, Search, Buyers Guide, Interior
+  Design, Construction Cost, Landscape, Subcontractors, Admin) got the
+  same treatment — Buyers Guide/Interior Design/Construction Cost/
+  Landscape/Subcontractors now live under one "Design & Tools" dropdown,
+  leaving Constructions/Calendar/Search/[Design & Tools]/Admin flat.
+- No migration — this only changes how existing, unchanged permissions
+  render.
