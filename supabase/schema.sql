@@ -28,9 +28,14 @@ create table if not exists projects (
   created_at timestamptz not null default now()
 );
 
+-- Construction Cost's "Standalone Plan" mode (a plan not tied to any
+-- tracked construction) needs a page that isn't tied to one either, so
+-- project_id is optional; created_by backs the RLS for a standalone page,
+-- same shape as finish_scans/landscape_designs.
 create table if not exists plan_pages (
   id uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects (id) on delete cascade,
+  project_id uuid references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
   storage_url text not null,
   label text not null,
   sort_order int not null default 0,
@@ -102,9 +107,16 @@ create table if not exists finish_scans (
   created_at timestamptz not null default now()
 );
 
+-- Optional project_id + created_by, same standalone shape as plan_pages
+-- above — an estimate for a plan that isn't (yet, or ever) one of your
+-- tracked constructions. title/location give a standalone row something to
+-- display in its history in place of a construction's name/address.
 create table if not exists cost_estimates (
   id uuid primary key default gen_random_uuid(),
-  project_id uuid not null references projects (id) on delete cascade,
+  project_id uuid references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  title text,
+  location text,
   total_sqft numeric,
   stories int,
   quality_tier text,
@@ -905,9 +917,33 @@ create policy "projects_update" on projects
 create policy "projects_delete" on projects
   for delete using (can_manage_projects() and has_project_access(id));
 
-create policy "plan_pages_member" on plan_pages
-  for all using (has_project_access(plan_pages.project_id))
-  with check (has_project_access(plan_pages.project_id));
+-- Project-tied pages stay gated by project membership. Unlike Landscape's
+-- "Standalone Photos" (a shared directory of one-off reference images), a
+-- standalone plan (project_id null) is a private multi-page working set —
+-- visible only to its own creator (or a Developer).
+create policy "plan_pages_select" on plan_pages
+  for select using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
+create policy "plan_pages_insert" on plan_pages
+  for insert with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and auth.uid() = created_by)
+  );
+create policy "plan_pages_update" on plan_pages
+  for update using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  ) with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
+create policy "plan_pages_delete" on plan_pages
+  for delete using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
 
 create policy "rooms_member" on rooms
   for all using (has_project_access(rooms.project_id))
@@ -937,9 +973,30 @@ create policy "finish_scans_update" on finish_scans
 create policy "finish_scans_delete" on finish_scans
   for delete using (auth.uid() = created_by or is_developer());
 
-create policy "cost_estimates_member" on cost_estimates
-  for all using (has_project_access(cost_estimates.project_id))
-  with check (has_project_access(cost_estimates.project_id));
+-- Same reasoning as plan_pages_select above — private to its own creator.
+create policy "cost_estimates_select" on cost_estimates
+  for select using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
+create policy "cost_estimates_insert" on cost_estimates
+  for insert with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and auth.uid() = created_by)
+  );
+create policy "cost_estimates_update" on cost_estimates
+  for update using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  ) with check (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
+create policy "cost_estimates_delete" on cost_estimates
+  for delete using (
+    (project_id is not null and has_project_access(project_id))
+    or (project_id is null and (auth.uid() = created_by or is_developer()))
+  );
 
 create policy "renderings_member" on renderings
   for all using (exists (select 1 from rooms r where r.id = renderings.room_id and has_project_access(r.project_id)))

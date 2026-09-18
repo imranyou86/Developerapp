@@ -43,6 +43,7 @@ export function RoomCard({
   const [addingTask, startAddingTask] = useTransition();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [selectedTasks, setSelectedTasks] = usePersistedSelection(`room-tasks-selected:${projectId}:${room.id}`, () => new Set());
+  const [selectModeTasks, setSelectModeTasks] = useState(false);
   const [confirmBulkDeleteTasks, setConfirmBulkDeleteTasks] = useState(false);
   const [bulkTasksBusy, setBulkTasksBusy] = useState(false);
   const allTasksSelected = room.tasks.length > 0 && room.tasks.every((t) => selectedTasks.has(t.id));
@@ -207,27 +208,42 @@ export function RoomCard({
             <h4 className="mb-2 text-sm font-semibold text-blueprint-dark">Tasks</h4>
             {room.tasks.length > 0 && (
               <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
-                <label className="flex items-center gap-1.5 text-blueprint/60">
-                  <input type="checkbox" checked={allTasksSelected} onChange={(e) => selectAllTasks(e.target.checked)} />
-                  {selectedTasks.size > 0 ? `${selectedTasks.size} selected` : "Select all"}
-                </label>
-                {selectedTasks.size > 0 && (
+                {!selectModeTasks ? (
+                  <button className="text-blueprint/60 hover:underline" onClick={() => setSelectModeTasks(true)}>
+                    Select
+                  </button>
+                ) : (
                   <>
-                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(true)} disabled={bulkTasksBusy}>
-                      Mark done
-                    </button>
-                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(false)} disabled={bulkTasksBusy}>
-                      Mark not done
-                    </button>
+                    <label className="flex items-center gap-1.5 text-blueprint/60">
+                      <input type="checkbox" checked={allTasksSelected} onChange={(e) => selectAllTasks(e.target.checked)} />
+                      {selectedTasks.size > 0 ? `${selectedTasks.size} selected` : "Select all"}
+                    </label>
+                    {selectedTasks.size > 0 && (
+                      <>
+                        <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(true)} disabled={bulkTasksBusy}>
+                          Mark done
+                        </button>
+                        <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleTasks(false)} disabled={bulkTasksBusy}>
+                          Mark not done
+                        </button>
+                        <button
+                          className="text-red-500 hover:underline"
+                          onClick={() => setConfirmBulkDeleteTasks(true)}
+                          disabled={bulkTasksBusy}
+                        >
+                          Delete selected
+                        </button>
+                      </>
+                    )}
                     <button
-                      className="text-red-500 hover:underline"
-                      onClick={() => setConfirmBulkDeleteTasks(true)}
+                      className="text-blueprint/40 hover:underline"
+                      onClick={() => {
+                        selectAllTasks(false);
+                        setSelectModeTasks(false);
+                      }}
                       disabled={bulkTasksBusy}
                     >
-                      Delete selected
-                    </button>
-                    <button className="text-blueprint/40 hover:underline" onClick={() => selectAllTasks(false)} disabled={bulkTasksBusy}>
-                      Clear
+                      Done
                     </button>
                   </>
                 )}
@@ -236,11 +252,11 @@ export function RoomCard({
             <div className="space-y-1">
               {room.tasks.map((t) => (
                 <div key={t.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
-                  <input type="checkbox" checked={selectedTasks.has(t.id)} onChange={() => toggleSelectTask(t.id)} title="Select for bulk actions" />
                   <input
                     type="checkbox"
-                    checked={t.done}
-                    onChange={(e) => handleToggleTask(t.id, e.target.checked)}
+                    checked={selectModeTasks ? selectedTasks.has(t.id) : t.done}
+                    onChange={(e) => (selectModeTasks ? toggleSelectTask(t.id) : handleToggleTask(t.id, e.target.checked))}
+                    title={selectModeTasks ? "Select for bulk actions" : undefined}
                   />
                   <span className={`flex-1 text-sm ${t.done ? "text-blueprint/40 line-through" : ""}`}>
                     {t.title}

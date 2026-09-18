@@ -2169,3 +2169,49 @@ yet; each one only adds what a given feature needed.
   client writes the session to real cookies (not just localStorage), so
   it still sees the fresh session on this navigation without needing a
   full page reload.
+
+## Construction Cost: upload a plan directly, and a Standalone Plan mode
+
+- **Added the ability to upload a plan right on the Construction Cost
+  page.** Previously the only way to get a plan in front of the cost
+  estimator was a detour through the Plan tab first — Construction Cost
+  just linked out to it. `CostClient` now has its own "Upload plan"
+  button (same PDF-per-page rendering and image upload as the Plan tab)
+  and its own thumbnail grid with a per-page "Remove," so uploading and
+  estimating happen in one place. A page uploaded this way is still a
+  normal `plan_pages` row, so it shows up on that construction's Plan tab
+  too — one source of truth either way.
+- **Generalized away from requiring one of the tracked "Constructions."**
+  A new "Standalone Plan" mode sits next to "By Construction" (same tab
+  shape as Landscape's "Standalone Photos") for pricing a plan that isn't
+  tied to any construction in this app at all — an addition, an ADU, a
+  renovation, or anything else you want a number on before it's ever
+  added here. It gets its own optional label and location (used the same
+  way a construction's address already was, to ground the estimate's
+  $/sqft in real regional data) and its own private plan pages + estimate
+  history — private to whoever created it, not a shared directory, since
+  unlike a single reference photo this is a whole working plan set plus a
+  running estimate history.
+- **Migration 051** makes `plan_pages.project_id` and
+  `cost_estimates.project_id` optional, adds `created_by` to both (same
+  shape as Finish ID/Landscape's earlier universal migrations), and adds
+  `title`/`location` to `cost_estimates` for a standalone row to display
+  in place of a construction's name/address.
+- The cost-estimation prompt itself no longer assumes a full single-family
+  house — it now reasons about whatever scope the plan actually shows
+  (an addition, ADU, renovation, or commercial buildout included).
+
+## One checkbox column instead of two, on every bulk-select list
+
+- **Checklist items, warranty items, room tasks, and payment schedule
+  lines each showed two checkboxes per row** — one to select the row for
+  a bulk action, one to toggle it done/fixed/paid — which read as a
+  confusing double column of checkboxes, especially on a narrow phone
+  screen. Replaced with a single checkbox per row plus an explicit
+  "Select" toggle above the list: tapping "Select" switches that same
+  checkbox to selection mode (with "Select all" and the bulk actions
+  appearing alongside it); tapping "Done" switches it back to its normal
+  job of marking the item done/fixed/paid. Nothing about the underlying
+  bulk actions changed — same select-all, mark-done/paid, and
+  delete-selected behavior — just one checkbox doing one job at a time
+  instead of two checkboxes always showing side by side.

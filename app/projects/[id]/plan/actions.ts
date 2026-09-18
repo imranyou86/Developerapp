@@ -5,47 +5,60 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
 
+// projectId is null for a standalone plan page — one uploaded from
+// Construction Cost's "Standalone Plan" mode, not tied to any construction
+// tracked in this app. The File Library only aggregates project-scoped
+// uploads, so recordProjectFile is skipped for those.
 export async function addPlanPage(
-  projectId: string,
+  projectId: string | null,
   storageUrl: string,
   label: string,
   sortOrder: number
 ): Promise<ActionResult> {
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
   const { error, data } = await supabase
     .from("plan_pages")
-    .insert({ project_id: projectId, storage_url: storageUrl, label, sort_order: sortOrder })
+    .insert({ project_id: projectId, created_by: user.id, storage_url: storageUrl, label, sort_order: sortOrder })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
-  await recordProjectFile(supabase, {
-    projectId,
-    storageUrl,
-    fileName: label,
-    category: "plan",
-    sourceTable: "plan_pages",
-    sourceId: data.id,
-  });
-
-  revalidatePath(`/projects/${projectId}/plan`);
+  if (projectId) {
+    await recordProjectFile(supabase, {
+      projectId,
+      storageUrl,
+      fileName: label,
+      category: "plan",
+      sourceTable: "plan_pages",
+      sourceId: data.id,
+    });
+    revalidatePath(`/projects/${projectId}/plan`);
+  }
+  revalidatePath("/construction-cost");
   return { ok: true, id: data.id };
 }
 
-export async function setPlanPageLayout(projectId: string, pageId: string, isLayout: boolean): Promise<ActionResult> {
+export async function setPlanPageLayout(projectId: string | null, pageId: string, isLayout: boolean): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("plan_pages").update({ is_layout: isLayout }).eq("id", pageId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/projects/${projectId}/plan`);
+  if (projectId) revalidatePath(`/projects/${projectId}/plan`);
+  revalidatePath("/construction-cost");
   return { ok: true };
 }
 
-export async function deletePlanPage(projectId: string, pageId: string): Promise<ActionResult> {
+export async function deletePlanPage(projectId: string | null, pageId: string): Promise<ActionResult> {
   const supabase = createClient();
   const { error } = await supabase.from("plan_pages").delete().eq("id", pageId);
   if (error) return { ok: false, error: error.message };
   await removeProjectFile(supabase, "plan_pages", pageId);
-  revalidatePath(`/projects/${projectId}/plan`);
+  if (projectId) revalidatePath(`/projects/${projectId}/plan`);
+  revalidatePath("/construction-cost");
   return { ok: true };
 }
 

@@ -118,6 +118,7 @@ export function WarrantyRequestClient({
   const canDeleteRequests = viewerRole === "contractor" || viewerRole === "developer";
 
   const [selectedItems, setSelectedItems] = usePersistedSelection(`warranty-items-selected:${projectId}`, () => new Set());
+  const [selectModeItems, setSelectModeItems] = useState(false);
   const [confirmBulkDeleteItems, setConfirmBulkDeleteItems] = useState(false);
   const [bulkItemsBusy, setBulkItemsBusy] = useState(false);
   const allItemsSelected = items.length > 0 && items.every((i) => selectedItems.has(i.id));
@@ -356,27 +357,42 @@ export function WarrantyRequestClient({
 
         {canManage && items.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-blueprint/10 pb-2 text-xs">
-            <label className="flex items-center gap-1.5 text-blueprint/60">
-              <input type="checkbox" checked={allItemsSelected} onChange={(e) => selectAllItems(e.target.checked)} />
-              {selectedItems.size > 0 ? `${selectedItems.size} selected` : "Select all"}
-            </label>
-            {selectedItems.size > 0 && (
+            {!selectModeItems ? (
+              <button className="text-blueprint/60 hover:underline" onClick={() => setSelectModeItems(true)}>
+                Select
+              </button>
+            ) : (
               <>
-                <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(true)} disabled={bulkItemsBusy}>
-                  Mark fixed
-                </button>
-                <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(false)} disabled={bulkItemsBusy}>
-                  Mark not fixed
-                </button>
+                <label className="flex items-center gap-1.5 text-blueprint/60">
+                  <input type="checkbox" checked={allItemsSelected} onChange={(e) => selectAllItems(e.target.checked)} />
+                  {selectedItems.size > 0 ? `${selectedItems.size} selected` : "Select all"}
+                </label>
+                {selectedItems.size > 0 && (
+                  <>
+                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(true)} disabled={bulkItemsBusy}>
+                      Mark fixed
+                    </button>
+                    <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggleItems(false)} disabled={bulkItemsBusy}>
+                      Mark not fixed
+                    </button>
+                    <button
+                      className="text-red-500 hover:underline"
+                      onClick={() => setConfirmBulkDeleteItems(true)}
+                      disabled={bulkItemsBusy}
+                    >
+                      Delete selected
+                    </button>
+                  </>
+                )}
                 <button
-                  className="text-red-500 hover:underline"
-                  onClick={() => setConfirmBulkDeleteItems(true)}
+                  className="text-blueprint/40 hover:underline"
+                  onClick={() => {
+                    selectAllItems(false);
+                    setSelectModeItems(false);
+                  }}
                   disabled={bulkItemsBusy}
                 >
-                  Delete selected
-                </button>
-                <button className="text-blueprint/40 hover:underline" onClick={() => selectAllItems(false)} disabled={bulkItemsBusy}>
-                  Clear
+                  Done
                 </button>
               </>
             )}
@@ -395,6 +411,7 @@ export function WarrantyRequestClient({
                 onUpdate={updateItem}
                 onRemove={(id) => removeItems([id])}
                 onDetachReport={(reportId) => handleAttach(reportId, null)}
+                selectMode={selectModeItems}
                 selected={selectedItems.has(item.id)}
                 onToggleSelect={() => toggleSelectItem(item.id)}
               />
@@ -1134,6 +1151,7 @@ function WarrantyItem({
   onUpdate,
   onRemove,
   onDetachReport,
+  selectMode,
   selected,
   onToggleSelect,
 }: {
@@ -1144,6 +1162,7 @@ function WarrantyItem({
   onUpdate: (id: string, patch: Partial<WarrantyItemRow>) => void;
   onRemove: (id: string) => void;
   onDetachReport: (reportId: string) => void;
+  selectMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
 }) {
@@ -1240,13 +1259,12 @@ function WarrantyItem({
   return (
     <div className="rounded-lg border border-blueprint/10">
       <div className="flex items-center gap-2 px-2 py-1.5">
-        {canManage && <input type="checkbox" checked={selected} onChange={onToggleSelect} title="Select for bulk actions" />}
         <input
           type="checkbox"
-          checked={item.done}
-          onChange={(e) => handleToggle(e.target.checked)}
-          title="Fixed"
-          disabled={!canManage || item.status === "invalidated"}
+          checked={selectMode ? selected : item.done}
+          onChange={(e) => (selectMode ? onToggleSelect() : handleToggle(e.target.checked))}
+          title={selectMode ? "Select for bulk actions" : "Fixed"}
+          disabled={!canManage || (!selectMode && item.status === "invalidated")}
         />
         <button
           className={`flex-1 text-left text-sm ${

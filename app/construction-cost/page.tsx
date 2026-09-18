@@ -2,13 +2,14 @@ import { createClient } from "@/lib/supabase/server";
 import { signRowsUrl } from "@/lib/storage";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
-import { ProjectPicker } from "@/components/ProjectPicker";
-import { CostClient } from "@/app/construction-cost/cost-client";
+import { CostSections } from "@/app/construction-cost/cost-sections";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
-import type { CostEstimate } from "@/lib/types";
+import type { CostEstimate, PlanPage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+const PLAN_PAGE_COLUMNS = "id, project_id, created_by, storage_url, label, sort_order, is_layout, created_at";
 
 export default async function ConstructionCostPage({ searchParams }: { searchParams: { project?: string } }) {
   const supabase = createClient();
@@ -29,7 +30,7 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
   const selectedId = requested && projectList.some((p) => p.id === requested) ? requested : projectList.length === 1 ? projectList[0].id : null;
 
   let projectAddress: string | null = null;
-  let planPages: { id: string; storage_url: string; label: string }[] = [];
+  let planPages: PlanPage[] = [];
   let roomsSqftHint: number | null = null;
   let estimates: CostEstimate[] = [];
   let loadError: string | null = null;
@@ -37,22 +38,33 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
   if (selectedId) {
     const [{ data: project }, { data: pages }, { data: rooms }, { data: estimateRows, error }] = await Promise.all([
       supabase.from("projects").select("address").eq("id", selectedId).single(),
-      supabase
-        .from("plan_pages")
-        .select("id, storage_url, label")
-        .eq("project_id", selectedId)
-        .eq("is_layout", true)
-        .order("sort_order"),
+      supabase.from("plan_pages").select(PLAN_PAGE_COLUMNS).eq("project_id", selectedId).eq("is_layout", true).order("sort_order"),
       supabase.from("rooms").select("width, depth").eq("project_id", selectedId),
       supabase.from("cost_estimates").select("*").eq("project_id", selectedId).order("created_at", { ascending: false }),
     ]);
 
     projectAddress = project?.address ?? null;
-    planPages = await signRowsUrl(pages ?? [], "storage_url");
+    planPages = (await signRowsUrl((pages ?? []) as PlanPage[], "storage_url")) as PlanPage[];
     const sqft = (rooms ?? []).reduce((sum, r) => (r.width && r.depth ? sum + Number(r.width) * Number(r.depth) : sum), 0);
     roomsSqftHint = sqft > 0 ? sqft : null;
     estimates = (estimateRows ?? []) as CostEstimate[];
     loadError = error?.message ?? null;
+  }
+
+  // Standalone mode — a plan not tied to any tracked construction. Scoped
+  // to this user's own uploads/estimates (see migration 051), not a shared
+  // directory: unlike Landscape's "Standalone Photos," this is a working
+  // set of plan pages plus a running estimate history, not a one-off
+  // reference image meant for teammates to browse.
+  let standalonePages: PlanPage[] = [];
+  let standaloneEstimates: CostEstimate[] = [];
+  if (user) {
+    const [{ data: pages }, { data: estimateRows }] = await Promise.all([
+      supabase.from("plan_pages").select(PLAN_PAGE_COLUMNS).is("project_id", null).eq("created_by", user.id).order("sort_order"),
+      supabase.from("cost_estimates").select("*").is("project_id", null).eq("created_by", user.id).order("created_at", { ascending: false }),
+    ]);
+    standalonePages = (await signRowsUrl((pages ?? []) as PlanPage[], "storage_url")) as PlanPage[];
+    standaloneEstimates = (estimateRows ?? []) as CostEstimate[];
   }
 
   return (
@@ -83,37 +95,17 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
       </header>
 
       <main className="mx-auto max-w-5xl animate-fade-in-up px-6 py-8">
-        <div className="mb-6">
-          <h2 className="mb-1 text-lg font-semibold text-blueprint-dark">Construction Cost</h2>
-          <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction to estimate — Claude reads that project&apos;s uploaded plan pages directly.
-          </p>
-          {projectList.length === 0 ? (
-            <p className="text-sm text-blueprint/50">
-              No constructions yet — create one under Constructions first, then come back here.
-            </p>
-          ) : (
-            <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/construction-cost" />
-          )}
-        </div>
-
-        {selectedId && (
-          <>
-            {loadError && (
-              <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-                Could not load cost estimate history: {loadError}
-              </div>
-            )}
-            <CostClient
-              key={selectedId}
-              projectId={selectedId}
-              projectAddress={projectAddress}
-              planPages={planPages}
-              roomsSqftHint={roomsSqftHint}
-              initialEstimates={estimates}
-            />
-          </>
-        )}
+        <CostSections
+          projectList={projectList}
+          selectedId={selectedId}
+          projectAddress={projectAddress}
+          planPages={planPages}
+          roomsSqftHint={roomsSqftHint}
+          estimates={estimates}
+          loadError={loadError}
+          standalonePages={standalonePages}
+          standaloneEstimates={standaloneEstimates}
+        />
       </main>
     </div>
   );

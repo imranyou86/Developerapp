@@ -103,6 +103,7 @@ function ChecklistPhaseColumn({
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = usePersistedSelection(`checklist-selected:${projectId}:${phase}`, () => new Set());
+  const [selectMode, setSelectMode] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const done = items.filter((i) => i.done).length;
@@ -196,27 +197,42 @@ function ChecklistPhaseColumn({
 
       {items.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-b border-blueprint/10 pb-2 text-xs">
-          <label className="flex items-center gap-1.5 text-blueprint/60">
-            <input type="checkbox" checked={allSelected} onChange={(e) => selectAll(e.target.checked)} />
-            {selected.size > 0 ? `${selected.size} selected` : "Select all"}
-          </label>
-          {selected.size > 0 && (
+          {!selectMode ? (
+            <button className="text-blueprint/60 hover:underline" onClick={() => setSelectMode(true)}>
+              Select
+            </button>
+          ) : (
             <>
-              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(true)} disabled={bulkBusy}>
-                Mark done
-              </button>
-              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(false)} disabled={bulkBusy}>
-                Mark not done
-              </button>
+              <label className="flex items-center gap-1.5 text-blueprint/60">
+                <input type="checkbox" checked={allSelected} onChange={(e) => selectAll(e.target.checked)} />
+                {selected.size > 0 ? `${selected.size} selected` : "Select all"}
+              </label>
+              {selected.size > 0 && (
+                <>
+                  <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(true)} disabled={bulkBusy}>
+                    Mark done
+                  </button>
+                  <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkToggle(false)} disabled={bulkBusy}>
+                    Mark not done
+                  </button>
+                  <button
+                    className="text-red-500 hover:underline"
+                    onClick={() => setConfirmBulkDelete(true)}
+                    disabled={bulkBusy}
+                  >
+                    Delete selected
+                  </button>
+                </>
+              )}
               <button
-                className="text-red-500 hover:underline"
-                onClick={() => setConfirmBulkDelete(true)}
+                className="text-blueprint/40 hover:underline"
+                onClick={() => {
+                  selectAll(false);
+                  setSelectMode(false);
+                }}
                 disabled={bulkBusy}
               >
-                Delete selected
-              </button>
-              <button className="text-blueprint/40 hover:underline" onClick={() => selectAll(false)} disabled={bulkBusy}>
-                Clear
+                Done
               </button>
             </>
           )}
@@ -231,6 +247,7 @@ function ChecklistPhaseColumn({
               item={item}
               onUpdate={onUpdate}
               onRemove={(id) => onRemove([id])}
+              selectMode={selectMode}
               selected={selected.has(item.id)}
               onToggleSelect={() => toggleSelect(item.id)}
             />
@@ -270,6 +287,7 @@ function ChecklistItemRow({
   item,
   onUpdate,
   onRemove,
+  selectMode,
   selected,
   onToggleSelect,
 }: {
@@ -277,6 +295,7 @@ function ChecklistItemRow({
   item: ChecklistItemRow;
   onUpdate: (id: string, patch: Partial<ChecklistItemRow>) => void;
   onRemove: (id: string) => void;
+  selectMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
 }) {
@@ -356,8 +375,12 @@ function ChecklistItemRow({
   return (
     <div className="rounded-lg border border-blueprint/10">
       <div className="flex items-center gap-2 px-2 py-1.5">
-        <input type="checkbox" checked={selected} onChange={onToggleSelect} title="Select for bulk actions" />
-        <input type="checkbox" checked={item.done} onChange={(e) => handleToggle(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={selectMode ? selected : item.done}
+          onChange={(e) => (selectMode ? onToggleSelect() : handleToggle(e.target.checked))}
+          title={selectMode ? "Select for bulk actions" : undefined}
+        />
         <button
           className={`flex-1 text-left text-sm ${item.done ? "text-blueprint/40 line-through" : "text-blueprint-dark"}`}
           onClick={() => setExpanded((e) => !e)}

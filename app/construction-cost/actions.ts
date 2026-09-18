@@ -6,6 +6,8 @@ import type { ActionResult } from "@/app/projects/actions";
 import type { CostBreakdownLine, CostTier, PredictionConfidence, QualityTier } from "@/lib/types";
 
 export interface SaveCostEstimateInput {
+  title?: string | null;
+  location?: string | null;
   total_sqft: number;
   stories: number | null;
   quality_tier: QualityTier;
@@ -26,11 +28,18 @@ export interface SaveCostEstimateInput {
   reasoning: string;
 }
 
-export async function saveCostEstimate(projectId: string, input: SaveCostEstimateInput): Promise<ActionResult> {
+// projectId is null for a standalone estimate — one made in "Standalone
+// Plan" mode, not tied to any construction tracked in this app.
+export async function saveCostEstimate(projectId: string | null, input: SaveCostEstimateInput): Promise<ActionResult> {
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
   const { error, data } = await supabase
     .from("cost_estimates")
-    .insert({ project_id: projectId, ...input })
+    .insert({ project_id: projectId, created_by: user.id, ...input })
     .select("id")
     .single();
 

@@ -1,20 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useRef, useState } from "react";
+import Image from "next/image";
+import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { deleteCostEstimate, saveCostEstimate } from "@/app/construction-cost/actions";
+import { addPlanPage, deletePlanPage } from "@/app/projects/[id]/plan/actions";
 import { COST_TIER_BANDS, COST_TIER_LABEL } from "@/lib/costTiers";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
-import type { CostBreakdownLine, CostEstimate, CostTier, QualityTier } from "@/lib/types";
-
-interface PlanPage {
-  id: string;
-  storage_url: string;
-  label: string;
-}
+import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
+import type { CostBreakdownLine, CostEstimate, CostTier, PlanPage, QualityTier } from "@/lib/types";
 
 const QUALITY_STYLE: Record<QualityTier, string> = {
   economy: "badge bg-blueprint/10 text-blueprint/60",
@@ -45,45 +42,187 @@ function currency(n: number | null | undefined): string {
 export function CostClient({
   projectId,
   projectAddress,
-  planPages,
+  initialPlanPages,
   roomsSqftHint,
   initialEstimates,
 }: {
-  projectId: string;
+  projectId: string | null;
   projectAddress: string | null;
-  planPages: PlanPage[];
+  initialPlanPages: PlanPage[];
   roomsSqftHint: number | null;
   initialEstimates: CostEstimate[];
 }) {
   const { notify } = useToast();
   const { run, isRunning } = useBackgroundTasks();
-  const estimateTaskKey = `cost-estimate:${projectId}`;
+  const taskKeyBase = projectId ?? "standalone";
+  const uploadTaskKey = `cost-plan-upload:${taskKeyBase}`;
+  const estimateTaskKey = `cost-estimate:${taskKeyBase}`;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [pages, setPages] = useState<PlanPage[]>(initialPlanPages);
+  const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [deletingPage, setDeletingPage] = useState<PlanPage | null>(null);
+
+  const [title, setTitle] = useState("");
+  const [location, setLocation] = useState("");
+
   const [estimates, setEstimates] = useState<CostEstimate[]>(initialEstimates);
   const [estimating, setEstimating] = useState(false);
   const [estimateStatus, setEstimateStatus] = useState("");
   const [deleting, setDeleting] = useState<CostEstimate | null>(null);
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      await run(uploadTaskKey, "Uploading plan pages…", async () => {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in.");
+
+        for (const file of Array.from(files)) {
+          if (file.type === "application/pdf") {
+            await uploadPdfPages(supabase, user.id, file);
+          } else if (file.type.startsWith("image/")) {
+            await uploadImagePage(supabase, user.id, file);
+          } else {
+            notify("error", `Skipped "${file.name}": unsupported file type.`);
+          }
+        }
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+      setUploadStatus("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function uploadImagePage(supabase: ReturnType<typeof createClient>, userId: string, file: File) {
+    const path = `${userId}/${projectId ?? "standalone"}/${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from("plan-pages").upload(path, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+    if (uploadError) throw new Error(`Upload of "${file.name}" failed: ${uploadError.message}`);
+
+    const { data: pub, error: pubSignError } = await supabase.storage.from("plan-pages").createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+    const sortOrder = pages.length;
+    const res = await addPlanPage(projectId, pub.signedUrl, file.name, sortOrder);
+    if (!res.ok) throw new Error(res.error ?? "Could not save plan page.");
+
+    setPages((prev) => [
+      ...prev,
+      {
+        id: res.id!,
+        project_id: projectId,
+        created_by: userId,
+        storage_url: pub.signedUrl,
+        label: file.name,
+        sort_order: sortOrder,
+        is_layout: true,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    notify("success", `Added "${file.name}".`);
+  }
+
+  async function uploadPdfPages(supabase: ReturnType<typeof createClient>, userId: string, file: File) {
+    const pdfjsLib = await import("pdfjs-dist");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      setUploadStatus(`Rendering ${file.name} — page ${pageNum} of ${pdf.numPages}…`);
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas rendering is not supported in this browser.");
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      const blob: Blob = await new Promise((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode page image."))), "image/png")
+      );
+
+      const label = pdf.numPages > 1 ? `${file.name} — Page ${pageNum}` : file.name;
+      const path = `${userId}/${projectId ?? "standalone"}/${Date.now()}-${pageNum}-${file.name}.png`;
+
+      const { error: uploadError } = await supabase.storage.from("plan-pages").upload(path, blob, {
+        contentType: "image/png",
+        upsert: false,
+      });
+      if (uploadError) throw new Error(`Upload of "${label}" failed: ${uploadError.message}`);
+
+      const { data: pub, error: pubSignError } = await supabase.storage.from("plan-pages").createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+      if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
+      const sortOrder = pages.length + pageNum - 1;
+      const res = await addPlanPage(projectId, pub.signedUrl, label, sortOrder);
+      if (!res.ok) throw new Error(`Saving "${label}" failed: ${res.error}`);
+
+      setPages((prev) => [
+        ...prev,
+        {
+          id: res.id!,
+          project_id: projectId,
+          created_by: userId,
+          storage_url: pub.signedUrl,
+          label,
+          sort_order: sortOrder,
+          is_layout: true,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    }
+    notify("success", `Added ${pdf.numPages} page(s) from "${file.name}".`);
+  }
 
   async function handleEstimate() {
     setEstimating(true);
     setEstimateStatus("Reading plan pages…");
     try {
       await run(estimateTaskKey, "Estimating construction cost…", async () => {
+        const address = projectAddress ?? (location.trim() || null);
         const res = await fetchWithRetry("/api/claude/estimate-construction-cost", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            pages: planPages.map((p) => ({ label: p.label, url: p.storage_url })),
-            projectAddress,
+            pages: pages.map((p) => ({ label: p.label, url: p.storage_url })),
+            projectAddress: address,
             roomsSqftHint,
           }),
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Cost estimation failed.");
 
-        const saveRes = await saveCostEstimate(projectId, json);
+        const saveRes = await saveCostEstimate(projectId, {
+          title: projectId ? null : title.trim() || null,
+          location: projectId ? null : location.trim() || null,
+          ...json,
+        });
         if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save estimate.");
 
-        setEstimates((prev) => [{ id: saveRes.id!, project_id: projectId, ...json, created_at: new Date().toISOString() }, ...prev]);
+        setEstimates((prev) => [
+          {
+            id: saveRes.id!,
+            project_id: projectId,
+            created_by: "",
+            title: projectId ? null : title.trim() || null,
+            location: projectId ? null : location.trim() || null,
+            ...json,
+            created_at: new Date().toISOString(),
+          },
+          ...prev,
+        ]);
         notify("success", "Cost estimate ready.");
       });
     } catch (err) {
@@ -97,9 +236,11 @@ export function CostClient({
   return (
     <div className="space-y-6">
       <div className="card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-blueprint-dark">Construction cost estimate</h2>
+            <h2 className="font-semibold text-blueprint-dark">
+              {projectId ? "Construction cost estimate" : "Plan cost estimate"}
+            </h2>
             <p className="text-sm text-blueprint/60">
               Claude reads every sheet of the uploaded plan — dimensions, room complexity, roofline,
               fixture counts — and gives a single most-accurate predicted cost (with a contingency
@@ -107,16 +248,72 @@ export function CostClient({
               ($350–400/sqft), or High ($450+/sqft) — and a full category breakdown.
             </p>
           </div>
-          {planPages.length === 0 ? (
-            <Link href={`/projects/${projectId}/plan`} className="btn-outline text-xs">
-              Upload a plan first →
-            </Link>
-          ) : (
-            <button className="btn-amber" onClick={handleEstimate} disabled={estimating || isRunning(estimateTaskKey)}>
+          <div className="flex shrink-0 gap-2">
+            <button
+              className="btn-outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || isRunning(uploadTaskKey)}
+            >
+              {uploading || isRunning(uploadTaskKey) ? uploadStatus || "Uploading…" : "Upload plan"}
+            </button>
+            <button
+              className="btn-amber"
+              onClick={handleEstimate}
+              disabled={estimating || isRunning(estimateTaskKey) || pages.length === 0}
+              title={pages.length === 0 ? "Upload a plan first" : undefined}
+            >
               {estimating || isRunning(estimateTaskKey) ? estimateStatus || "Estimating…" : "Estimate cost from plan"}
             </button>
-          )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+          />
         </div>
+
+        {!projectId && (
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label">Label (optional)</label>
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Backyard ADU" />
+            </div>
+            <div>
+              <label className="label">Location (optional)</label>
+              <input
+                className="input"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="City, state — used to ground $/sqft in real local data"
+              />
+            </div>
+          </div>
+        )}
+
+        {pages.length === 0 ? (
+          <p className="text-sm text-blueprint/50">No plan pages yet — upload the plan as PDF or image above.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {pages.map((p) => (
+              <div key={p.id} className="overflow-hidden rounded-lg border border-blueprint/10">
+                <div className="relative aspect-[4/3] bg-concrete">
+                  <Image src={p.storage_url} alt={p.label} fill className="object-contain" unoptimized />
+                </div>
+                <div className="flex items-center justify-between gap-2 p-2">
+                  <span className="truncate text-xs text-blueprint/70" title={p.label}>
+                    {p.label}
+                  </span>
+                  <button className="text-xs text-red-600 hover:underline" onClick={() => setDeletingPage(p)}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {estimates.length === 0 ? (
@@ -128,6 +325,26 @@ export function CostClient({
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deletingPage}
+        title="Remove plan page?"
+        message={`Remove "${deletingPage?.label}" from this plan?`}
+        confirmLabel="Remove"
+        danger
+        onCancel={() => setDeletingPage(null)}
+        onConfirm={async () => {
+          if (!deletingPage) return;
+          const res = await deletePlanPage(projectId, deletingPage.id);
+          if (!res.ok) {
+            notify("error", res.error ?? "Could not remove page.");
+          } else {
+            setPages((prev) => prev.filter((p) => p.id !== deletingPage.id));
+            notify("success", "Plan page removed.");
+          }
+          setDeletingPage(null);
+        }}
+      />
 
       <ConfirmDialog
         open={!!deleting}
@@ -177,6 +394,11 @@ function EstimateCard({ estimate, onDelete }: { estimate: CostEstimate; onDelete
 
   return (
     <div className="card p-5">
+      {(estimate.title || estimate.location) && (
+        <p className="mb-2 text-sm font-medium text-blueprint-dark">
+          {[estimate.title, estimate.location].filter(Boolean).join(" — ")}
+        </p>
+      )}
       <div className="mb-3 flex flex-wrap gap-1.5">
         {COST_TIERS.map((tier) => (
           <button

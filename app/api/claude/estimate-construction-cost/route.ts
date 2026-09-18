@@ -31,10 +31,12 @@ interface CostEstimateResult {
   reasoning: string;
 }
 
-const SYSTEM_PROMPT = `You are a professional residential construction cost estimator. You'll be
-shown every sheet of an architect's plan set together (floors, elevations, site plan — whatever
-was provided) and asked to produce a grounded construction cost estimate from what's actually
-drawn, not a generic guess.
+const SYSTEM_PROMPT = `You are a professional construction cost estimator. You'll be shown every
+sheet of an architect's or designer's plan set together (floors, elevations, site plan — whatever
+was provided) and asked to produce a grounded cost estimate from what's actually drawn, not a
+generic guess. The plan may be for a full new house, or for something smaller — an addition, an
+ADU, a renovation, a commercial buildout — reason about whatever scope is actually shown rather
+than assuming a full single-family build.
 
 Before pricing anything, use the web_search tool to ground your numbers in real, current data
 instead of relying only on your training knowledge:

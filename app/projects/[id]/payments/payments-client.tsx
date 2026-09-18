@@ -143,6 +143,7 @@ function BidCard({
   const [deletingLine, setDeletingLine] = useState<PaymentLine | null>(null);
   const [deletingLineBusy, setDeletingLineBusy] = useState(false);
   const [selectedLines, setSelectedLines] = usePersistedSelection(`payment-lines-selected:${projectId}:${bid.id}`, () => new Set());
+  const [selectMode, setSelectMode] = useState(false);
   const [confirmBulkDeleteLines, setConfirmBulkDeleteLines] = useState(false);
   const [bulkLinesBusy, setBulkLinesBusy] = useState(false);
   const allLinesSelected = bid.payment_schedule_items.length > 0 && bid.payment_schedule_items.every((l) => selectedLines.has(l.id));
@@ -248,27 +249,42 @@ function BidCard({
 
       {bid.payment_schedule_items.length > 0 && (
         <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
-          <label className="flex items-center gap-1.5 text-blueprint/60">
-            <input type="checkbox" checked={allLinesSelected} onChange={(e) => selectAllLines(e.target.checked)} />
-            {selectedLines.size > 0 ? `${selectedLines.size} selected` : "Select all"}
-          </label>
-          {selectedLines.size > 0 && (
+          {!selectMode ? (
+            <button className="text-blueprint/60 hover:underline" onClick={() => setSelectMode(true)}>
+              Select
+            </button>
+          ) : (
             <>
-              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(true)} disabled={bulkLinesBusy}>
-                Mark paid
-              </button>
-              <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(false)} disabled={bulkLinesBusy}>
-                Mark not paid
-              </button>
+              <label className="flex items-center gap-1.5 text-blueprint/60">
+                <input type="checkbox" checked={allLinesSelected} onChange={(e) => selectAllLines(e.target.checked)} />
+                {selectedLines.size > 0 ? `${selectedLines.size} selected` : "Select all"}
+              </label>
+              {selectedLines.size > 0 && (
+                <>
+                  <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(true)} disabled={bulkLinesBusy}>
+                    Mark paid
+                  </button>
+                  <button className="text-blueprint/60 hover:underline" onClick={() => handleBulkMarkPaid(false)} disabled={bulkLinesBusy}>
+                    Mark not paid
+                  </button>
+                  <button
+                    className="text-red-500 hover:underline"
+                    onClick={() => setConfirmBulkDeleteLines(true)}
+                    disabled={bulkLinesBusy}
+                  >
+                    Remove selected
+                  </button>
+                </>
+              )}
               <button
-                className="text-red-500 hover:underline"
-                onClick={() => setConfirmBulkDeleteLines(true)}
+                className="text-blueprint/40 hover:underline"
+                onClick={() => {
+                  selectAllLines(false);
+                  setSelectMode(false);
+                }}
                 disabled={bulkLinesBusy}
               >
-                Remove selected
-              </button>
-              <button className="text-blueprint/40 hover:underline" onClick={() => selectAllLines(false)} disabled={bulkLinesBusy}>
-                Clear
+                Done
               </button>
             </>
           )}
@@ -277,8 +293,12 @@ function BidCard({
       <div className="space-y-1">
         {bid.payment_schedule_items.map((line) => (
           <div key={line.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
-            <input type="checkbox" checked={selectedLines.has(line.id)} onChange={() => toggleSelectLine(line.id)} title="Select for bulk actions" />
-            <input type="checkbox" checked={line.paid} onChange={(e) => handleToggle(line.id, e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={selectMode ? selectedLines.has(line.id) : line.paid}
+              onChange={(e) => (selectMode ? toggleSelectLine(line.id) : handleToggle(line.id, e.target.checked))}
+              title={selectMode ? "Select for bulk actions" : undefined}
+            />
             <span className={`flex-1 text-sm ${line.paid ? "text-blueprint/40 line-through" : ""}`}>{line.label}</span>
             <span className="text-sm font-medium">{currency(line.amount)}</span>
             <button

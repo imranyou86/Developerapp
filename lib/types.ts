@@ -42,7 +42,8 @@ export interface Project {
 
 export interface PlanPage {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  created_by: string;
   storage_url: string;
   label: string;
   sort_order: number;
@@ -452,7 +453,10 @@ export interface ProjectInvite {
 
 export interface CostEstimate {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  created_by: string;
+  title: string | null;
+  location: string | null;
   total_sqft: number | null;
   stories: number | null;
   quality_tier: QualityTier | null;
