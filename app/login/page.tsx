@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BrandMark } from "@/components/BrandMark";
 
@@ -16,6 +16,7 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
+  const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/projects";
 
@@ -71,8 +72,18 @@ function LoginForm() {
     // from app/projects/page.tsx) reads this query flag on landing and
     // strips it right away, so it only ever shows immediately after a
     // real sign-in, never on an ordinary page load/refresh.
+    //
+    // Uses the Next.js router, not window.location.href — a raw browser
+    // navigation reassigned after this `await` (outside the split-second
+    // "direct user gesture" window Safari tracks) can get treated like a
+    // delayed pop-under and silently blocked when "Block Pop-ups" is on.
+    // A client-side router transition never goes through that check at
+    // all. @supabase/ssr's browser client writes the session to real
+    // cookies (not just localStorage), so /projects's server component —
+    // already force-dynamic — sees the fresh session on this navigation
+    // without needing a full page reload.
     const separator = next.includes("?") ? "&" : "?";
-    window.location.href = `${next}${separator}welcome=1`;
+    router.push(`${next}${separator}welcome=1`);
   }
 
   return (

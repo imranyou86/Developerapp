@@ -2153,3 +2153,19 @@ yet; each one only adds what a given feature needed.
   now bypasses `updateSession` entirely (same early-return pattern as
   `/share` and the alert-unsubscribe link), so it always reaches the
   route regardless of auth state.
+
+## Fixed: welcome animation depending on Safari's popup-blocker setting
+
+- **Password login's post-sign-in redirect used `window.location.href`,
+  reassigned after an `await` (the `signInWithPassword` call) — outside
+  the split-second window Safari treats as a "direct user gesture."**
+  With "Block Pop-ups" enabled, Safari could silently treat that delayed
+  navigation like a blocked pop-under, which is why the welcome overlay
+  (and the fresh `/projects` load generally) only worked with the setting
+  turned off. `app/login/page.tsx` now uses Next.js's `useRouter().push()`
+  instead — a pure client-side SPA transition that never goes through the
+  browser's navigation/popup-blocking path at all. `/projects`'s server
+  component is already `force-dynamic`, and `@supabase/ssr`'s browser
+  client writes the session to real cookies (not just localStorage), so
+  it still sees the fresh session on this navigation without needing a
+  full page reload.
