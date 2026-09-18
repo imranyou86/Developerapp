@@ -199,7 +199,7 @@ export function ChatClient({
                       <span className={`text-[10px] ${isOwn ? "text-white/60" : "text-blueprint/40"}`}>{formatTimestamp(m.created_at)}</span>
                       {isOwn && (
                         <button
-                          className={`text-[10px] opacity-0 hover:underline group-hover:opacity-100 ${isOwn ? "text-white/70" : "text-blueprint/50"}`}
+                          className="text-[10px] text-white/70 hover:underline"
                           onClick={() => handleDelete(m.id)}
                           disabled={deletingId === m.id}
                         >

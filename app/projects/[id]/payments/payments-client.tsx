@@ -292,27 +292,26 @@ function BidCard({
       )}
       <div className="space-y-1">
         {bid.payment_schedule_items.map((line) => (
-          <div key={line.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
+          <div key={line.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-concrete">
             <input
               type="checkbox"
               checked={selectMode ? selectedLines.has(line.id) : line.paid}
               onChange={(e) => (selectMode ? toggleSelectLine(line.id) : handleToggle(line.id, e.target.checked))}
               title={selectMode ? "Select for bulk actions" : undefined}
             />
-            <span className={`flex-1 text-sm ${line.paid ? "text-blueprint/40 line-through" : ""}`}>{line.label}</span>
-            <span className="text-sm font-medium">{currency(line.amount)}</span>
-            <button
-              className="text-xs text-blueprint/50 opacity-0 hover:underline group-hover:opacity-100"
-              onClick={() => setEditingLine(line)}
-            >
-              Edit
-            </button>
-            <button
-              className="text-xs text-red-500 opacity-0 hover:underline group-hover:opacity-100"
-              onClick={() => setDeletingLine(line)}
-            >
-              Remove
-            </button>
+            <span className={`min-w-0 flex-1 basis-32 text-sm ${line.paid ? "text-blueprint/40 line-through" : ""}`}>{line.label}</span>
+            <span className="shrink-0 text-sm font-medium">{currency(line.amount)}</span>
+            {/* Always visible (not hover-revealed) — opacity-0 until
+                :hover left these unreachable on touch devices, which have
+                no hover state at all. */}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <button className="text-xs text-blueprint/50 hover:underline" onClick={() => setEditingLine(line)}>
+                Edit
+              </button>
+              <button className="text-xs text-red-500 hover:underline" onClick={() => setDeletingLine(line)}>
+                Remove
+              </button>
+            </div>
           </div>
         ))}
       </div>

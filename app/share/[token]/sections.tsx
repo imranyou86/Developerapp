@@ -129,26 +129,28 @@ export function RoomsSection({ rooms }: { rooms: ShareRoom[] }) {
                 )}
 
                 {room.finishes.length > 0 && (
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="text-xs uppercase tracking-wide text-blueprint/50">
-                        <th className="py-1 pr-4 font-medium">Item</th>
-                        <th className="py-1 pr-4 font-medium">Category</th>
-                        <th className="py-1 pr-4 font-medium">Brand / Model</th>
-                        <th className="py-1 font-medium">Price</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {room.finishes.map((f) => (
-                        <tr key={f.id} className="border-t border-blueprint/5">
-                          <td className="py-1.5 pr-4">{f.name}</td>
-                          <td className="py-1.5 pr-4 text-blueprint/60">{f.category}</td>
-                          <td className="py-1.5 pr-4 text-blueprint/60">{f.brand ?? "—"}</td>
-                          <td className="py-1.5">{f.price != null ? currency(f.price) : "—"}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="text-xs uppercase tracking-wide text-blueprint/50">
+                          <th className="py-1 pr-4 font-medium">Item</th>
+                          <th className="py-1 pr-4 font-medium">Category</th>
+                          <th className="py-1 pr-4 font-medium">Brand / Model</th>
+                          <th className="py-1 font-medium">Price</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {room.finishes.map((f) => (
+                          <tr key={f.id} className="border-t border-blueprint/5">
+                            <td className="whitespace-nowrap py-1.5 pr-4">{f.name}</td>
+                            <td className="whitespace-nowrap py-1.5 pr-4 text-blueprint/60">{f.category}</td>
+                            <td className="whitespace-nowrap py-1.5 pr-4 text-blueprint/60">{f.brand ?? "—"}</td>
+                            <td className="whitespace-nowrap py-1.5">{f.price != null ? currency(f.price) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             );
@@ -252,26 +254,28 @@ export function BudgetSection({ rooms }: { rooms: ShareRoom[] }) {
           {roomsWithBudget.map((room) => (
             <div key={room.id} className="card p-5">
               <h3 className="mb-2 font-semibold text-blueprint-dark">{room.name}</h3>
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-xs uppercase tracking-wide text-blueprint/50">
-                    <th className="py-1 font-medium">Item</th>
-                    <th className="py-1 font-medium">Budgeted</th>
-                    <th className="py-1 font-medium">Actual</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {room.budget_items.map((item) => (
-                    <tr key={item.id} className="border-t border-blueprint/5">
-                      <td className="py-1.5">{item.item}</td>
-                      <td className="py-1.5">{currency(item.budgeted)}</td>
-                      <td className={`py-1.5 ${Number(item.actual) > Number(item.budgeted) ? "text-red-600" : ""}`}>
-                        {currency(item.actual)}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wide text-blueprint/50">
+                      <th className="py-1 font-medium">Item</th>
+                      <th className="py-1 font-medium">Budgeted</th>
+                      <th className="py-1 font-medium">Actual</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {room.budget_items.map((item) => (
+                      <tr key={item.id} className="border-t border-blueprint/5">
+                        <td className="whitespace-nowrap py-1.5">{item.item}</td>
+                        <td className="whitespace-nowrap py-1.5">{currency(item.budgeted)}</td>
+                        <td className={`whitespace-nowrap py-1.5 ${Number(item.actual) > Number(item.budgeted) ? "text-red-600" : ""}`}>
+                          {currency(item.actual)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ))}
         </div>

@@ -2380,3 +2380,31 @@ yet; each one only adds what a given feature needed.
   leaving Constructions/Calendar/Search/[Design & Tools]/Admin flat.
 - No migration — this only changes how existing, unchanged permissions
   render.
+
+## Mobile responsiveness pass
+
+- **List rows that crowded together on narrow screens** (Payments lines,
+  Checklist items, Room tasks, Warranty items) were missing `min-w-0` on
+  their flexible title text, so a long item name refused to shrink and
+  pushed against the amount/status/action buttons next to it instead of
+  wrapping. Those rows now use `flex flex-wrap` with `min-w-0 flex-1` on
+  the title and `shrink-0` on the fixed-width bits (amount, due date,
+  status), so a long title wraps onto its own line instead of squeezing
+  everything else off-screen.
+- **Row action buttons hidden behind `opacity-0`/`group-hover:opacity-100`**
+  (Edit/Remove/Delete on payments, room tasks, bank transactions, warranty
+  comments, chat messages) were invisible on touch — there's no hover
+  state on a phone, so there was no way to tap them at all. They're now
+  always visible.
+- **The repeated page-header row** (logo/title/email on the left, Sign out
+  on the right) across Constructions, Calendar, Subcontractors, Search,
+  Landscape, Construction Cost, Buyers Guide, Interior Design, Admin, and
+  the per-project header now wraps (`flex-wrap`) instead of overflowing,
+  with `min-w-0`/`truncate` on the left text block so a long email doesn't
+  push the Sign out button off the right edge of a phone screen.
+- **Wide tables** (budget line items, finishes, bank transaction CSV
+  preview, the public share page's finishes/budget tables) are now wrapped
+  in `overflow-x-auto` containers with `whitespace-nowrap` cells where
+  needed, so they scroll horizontally on a narrow screen instead of
+  squashing columns unreadably or breaking the page layout.
+- No migration — this is a CSS/layout-only pass across existing pages.

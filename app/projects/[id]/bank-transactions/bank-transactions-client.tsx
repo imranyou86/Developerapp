@@ -429,7 +429,7 @@ export function BankTransactionsClient({
               />
             </div>
 
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-blueprint/10">
+            <div className="max-h-64 overflow-x-auto overflow-y-auto rounded-lg border border-blueprint/10">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-blueprint/10 text-left">
@@ -767,10 +767,7 @@ export function BankTransactionsClient({
                         <input type="checkbox" checked={t.include_in_pl} onChange={() => handleToggleIncludeInPl(t)} />
                       </td>
                       <td className="px-2 py-1.5 text-right">
-                        <button
-                          className="text-xs text-red-500 opacity-0 hover:underline group-hover:opacity-100"
-                          onClick={() => setDeleting(t)}
-                        >
+                        <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(t)}>
                           Delete
                         </button>
                       </td>

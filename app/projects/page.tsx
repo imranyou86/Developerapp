@@ -58,15 +58,15 @@ export default async function ProjectsPage({ searchParams }: { searchParams: { w
     <div className="min-h-screen bg-concrete">
       <WelcomeOverlay show={searchParams.welcome === "1"} />
       <header className="border-b border-blueprint/10 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-y-2 px-6 py-4">
+          <div className="flex min-w-0 items-center gap-3">
             <BrandMark />
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg font-semibold text-blueprint-dark">Alaia Homes Dev</h1>
-              <p className="text-xs text-blueprint/50">{user?.email}</p>
+              <p className="truncate text-xs text-blueprint/50">{user?.email}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <PushNotificationToggle />
             <form action="/auth/signout" method="post">
               <button type="submit" className="btn-ghost">

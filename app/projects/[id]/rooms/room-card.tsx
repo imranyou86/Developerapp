@@ -251,19 +251,21 @@ export function RoomCard({
             )}
             <div className="space-y-1">
               {room.tasks.map((t) => (
-                <div key={t.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-concrete">
+                <div key={t.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-concrete">
                   <input
                     type="checkbox"
                     checked={selectModeTasks ? selectedTasks.has(t.id) : t.done}
                     onChange={(e) => (selectModeTasks ? toggleSelectTask(t.id) : handleToggleTask(t.id, e.target.checked))}
                     title={selectModeTasks ? "Select for bulk actions" : undefined}
                   />
-                  <span className={`flex-1 text-sm ${t.done ? "text-blueprint/40 line-through" : ""}`}>
+                  <span className={`min-w-0 flex-1 basis-32 text-sm ${t.done ? "text-blueprint/40 line-through" : ""}`}>
                     {t.title}
                   </span>
-                  {t.due_date && <span className="text-xs text-blueprint/50">{t.due_date}</span>}
+                  {t.due_date && <span className="shrink-0 text-xs text-blueprint/50">{t.due_date}</span>}
+                  {/* Always visible — opacity-0 until :hover left this
+                      unreachable on touch devices, which have no hover state. */}
                   <button
-                    className="text-xs text-red-500 opacity-0 hover:underline group-hover:opacity-100"
+                    className="ml-auto shrink-0 text-xs text-red-500 hover:underline"
                     onClick={() => setDeletingTaskId(t.id)}
                   >
                     Remove

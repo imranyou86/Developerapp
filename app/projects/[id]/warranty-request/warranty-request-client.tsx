@@ -831,10 +831,7 @@ export function WarrantyRequestCard({
                   <span className="flex items-center gap-2 text-blueprint/40">
                     {new Date(c.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
                     {c.user_id === currentUserId && (
-                      <button
-                        className="opacity-0 hover:underline group-hover:opacity-100"
-                        onClick={() => onDeleteComment(c.id)}
-                      >
+                      <button className="hover:underline" onClick={() => onDeleteComment(c.id)}>
                         Delete
                       </button>
                     )}
@@ -1258,7 +1255,7 @@ function WarrantyItem({
 
   return (
     <div className="rounded-lg border border-blueprint/10">
-      <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2 py-1.5">
         <input
           type="checkbox"
           checked={selectMode ? selected : item.done}
@@ -1267,7 +1264,7 @@ function WarrantyItem({
           disabled={!canManage || (!selectMode && item.status === "invalidated")}
         />
         <button
-          className={`flex-1 text-left text-sm ${
+          className={`min-w-0 flex-1 basis-40 text-left text-sm ${
             item.status === "invalidated"
               ? "text-red-400 line-through"
               : item.done
@@ -1278,43 +1275,48 @@ function WarrantyItem({
         >
           {item.title}
         </button>
-        {canManage ? (
-          <select
-            className={`input w-auto shrink-0 text-xs ${
-              item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+        {/* Wraps onto its own right-aligned line on a narrow screen rather
+            than squeezing the status select/badge and two buttons next to
+            a long, wrapped title on the same row. */}
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+          {canManage ? (
+            <select
+              className={`input w-auto shrink-0 text-xs ${
+                item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+              }`}
+              value={item.status}
+              onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
+            >
+              <option value="pending">Pending review</option>
+              <option value="validated">Validate</option>
+              <option value="invalidated">Not covered by warranty</option>
+            </select>
+          ) : (
+            <span
+              className={`shrink-0 text-xs ${
+                item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
+              }`}
+            >
+              {item.status === "validated" ? "Validated" : item.status === "invalidated" ? "Not covered" : "Pending review"}
+            </span>
+          )}
+          <button
+            className={`shrink-0 text-xs hover:underline ${
+              item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"
             }`}
-            value={item.status}
-            onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
+            onClick={() => setExpanded((e) => !e)}
           >
-            <option value="pending">Pending review</option>
-            <option value="validated">Validate</option>
-            <option value="invalidated">Not covered by warranty</option>
-          </select>
-        ) : (
-          <span
-            className={`shrink-0 text-xs ${
-              item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
-            }`}
-          >
-            {item.status === "validated" ? "Validated" : item.status === "invalidated" ? "Not covered" : "Pending review"}
-          </span>
-        )}
-        <button
-          className={`shrink-0 text-xs hover:underline ${
-            item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"
-          }`}
-          onClick={() => setExpanded((e) => !e)}
-        >
-          {item.comment && "📝 "}
-          {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
-          {reports.length > 0 && `📄${reports.length} `}
-          {expanded ? "Details ▾" : "Details ▸"}
-        </button>
-        {canManage && (
-          <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
-            Remove
+            {item.comment && "📝 "}
+            {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
+            {reports.length > 0 && `📄${reports.length} `}
+            {expanded ? "Details ▾" : "Details ▸"}
           </button>
-        )}
+          {canManage && (
+            <button className="shrink-0 text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
+              Remove
+            </button>
+          )}
+        </div>
       </div>
 
       {expanded && (

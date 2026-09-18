@@ -90,6 +90,7 @@ export function BudgetClient({
                 {room.budget_items.length === 0 ? (
                   <p className="text-xs text-blueprint/50">No line items yet.</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="text-xs uppercase tracking-wide text-blueprint/50">
@@ -132,6 +133,7 @@ export function BudgetClient({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );

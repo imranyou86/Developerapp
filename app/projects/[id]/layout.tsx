@@ -73,18 +73,18 @@ export default async function ProjectLayout({
   return (
     <div className="min-h-screen bg-concrete">
       <header className="border-b border-blueprint/10 bg-white">
-        <div className="mx-auto flex max-w-6xl items-start justify-between px-6 py-4">
-          <div>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-y-2 px-6 py-4">
+          <div className="min-w-0">
             <Link href="/projects" className="text-xs text-blueprint/50 hover:text-amber">
               ← All constructions
             </Link>
             <div className="mt-1 flex items-center gap-2">
-              <h1 className="text-xl font-semibold text-blueprint-dark">{project.name}</h1>
-              {project.kind === "warranty_tracker" && <span className="badge-amber text-xs">Warranty Tracker</span>}
+              <h1 className="truncate text-xl font-semibold text-blueprint-dark">{project.name}</h1>
+              {project.kind === "warranty_tracker" && <span className="shrink-0 badge-amber text-xs">Warranty Tracker</span>}
             </div>
-            {project.address && <p className="text-sm text-blueprint/50">{project.address}</p>}
+            {project.address && <p className="truncate text-sm text-blueprint/50">{project.address}</p>}
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             {currentUser && <AlertSubscribeButton projectId={project.id} initialSubscribed={!!alertSub} />}
             {currentUser?.role === "developer" && <InviteButton projectId={project.id} />}
             <ShareButton projectId={project.id} initialShares={shares ?? []} />

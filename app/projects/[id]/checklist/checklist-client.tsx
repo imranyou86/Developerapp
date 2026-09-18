@@ -374,7 +374,7 @@ function ChecklistItemRow({
 
   return (
     <div className="rounded-lg border border-blueprint/10">
-      <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5">
         <input
           type="checkbox"
           checked={selectMode ? selected : item.done}
@@ -382,24 +382,28 @@ function ChecklistItemRow({
           title={selectMode ? "Select for bulk actions" : undefined}
         />
         <button
-          className={`flex-1 text-left text-sm ${item.done ? "text-blueprint/40 line-through" : "text-blueprint-dark"}`}
+          className={`min-w-0 flex-1 basis-40 text-left text-sm ${item.done ? "text-blueprint/40 line-through" : "text-blueprint-dark"}`}
           onClick={() => setExpanded((e) => !e)}
         >
           {item.title}
         </button>
-        <button
-          className={`shrink-0 text-xs hover:underline ${
-            item.comment || item.checklist_photos.length > 0 ? "text-amber-dark" : "text-blueprint/40"
-          }`}
-          onClick={() => setExpanded((e) => !e)}
-        >
-          {item.comment && "📝 "}
-          {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
-          {expanded ? "Notes & photos ▾" : "Notes & photos ▸"}
-        </button>
-        <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
-          Remove
-        </button>
+        {/* Wraps onto its own right-aligned line on a narrow screen rather
+            than squeezing next to a long, wrapped title on the same row. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            className={`text-xs hover:underline ${
+              item.comment || item.checklist_photos.length > 0 ? "text-amber-dark" : "text-blueprint/40"
+            }`}
+            onClick={() => setExpanded((e) => !e)}
+          >
+            {item.comment && "📝 "}
+            {item.checklist_photos.length > 0 && `📷${item.checklist_photos.length} `}
+            {expanded ? "Notes & photos ▾" : "Notes & photos ▸"}
+          </button>
+          <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmDelete(true)}>
+            Remove
+          </button>
+        </div>
       </div>
 
       {expanded && (
