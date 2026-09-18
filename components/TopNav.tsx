@@ -21,6 +21,7 @@ export function TopNav({
   const pathname = usePathname();
   const tabs = [
     { href: "/projects", label: "Constructions" },
+    { href: "/calendar", label: "Calendar" },
     { href: "/search", label: "Search" },
     ...(showDeals ? [{ href: "/deals", label: "Buyers Guide" }] : []),
     ...(showInteriorDesign ? [{ href: "/interior-design", label: "Interior Design" }] : []),

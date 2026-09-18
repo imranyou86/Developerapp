@@ -2254,3 +2254,16 @@ yet; each one only adds what a given feature needed.
   containing a literal comma would otherwise corrupt that string and
   silently break the filter.
 - No new tables or migration — this only reads what already exists.
+
+## Calendar view
+
+- **New "Calendar" link in the top nav** (`/calendar`) — every open room
+  task with a due date, across every construction you have access to,
+  grouped into Overdue, Due this week, and Later. A dropdown narrows it
+  to one construction, same picker pattern as Construction Cost/Interior
+  Design. Room tasks (`tasks.due_date`) are the only genuinely
+  forward-looking due date anywhere in the schema — everything else is a
+  timestamp of when something already happened — so that's what this
+  aggregates; each row links back to that construction's Rooms tab.
+- No migration — read-only against the existing `tasks` table, scoped by
+  its existing RLS the same way every other query in the app is.
