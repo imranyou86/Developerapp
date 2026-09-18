@@ -2135,3 +2135,21 @@ yet; each one only adds what a given feature needed.
   plain browser History API call that only rewrites the address bar text,
   triggering no Next.js navigation, re-fetch, or re-render at all, so the
   component's own state is left completely alone.
+
+## Fixed: sign-out doing nothing at all (the real cause)
+
+- **Middleware was redirecting an authenticated user's sign-out request
+  back to `/projects` before the sign-out route ever ran** —
+  `isAuthRoute` in `lib/supabase/middleware.ts` matched any path starting
+  with `/auth` (meant to catch `/auth/confirm`), which also matched
+  `/auth/signout`. Since a signed-in user's `if (user && isAuthRoute)`
+  rule fires for exactly that case, their POST to `/auth/signout` was
+  being redirected straight back to `/projects` — `supabase.auth.signOut()`
+  never executed, so the session was never actually cleared, which is why
+  tapping "Sign out" appeared to do nothing and a fresh tab still showed
+  the same account logged in. The earlier 307-vs-303 redirect fix on the
+  route itself was a real, separate bug, but never actually mattered in
+  practice since requests never reached that code at all. `/auth/signout`
+  now bypasses `updateSession` entirely (same early-return pattern as
+  `/share` and the alert-unsubscribe link), so it always reaches the
+  route regardless of auth state.

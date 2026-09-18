@@ -14,7 +14,18 @@ export async function updateSession(request: NextRequest) {
   // inbox is very likely not signed in on that device at all, and
   // redirecting them to /login instead of just unsubscribing them would
   // defeat the point of a one-click link.
-  if (request.nextUrl.pathname.startsWith("/share") || request.nextUrl.pathname.startsWith("/api/alerts/unsubscribe")) {
+  //
+  // /auth/signout also has to bypass this whole function: isAuthRoute below
+  // matches any path starting with "/auth" (meant for /auth/confirm), so a
+  // signed-in user's POST to /auth/signout was matching "user && isAuthRoute"
+  // and getting redirected straight back to /projects before the route
+  // handler ever ran — supabase.auth.signOut() never executed, so sign-out
+  // silently did nothing.
+  if (
+    request.nextUrl.pathname.startsWith("/share") ||
+    request.nextUrl.pathname.startsWith("/api/alerts/unsubscribe") ||
+    request.nextUrl.pathname.startsWith("/auth/signout")
+  ) {
     return NextResponse.next({ request });
   }
 
