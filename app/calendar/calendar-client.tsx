@@ -2,14 +2,18 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { formatTimeWindow } from "@/lib/timeFormat";
 
-export interface CalendarTask {
+export interface CalendarEntry {
   id: string;
+  kind: "task" | "warranty_visit";
   title: string;
   dueDate: string;
-  roomName: string;
+  timeStart: string | null;
+  timeEnd: string | null;
+  subLabel: string;
   projectId: string;
-  projectName: string;
+  href: string;
 }
 
 interface ProjectOption {
@@ -26,7 +30,7 @@ function formatDueDate(dueDate: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function CalendarClient({ tasks, projects }: { tasks: CalendarTask[]; projects: ProjectOption[] }) {
+export function CalendarClient({ entries, projects }: { entries: CalendarEntry[]; projects: ProjectOption[] }) {
   const [filterProjectId, setFilterProjectId] = useState<string>("");
 
   // Compared as ISO date strings (which sort correctly lexicographically)
@@ -41,18 +45,18 @@ export function CalendarClient({ tasks, projects }: { tasks: CalendarTask[]; pro
     return { todayStr: toIso(today), weekAheadStr: toIso(weekAhead) };
   }, []);
 
-  const filtered = filterProjectId ? tasks.filter((t) => t.projectId === filterProjectId) : tasks;
+  const filtered = filterProjectId ? entries.filter((e) => e.projectId === filterProjectId) : entries;
 
-  const overdue = filtered.filter((t) => t.dueDate < todayStr);
-  const thisWeek = filtered.filter((t) => t.dueDate >= todayStr && t.dueDate < weekAheadStr);
-  const later = filtered.filter((t) => t.dueDate >= weekAheadStr);
+  const overdue = filtered.filter((e) => e.dueDate < todayStr);
+  const thisWeek = filtered.filter((e) => e.dueDate >= todayStr && e.dueDate < weekAheadStr);
+  const later = filtered.filter((e) => e.dueDate >= weekAheadStr);
 
   const groups = (
     [
       { label: "Overdue", tone: "danger", items: overdue },
       { label: "Due this week", tone: "warn", items: thisWeek },
       { label: "Later", tone: "neutral", items: later },
-    ] as { label: string; tone: "danger" | "warn" | "neutral"; items: CalendarTask[] }[]
+    ] as { label: string; tone: "danger" | "warn" | "neutral"; items: CalendarEntry[] }[]
   ).filter((g) => g.items.length > 0);
 
   return (
@@ -68,7 +72,7 @@ export function CalendarClient({ tasks, projects }: { tasks: CalendarTask[]; pro
 
       {groups.length === 0 ? (
         <div className="card p-10 text-center text-sm text-blueprint/60">
-          No open tasks with a due date{filterProjectId ? " for this construction" : ""}.
+          Nothing due or scheduled{filterProjectId ? " for this construction" : ""}.
         </div>
       ) : (
         groups.map((group) => (
@@ -81,27 +85,32 @@ export function CalendarClient({ tasks, projects }: { tasks: CalendarTask[]; pro
               {group.label} ({group.items.length})
             </p>
             <div className="card divide-y divide-blueprint/10">
-              {group.items.map((task) => (
-                <Link
-                  key={task.id}
-                  href={`/projects/${task.projectId}/rooms`}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-concrete"
-                >
-                  <div>
-                    <p className="text-sm text-blueprint-dark">{task.title}</p>
-                    <p className="text-xs text-blueprint/50">
-                      {task.roomName} — {task.projectName}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 text-xs font-medium ${
-                      group.tone === "danger" ? "text-red-600" : group.tone === "warn" ? "text-amber-dark" : "text-blueprint/50"
-                    }`}
+              {group.items.map((entry) => {
+                const timeWindow = formatTimeWindow(entry.timeStart, entry.timeEnd);
+                return (
+                  <Link
+                    key={entry.id}
+                    href={entry.href}
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2.5 transition-colors hover:bg-concrete"
                   >
-                    {formatDueDate(task.dueDate)}
-                  </span>
-                </Link>
-              ))}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-blueprint-dark">
+                        {entry.kind === "warranty_visit" && <span className="mr-1">🔧</span>}
+                        {entry.title}
+                      </p>
+                      <p className="truncate text-xs text-blueprint/50">{entry.subLabel}</p>
+                    </div>
+                    <span
+                      className={`shrink-0 text-xs font-medium ${
+                        group.tone === "danger" ? "text-red-600" : group.tone === "warn" ? "text-amber-dark" : "text-blueprint/50"
+                      }`}
+                    >
+                      {formatDueDate(entry.dueDate)}
+                      {timeWindow && `, ${timeWindow}`}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           </div>
         ))

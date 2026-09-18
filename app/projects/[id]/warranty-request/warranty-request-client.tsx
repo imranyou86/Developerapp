@@ -24,6 +24,7 @@ import {
   deleteWarrantyRequestComment,
   rejectWarrantyItemRequest,
   setWarrantyRequestProgress,
+  setWarrantyRequestSchedule,
   setWarrantyStatus,
   toggleWarrantyItem,
   toggleWarrantyItems,
@@ -33,6 +34,8 @@ import {
 import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import type { UserRole, WarrantyItemRequest, WarrantyItemRequestComment, WarrantyItemStatus, WarrantyRequestProgress } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
+import { telHref } from "@/lib/phone";
+import { formatTimeWindow } from "@/lib/timeFormat";
 
 const PROGRESS_LABELS: Record<WarrantyRequestProgress, string> = {
   open: "Open",
@@ -74,7 +77,18 @@ export interface InspectionReportRow {
 export interface SubcontractorOption {
   id: string;
   company_name: string;
+  contact_name: string | null;
   trade: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
+function formatScheduledVisit(date: string | null, start: string | null, end: string | null): string | null {
+  if (!date) return null;
+  const [y, m, d] = date.split("-").map(Number);
+  const dateLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const windowLabel = formatTimeWindow(start, end);
+  return windowLabel ? `${dateLabel}, ${windowLabel}` : dateLabel;
 }
 
 export function WarrantyRequestClient({
@@ -292,6 +306,31 @@ export function WarrantyRequestClient({
     }
   }
 
+  async function handleSetSchedule(
+    request: WarrantyItemRequest,
+    schedule: { date: string | null; timeStart: string | null; timeEnd: string | null }
+  ) {
+    const previous = {
+      scheduled_date: request.scheduled_date,
+      scheduled_time_start: request.scheduled_time_start,
+      scheduled_time_end: request.scheduled_time_end,
+    };
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === request.id
+          ? { ...r, scheduled_date: schedule.date, scheduled_time_start: schedule.timeStart, scheduled_time_end: schedule.timeEnd }
+          : r
+      )
+    );
+    const res = await setWarrantyRequestSchedule(projectId, request.id, schedule, request.title);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save the visit schedule.");
+      setRequests((prev) => (prev.map((r) => (r.id === request.id ? { ...r, ...previous } : r))));
+    } else {
+      notify("success", schedule.date ? "Visit scheduled." : "Visit schedule cleared.");
+    }
+  }
+
   async function handleAddComment(requestId: string, body: string) {
     const res = await addWarrantyRequestComment(projectId, requestId, body);
     if (!res.ok || !res.id) {
@@ -460,6 +499,7 @@ export function WarrantyRequestClient({
         onDelete={handleDeleteRequest}
         onSetProgress={handleSetProgress}
         onAssignSubcontractor={handleAssignSubcontractor}
+        onSetSchedule={handleSetSchedule}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
         onReportAdd={(r) => setReports((prev) => [r, ...prev])}
@@ -486,6 +526,7 @@ function RequestsSection({
   onDelete,
   onSetProgress,
   onAssignSubcontractor,
+  onSetSchedule,
   onAddComment,
   onDeleteComment,
   onReportAdd,
@@ -503,6 +544,10 @@ function RequestsSection({
   onDelete: (request: WarrantyItemRequest) => Promise<void>;
   onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
   onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
+  onSetSchedule: (
+    request: WarrantyItemRequest,
+    schedule: { date: string | null; timeStart: string | null; timeEnd: string | null }
+  ) => Promise<void>;
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
@@ -554,6 +599,7 @@ function RequestsSection({
               onDelete={onDelete}
               onSetProgress={onSetProgress}
               onAssignSubcontractor={onAssignSubcontractor}
+              onSetSchedule={onSetSchedule}
               onAddComment={onAddComment}
               onDeleteComment={onDeleteComment}
               onReportAdd={onReportAdd}
@@ -591,6 +637,7 @@ export function WarrantyRequestCard({
   onDelete,
   onSetProgress,
   onAssignSubcontractor,
+  onSetSchedule,
   onAddComment,
   onDeleteComment,
   onReportAdd,
@@ -608,6 +655,10 @@ export function WarrantyRequestCard({
   onDelete?: (request: WarrantyItemRequest) => Promise<void>;
   onSetProgress: (request: WarrantyItemRequest, progress: WarrantyRequestProgress) => Promise<void>;
   onAssignSubcontractor: (request: WarrantyItemRequest, subcontractorId: string | null) => Promise<void>;
+  onSetSchedule: (
+    request: WarrantyItemRequest,
+    schedule: { date: string | null; timeStart: string | null; timeEnd: string | null }
+  ) => Promise<void>;
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
@@ -619,7 +670,22 @@ export function WarrantyRequestCard({
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState(request.scheduled_date ?? "");
+  const [scheduleStart, setScheduleStart] = useState(request.scheduled_time_start?.slice(0, 5) ?? "");
+  const [scheduleEnd, setScheduleEnd] = useState(request.scheduled_time_end?.slice(0, 5) ?? "");
   const assignedSub = subcontractors.find((s) => s.id === request.subcontractor_id);
+  const scheduledVisitLabel = formatScheduledVisit(request.scheduled_date, request.scheduled_time_start, request.scheduled_time_end);
+
+  async function handleSaveSchedule() {
+    setSavingSchedule(true);
+    await onSetSchedule(request, {
+      date: scheduleDate || null,
+      timeStart: scheduleDate && scheduleStart ? scheduleStart : null,
+      timeEnd: scheduleDate && scheduleStart && scheduleEnd ? scheduleEnd : null,
+    });
+    setSavingSchedule(false);
+  }
 
   async function handleUploadReport(file: File) {
     setUploading(true);
@@ -780,6 +846,56 @@ export function WarrantyRequestCard({
             </span>
           )}
         </div>
+      </div>
+
+      {assignedSub && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-blueprint/60">
+          {assignedSub.contact_name && <span>{assignedSub.contact_name}</span>}
+          {assignedSub.phone && (
+            <a href={telHref(assignedSub.phone)} className="text-blueprint hover:text-amber hover:underline">
+              {assignedSub.phone}
+            </a>
+          )}
+          {assignedSub.email && (
+            <a href={`mailto:${assignedSub.email}`} className="text-blueprint hover:text-amber hover:underline">
+              {assignedSub.email}
+            </a>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2.5 border-t border-blueprint/10 pt-2.5">
+        <span className="mb-1.5 block text-xs font-medium text-blueprint/50">Scheduled visit</span>
+        {canManageRequests ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input w-auto py-1 text-xs"
+              type="date"
+              value={scheduleDate}
+              onChange={(e) => setScheduleDate(e.target.value)}
+            />
+            <input
+              className="input w-auto py-1 text-xs"
+              type="time"
+              value={scheduleStart}
+              disabled={!scheduleDate}
+              onChange={(e) => setScheduleStart(e.target.value)}
+            />
+            <span className="text-xs text-blueprint/40">to</span>
+            <input
+              className="input w-auto py-1 text-xs"
+              type="time"
+              value={scheduleEnd}
+              disabled={!scheduleDate || !scheduleStart}
+              onChange={(e) => setScheduleEnd(e.target.value)}
+            />
+            <button className="btn-outline px-2 py-1 text-xs" onClick={handleSaveSchedule} disabled={savingSchedule}>
+              {savingSchedule ? "Saving…" : "Save"}
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs text-blueprint-dark">{scheduledVisitLabel ?? "Not yet scheduled"}</span>
+        )}
       </div>
 
       <div className="mt-2.5 border-t border-blueprint/10 pt-2.5">

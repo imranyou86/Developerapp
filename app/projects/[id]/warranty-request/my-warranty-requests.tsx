@@ -57,6 +57,7 @@ export function MyWarrantyRequests({
             onReject={noop}
             onSetProgress={noop}
             onAssignSubcontractor={noop}
+            onSetSchedule={noop}
             onAddComment={noop}
             onDeleteComment={noop}
             onReportAdd={(r) => setReports((prev) => [r, ...prev])}

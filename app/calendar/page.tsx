@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
-import { CalendarClient, type CalendarTask } from "@/app/calendar/calendar-client";
+import { CalendarClient, type CalendarEntry } from "@/app/calendar/calendar-client";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
 
@@ -14,8 +14,19 @@ interface TaskRow {
   rooms: { id: string; name: string; project_id: string; projects: { name: string }[] | null }[] | null;
 }
 
+interface WarrantyVisitRow {
+  id: string;
+  project_id: string;
+  title: string;
+  scheduled_date: string;
+  scheduled_time_start: string | null;
+  scheduled_time_end: string | null;
+  projects: { name: string }[] | null;
+  subcontractors: { company_name: string }[] | null;
+}
+
 // Not gated by tab_permissions — same reasoning as /search, this is a
-// utility view over data every visible task's own RLS already scopes.
+// utility view over data every visible entry's own RLS already scopes.
 export default async function CalendarPage() {
   const supabase = createClient();
   const {
@@ -24,7 +35,7 @@ export default async function CalendarPage() {
   const currentUser = await getCurrentUser();
   const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
-  const [{ data: projects }, { data: taskRows, error }] = await Promise.all([
+  const [{ data: projects }, { data: taskRows, error }, { data: visitRows, error: visitsError }] = await Promise.all([
     supabase.from("projects").select("id, name").order("name"),
     supabase
       .from("tasks")
@@ -32,26 +43,57 @@ export default async function CalendarPage() {
       .eq("done", false)
       .not("due_date", "is", null)
       .order("due_date"),
+    // can_view_warranty_request's RLS (same as the Warranty Request tab)
+    // already scopes this to what the signed-in user can see — a 'warranty'
+    // account only ever gets its own filed requests, everyone else with
+    // project access gets all of them. A visit already marked complete
+    // drops off here the same way a done task drops off above.
+    supabase
+      .from("warranty_item_requests")
+      .select(
+        "id, project_id, title, scheduled_date, scheduled_time_start, scheduled_time_end, projects(name), subcontractors(company_name)"
+      )
+      .not("scheduled_date", "is", null)
+      .neq("progress", "complete")
+      .order("scheduled_date"),
   ]);
 
-  // Only room tasks carry a real due date anywhere in this app (checklist/
-  // warranty items, bids, etc. don't) — tasks_member RLS (has_project_access
+  // Only room tasks carry a real due date anywhere else in this app
+  // (checklist items, bids, etc. don't) — tasks_member RLS (has_project_access
   // via the parent room) already scoped this to what the signed-in user
   // can see, same as every other query here.
-  const tasks: CalendarTask[] = ((taskRows ?? []) as unknown as TaskRow[])
+  const taskEntries: CalendarEntry[] = ((taskRows ?? []) as unknown as TaskRow[])
     .map((t) => {
       const room = t.rooms?.[0];
       if (!room) return null;
-      return {
-        id: t.id,
+      const entry: CalendarEntry = {
+        id: `task-${t.id}`,
+        kind: "task",
         title: t.title,
         dueDate: t.due_date,
-        roomName: room.name,
+        timeStart: null,
+        timeEnd: null,
+        subLabel: `${room.name} — ${room.projects?.[0]?.name ?? "Untitled construction"}`,
         projectId: room.project_id,
-        projectName: room.projects?.[0]?.name ?? "Untitled construction",
+        href: `/projects/${room.project_id}/rooms`,
       };
+      return entry;
     })
-    .filter((t): t is CalendarTask => t !== null);
+    .filter((t): t is CalendarEntry => t !== null);
+
+  const visitEntries: CalendarEntry[] = ((visitRows ?? []) as unknown as WarrantyVisitRow[]).map((v) => ({
+    id: `visit-${v.id}`,
+    kind: "warranty_visit",
+    title: v.title,
+    dueDate: v.scheduled_date,
+    timeStart: v.scheduled_time_start,
+    timeEnd: v.scheduled_time_end,
+    subLabel: `${v.subcontractors?.[0]?.company_name ?? "Subcontractor TBD"} — ${v.projects?.[0]?.name ?? "Untitled construction"}`,
+    projectId: v.project_id,
+    href: `/projects/${v.project_id}/warranty-request`,
+  }));
+
+  const entries = [...taskEntries, ...visitEntries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   return (
     <div className="min-h-screen bg-concrete">
@@ -84,16 +126,17 @@ export default async function CalendarPage() {
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-blueprint-dark">Calendar</h2>
           <p className="text-sm text-blueprint/50">
-            Every open room task with a due date, across every construction you have access to — overdue first,
-            then this week, then everything later. Pick a construction below to narrow it to just that one.
+            Every open room task with a due date, plus every scheduled warranty visit (🔧), across every construction
+            you have access to — overdue first, then this week, then everything later. Pick a construction below to
+            narrow it to just that one.
           </p>
         </div>
-        {error && (
+        {(error || visitsError) && (
           <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load the calendar: {error.message}
+            Could not load the calendar: {(error ?? visitsError)?.message}
           </div>
         )}
-        <CalendarClient tasks={tasks} projects={projects ?? []} />
+        <CalendarClient entries={entries} projects={projects ?? []} />
       </main>
     </div>
   );

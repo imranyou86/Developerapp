@@ -94,4 +94,10 @@ export const NOTIFICATION_ACTIONS: NotificationActionDef[] = [
     description: "Someone comments on a warranty request.",
     defaultRoles: [],
   },
+  {
+    key: "warranty_request_scheduled",
+    label: "Warranty visit scheduled",
+    description: "A subcontractor's visit date/time window is set or changed for a warranty request — always reaches whoever filed it.",
+    defaultRoles: [],
+  },
 ];

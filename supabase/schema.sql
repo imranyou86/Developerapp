@@ -272,6 +272,12 @@ create table if not exists warranty_item_requests (
   checklist_item_id uuid references checklist_items (id) on delete set null,
   reviewed_by uuid references auth.users (id) on delete set null,
   reviewed_at timestamptz,
+  -- When the assigned subcontractor is expected to show up — set by
+  -- whoever manages the request, shown to the homeowner who filed it and
+  -- surfaced on /calendar.
+  scheduled_date date,
+  scheduled_time_start time,
+  scheduled_time_end time,
   created_at timestamptz not null default now()
 );
 
@@ -803,7 +809,8 @@ insert into notification_settings (action, enabled, roles) values
   ('warranty_request_approved', true, '{}'),
   ('warranty_request_rejected', true, '{}'),
   ('warranty_request_status_changed', true, '{}'),
-  ('warranty_request_comment', true, '{}')
+  ('warranty_request_comment', true, '{}'),
+  ('warranty_request_scheduled', true, '{}')
 on conflict (action) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new

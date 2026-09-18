@@ -326,6 +326,12 @@ export interface WarrantyItemRequest {
   checklist_item_id: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  // When the assigned subcontractor is expected to show up — set by
+  // whoever manages the request (see setWarrantyRequestSchedule), shown to
+  // the homeowner who filed it and surfaced on /calendar.
+  scheduled_date: string | null;
+  scheduled_time_start: string | null;
+  scheduled_time_end: string | null;
   created_at: string;
 }
 

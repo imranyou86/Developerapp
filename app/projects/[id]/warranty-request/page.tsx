@@ -22,7 +22,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
     const { data: requests, error: requestsError } = await supabase
       .from("warranty_item_requests")
       .select(
-        "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, created_at"
+        "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, created_at"
       )
       .eq("project_id", params.id)
       .eq("requested_by", currentUser?.id ?? "")
@@ -53,7 +53,11 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
     const subIds = Array.from(new Set((requests ?? []).map((r) => r.subcontractor_id).filter((id): id is string => !!id)));
     const { data: subcontractors } =
       subIds.length > 0
-        ? await supabase.from("subcontractors").select("id, company_name, trade").in("id", subIds).order("company_name")
+        ? await supabase
+            .from("subcontractors")
+            .select("id, company_name, contact_name, trade, phone, email")
+            .in("id", subIds)
+            .order("company_name")
         : { data: [] };
 
     const signedReports = await signRowsUrl(reports ?? [], "storage_url");
@@ -96,7 +100,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
       supabase
         .from("warranty_item_requests")
         .select(
-          "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, created_at"
+          "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, created_at"
         )
         .eq("project_id", params.id)
         .order("created_at", { ascending: false }),
@@ -117,7 +121,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
           .in("request_id", requestIds)
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
-    supabase.from("subcontractors").select("id, company_name, trade").order("company_name"),
+    supabase.from("subcontractors").select("id, company_name, contact_name, trade, phone, email").order("company_name"),
   ]);
 
   const [signedItems, signedReports] = await Promise.all([

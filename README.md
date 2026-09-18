@@ -2408,3 +2408,28 @@ yet; each one only adds what a given feature needed.
   needed, so they scroll horizontally on a narrow screen instead of
   squashing columns unreadably or breaking the page layout.
 - No migration — this is a CSS/layout-only pass across existing pages.
+
+## Warranty visit scheduling + Calendar integration
+
+- **The Calendar page previously only showed open room task due dates** —
+  for a project that mostly tracks warranty work rather than room tasks,
+  that made it look like it "did nothing." It now also shows every
+  scheduled warranty visit, marked with a 🔧, merged into the same
+  overdue/this-week/later grouping and the same per-construction filter.
+- **A Contractor, Developer, or PM can now set a date and time window on a
+  warranty request** ("Scheduled visit" under Status/Subcontractor on each
+  request card) — when the assigned subcontractor is expected to show up.
+  Saving it always notifies the homeowner who filed the request (even if
+  they never personally clicked "Get alerts" — see
+  `notifyForAction`'s new `alwaysIncludeUserId` option in `lib/alerts.ts`),
+  and it's Admin-configurable like every other notification (new
+  `warranty_request_scheduled` catalog entry). A visit marked "Complete"
+  drops off the Calendar the same way a done task does.
+- **The homeowner's own request view now shows the assigned subcontractor's
+  contact info** (contact name, phone as a tap-to-call link, email as a
+  mailto link) and the scheduled visit date/time window, read-only — so
+  they know who's coming and when without having to ask.
+- **Migration 055** adds `scheduled_date`/`scheduled_time_start`/
+  `scheduled_time_end` to `warranty_item_requests` (no new RLS — the
+  existing Contractor/Developer/PM update policy already covers these
+  columns) and seeds the new notification action.

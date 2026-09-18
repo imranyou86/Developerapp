@@ -664,6 +664,56 @@ export async function assignWarrantyRequestSubcontractor(
   return { ok: true };
 }
 
+// Sets when the assigned subcontractor is expected to show up — surfaced on
+// /calendar (see app/calendar/page.tsx) and shown to the homeowner who
+// filed the request (WarrantyRequestCard's read-only view). Unlike every
+// other notify call in this file (which just goes to whoever's subscribed
+// or force-notified by role), this one always reaches the person who filed
+// the request — they need to know a visit is coming whether or not they
+// personally clicked "Get alerts."
+export async function setWarrantyRequestSchedule(
+  projectId: string,
+  requestId: string,
+  schedule: { date: string | null; timeStart: string | null; timeEnd: string | null },
+  requestTitle?: string
+): Promise<ActionResult> {
+  const guard = await requireApprover();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  const supabase = createClient();
+  const { data: request, error: fetchError } = await supabase
+    .from("warranty_item_requests")
+    .select("requested_by")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (fetchError) return { ok: false, error: fetchError.message };
+
+  const { error } = await supabase
+    .from("warranty_item_requests")
+    .update({
+      scheduled_date: schedule.date,
+      scheduled_time_start: schedule.timeStart,
+      scheduled_time_end: schedule.timeEnd,
+    })
+    .eq("id", requestId);
+  if (error) return { ok: false, error: error.message };
+
+  if (schedule.date && request?.requested_by) {
+    const window = schedule.timeStart
+      ? ` (${schedule.timeStart}${schedule.timeEnd ? `–${schedule.timeEnd}` : ""})`
+      : "";
+    await notifyForAction(projectId, "warranty_request_scheduled", {
+      subject: "Warranty visit scheduled",
+      body: `A visit for "${requestTitle ?? "your warranty request"}" is scheduled for ${schedule.date}${window}.`,
+      excludeUserId: guard.userId,
+      alwaysIncludeUserId: request.requested_by,
+    });
+  }
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
 // Comments/notes on a request — Contractor/Developer/PM can post (enforced
 // in RLS too, see warranty_item_request_comments_insert), the 'warranty'
 // role who filed it can only read them (its own request only, per

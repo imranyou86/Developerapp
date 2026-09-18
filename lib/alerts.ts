@@ -41,7 +41,7 @@ interface AlertRecipient {
 export async function notifyForAction(
   projectId: string,
   action: string,
-  options: { subject: string; body: string; excludeUserId?: string }
+  options: { subject: string; body: string; excludeUserId?: string; alwaysIncludeUserId?: string }
 ): Promise<void> {
   try {
     const admin = createAdminClient();
@@ -90,6 +90,20 @@ export async function notifyForAction(
         // that has none.
         if (!recipientsByUser.has(p.id)) recipientsByUser.set(p.id, { userId: p.id, email: p.email });
       }
+    }
+
+    // A specific recipient who must always be notified regardless of their
+    // own subscription or forced-role membership — e.g. the homeowner whose
+    // warranty request just got a scheduled visit. Still respects the
+    // enabled toggle and excludeUserId above; it just bypasses the
+    // subscription/role membership checks the rest of this function relies on.
+    if (
+      options.alwaysIncludeUserId &&
+      options.alwaysIncludeUserId !== options.excludeUserId &&
+      !recipientsByUser.has(options.alwaysIncludeUserId)
+    ) {
+      const { data: profile } = await admin.from("profiles").select("id, email").eq("id", options.alwaysIncludeUserId).maybeSingle();
+      if (profile) recipientsByUser.set(profile.id, { userId: profile.id, email: profile.email });
     }
 
     const recipients = Array.from(recipientsByUser.values());
