@@ -26,9 +26,9 @@ export function CreateWarrantyRequestForm({ projectId }: { projectId: string }) 
   const [submitting, setSubmitting] = useState(false);
   const [justSubmitted, setJustSubmitted] = useState(false);
 
-  function addFiles(fileList: FileList | null) {
-    if (!fileList) return;
-    setFiles((prev) => [...prev, ...Array.from(fileList)]);
+  function addFiles(newFiles: File[]) {
+    if (newFiles.length === 0) return;
+    setFiles((prev) => [...prev, ...newFiles]);
   }
 
   function removeFile(index: number) {
@@ -150,7 +150,13 @@ export function CreateWarrantyRequestForm({ projectId }: { projectId: string }) 
               accept="application/pdf,image/*,.doc,.docx"
               className="input"
               onChange={(e) => {
-                addFiles(e.target.files);
+                // Snapshot into a plain array synchronously, in this same
+                // tick — e.target.files is a *live* FileList, and the
+                // React state update below runs the updater function after
+                // this handler returns, by which point the value reset on
+                // the next line has already emptied that same live list in
+                // WebKit. A plain File[] array is immune to that.
+                addFiles(Array.from(e.target.files ?? []));
                 e.target.value = "";
               }}
             />
