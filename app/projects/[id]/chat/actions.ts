@@ -65,10 +65,13 @@ export async function sendMessage(projectId: string, id: string, body: string): 
   });
   if (error) return { ok: false, error: error.message };
 
+  // No excludeUserId here (unlike checklist/warranty notifications) — a
+  // subscribed account gets emailed about every new chat message,
+  // including its own, so someone watching a project's chat by email sees
+  // a complete thread rather than a gapped one missing their own replies.
   await notifyProjectSubscribers(projectId, {
     subject: "New chat message",
-    body: `${senderName ?? user.email ?? "Someone"} wrote:\n\n${trimmed}`,
-    excludeUserId: user.id,
+    body: `${senderName ?? user.email ?? "Someone"} sent a chat message:\n\n${trimmed}`,
   });
 
   return { ok: true, id };

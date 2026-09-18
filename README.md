@@ -2054,3 +2054,14 @@ yet; each one only adds what a given feature needed.
     `payments/actions.ts` — bulk delete sums every selected line's
     `amount` and adjusts the bid's `total_amount` once via the existing
     `adjustBidTotal` helper, rather than one adjustment per line.
+
+## Chat notifications now include the sender
+
+- **A subscribed account now gets emailed about its own chat messages
+  too** — every other alert (checklist, warranty item, etc.) still
+  excludes whoever triggered it via `excludeUserId`, but chat's
+  `sendMessage` (`app/projects/[id]/chat/actions.ts`) no longer passes
+  that, so someone watching a project's chat by email sees a complete
+  thread instead of one missing their own replies. Also reworded the
+  notification body from "wrote:" to "sent a chat message:" for clarity
+  in the inbox.
