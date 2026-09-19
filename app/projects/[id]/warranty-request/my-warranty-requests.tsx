@@ -68,6 +68,7 @@ export function MyWarrantyRequests({
         onAddComment={noop}
         onDeleteComment={noop}
         onReportAdd={(r) => setReports((prev) => [r, ...prev])}
+        onReportRemove={(id) => setReports((prev) => prev.filter((r) => r.id !== id))}
       />
     </div>
   );

@@ -2683,3 +2683,20 @@ yet; each one only adds what a given feature needed.
   ever lives there, never on "Create a Request") —
   `warranty-homeowner-tabs.tsx` checks for the `#wr-` prefix on mount.
 - No migration — purely a client-side navigation/UX change.
+
+## Delete photos/files attached to a warranty request, group, or individual task
+
+- **A Contractor/Developer/PM can now remove a photo or file** from any of
+  the three places one can be attached: a standalone request's or a
+  group's own "Inspection reports" list (a "Delete" link next to each
+  entry), and an individual task's own photo grid inside a group (hover a
+  thumbnail for a "Remove" overlay, same interaction as a checklist item's
+  own photos). Previously these lists only ever grew — the only way to
+  remove an attachment at all was the separate project-wide inspection
+  reports section.
+- Reuses the existing `deleteInspectionReport` action end to end (already
+  guarded to Contractor/Developer/PM, already cleans up the underlying
+  storage file) — this was just wiring a delete button to it in three more
+  places (`onReportRemove` threaded through `GroupedRequestCards` →
+  `WarrantyRequestCard`/`WarrantyRequestGroupCard`/`GroupTaskRow`). No
+  migration.

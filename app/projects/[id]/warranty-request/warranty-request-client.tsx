@@ -558,6 +558,7 @@ export function WarrantyRequestClient({
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
         onReportAdd={(r) => setReports((prev) => [r, ...prev])}
+        onReportRemove={removeReport}
         onFileOnBehalf={() => setFileOnBehalfOpen(true)}
         onGenerateJobReport={() => setJobReportOpen(true)}
       />
@@ -874,6 +875,7 @@ export interface GroupedRequestCardsProps {
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
+  onReportRemove: (reportId: string) => void;
 }
 
 // Every request, organized into a section per trade (Electrical, Plumbing,
@@ -904,6 +906,7 @@ export function GroupedRequestCards({
   onAddComment,
   onDeleteComment,
   onReportAdd,
+  onReportRemove,
 }: GroupedRequestCardsProps) {
   // A task that belongs to a group (group_id set) is rendered nested inside
   // that group's own card below, not as its own sibling in the section list.
@@ -947,6 +950,7 @@ export function GroupedRequestCards({
                     onAddComment={onAddComment}
                     onDeleteComment={onDeleteComment}
                     onReportAdd={onReportAdd}
+                    onReportRemove={onReportRemove}
                   />
                 ) : (
                   <WarrantyRequestCard
@@ -969,6 +973,7 @@ export function GroupedRequestCards({
                     onAddComment={onAddComment}
                     onDeleteComment={onDeleteComment}
                     onReportAdd={onReportAdd}
+                    onReportRemove={onReportRemove}
                   />
                 )
               )}
@@ -1003,6 +1008,7 @@ function RequestsSection({
   onAddComment,
   onDeleteComment,
   onReportAdd,
+  onReportRemove,
   onFileOnBehalf,
   onGenerateJobReport,
 }: GroupedRequestCardsProps & { onFileOnBehalf: () => void; onGenerateJobReport: () => void }) {
@@ -1051,6 +1057,7 @@ function RequestsSection({
           onAddComment={onAddComment}
           onDeleteComment={onDeleteComment}
           onReportAdd={onReportAdd}
+          onReportRemove={onReportRemove}
         />
       )}
     </div>
@@ -1147,6 +1154,7 @@ export function WarrantyRequestCard({
   onAddComment,
   onDeleteComment,
   onReportAdd,
+  onReportRemove,
 }: {
   projectId: string;
   request: WarrantyItemRequest;
@@ -1169,6 +1177,7 @@ export function WarrantyRequestCard({
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
+  onReportRemove: (reportId: string) => void;
 }) {
   const { notify } = useToast();
   const [acting, setActing] = useState(false);
@@ -1244,6 +1253,15 @@ export function WarrantyRequestCard({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleDeleteReport(reportId: string) {
+    const res = await deleteInspectionReport(projectId, reportId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete this file.");
+      return;
+    }
+    onReportRemove(reportId);
   }
 
   async function handlePostComment() {
@@ -1452,15 +1470,21 @@ export function WarrantyRequestCard({
         ) : (
           <div className="space-y-1">
             {reports.map((r) => (
-              <a
-                key={r.id}
-                href={r.storage_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
-              >
-                📄 {r.file_name}
-              </a>
+              <div key={r.id} className="flex items-center justify-between gap-2">
+                <a
+                  href={r.storage_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block min-w-0 flex-1 truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
+                >
+                  📄 {r.file_name}
+                </a>
+                {canManageRequests && (
+                  <button className="shrink-0 text-xs text-red-500 hover:underline" onClick={() => handleDeleteReport(r.id)}>
+                    Delete
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1534,6 +1558,7 @@ function WarrantyRequestGroupCard({
   onAddComment,
   onDeleteComment,
   onReportAdd,
+  onReportRemove,
 }: {
   projectId: string;
   group: WarrantyItemRequest;
@@ -1557,6 +1582,7 @@ function WarrantyRequestGroupCard({
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
+  onReportRemove: (reportId: string) => void;
 }) {
   const { notify } = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1633,6 +1659,15 @@ function WarrantyRequestGroupCard({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleDeleteReport(reportId: string) {
+    const res = await deleteInspectionReport(projectId, reportId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete this file.");
+      return;
+    }
+    onReportRemove(reportId);
   }
 
   async function handlePostComment() {
@@ -1796,6 +1831,7 @@ function WarrantyRequestGroupCard({
               onApprove={onApprove}
               onReject={onReject}
               onReportAdd={onReportAdd}
+              onReportRemove={onReportRemove}
               onAddComment={onAddComment}
               onDeleteComment={onDeleteComment}
             />
@@ -1825,15 +1861,21 @@ function WarrantyRequestGroupCard({
         ) : (
           <div className="space-y-1">
             {groupReports.map((r) => (
-              <a
-                key={r.id}
-                href={r.storage_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
-              >
-                📄 {r.file_name}
-              </a>
+              <div key={r.id} className="flex items-center justify-between gap-2">
+                <a
+                  href={r.storage_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block min-w-0 flex-1 truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
+                >
+                  📄 {r.file_name}
+                </a>
+                {canManageRequests && (
+                  <button className="shrink-0 text-xs text-red-500 hover:underline" onClick={() => handleDeleteReport(r.id)}>
+                    Delete
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1894,6 +1936,7 @@ function GroupTaskRow({
   onApprove,
   onReject,
   onReportAdd,
+  onReportRemove,
   onAddComment,
   onDeleteComment,
 }: {
@@ -1906,6 +1949,7 @@ function GroupTaskRow({
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest, note?: string) => Promise<void>;
   onReportAdd: (report: InspectionReportRow) => void;
+  onReportRemove: (reportId: string) => void;
   onAddComment: (requestId: string, body: string) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
 }) {
@@ -1952,6 +1996,15 @@ function GroupTaskRow({
     } finally {
       setUploading(false);
     }
+  }
+
+  async function handleDeleteReport(reportId: string) {
+    const res = await deleteInspectionReport(projectId, reportId);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete this file.");
+      return;
+    }
+    onReportRemove(reportId);
   }
 
   async function handlePostComment() {
@@ -2023,19 +2076,35 @@ function GroupTaskRow({
               <div className="flex flex-wrap gap-1.5">
                 {reports.map((r) =>
                   /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(r.file_name) ? (
-                    <a key={r.id} href={r.storage_url} target="_blank" rel="noopener noreferrer" className="relative block h-12 w-12 overflow-hidden rounded">
-                      <Image src={r.storage_url} alt="" fill className="object-cover" unoptimized />
-                    </a>
+                    <div key={r.id} className="group relative h-12 w-12 overflow-hidden rounded">
+                      <a href={r.storage_url} target="_blank" rel="noopener noreferrer" className="absolute inset-0 block">
+                        <Image src={r.storage_url} alt="" fill className="object-cover" unoptimized />
+                      </a>
+                      {canManageRequests && (
+                        <button
+                          className="absolute inset-0 hidden items-center justify-center bg-blueprint-dark/60 text-xs text-white group-hover:flex"
+                          onClick={() => handleDeleteReport(r.id)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   ) : (
-                    <a
-                      key={r.id}
-                      href={r.storage_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block max-w-[8rem] truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
-                    >
-                      📄 {r.file_name}
-                    </a>
+                    <div key={r.id} className="flex items-center gap-1.5">
+                      <a
+                        href={r.storage_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block max-w-[8rem] truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
+                      >
+                        📄 {r.file_name}
+                      </a>
+                      {canManageRequests && (
+                        <button className="text-xs text-red-500 hover:underline" onClick={() => handleDeleteReport(r.id)}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   )
                 )}
               </div>
