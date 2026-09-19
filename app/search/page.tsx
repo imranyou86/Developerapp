@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
@@ -11,12 +12,21 @@ export const dynamic = "force-dynamic";
 // searching is a utility, not a feature with its own visibility toggle.
 // What a result can actually reach is still governed entirely by that
 // table's own RLS (see app/api/search/route.ts), same as every other page.
+// The one exception is the 'warranty' role, explicitly kept off search
+// entirely (it surfaces bids, payments, subcontractors — nothing a
+// homeowner account needs to browse). Checked against the effective role
+// (currentUser.role, preview-aware) rather than the real stored one, on
+// purpose — a Developer using "Preview as Warranty" should see exactly
+// what that role experiences, redirect included. The real boundary is
+// app/api/search/route.ts's own role check below, which does use the real
+// stored role.
 export default async function SearchPage() {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUser = await getCurrentUser();
+  if (currentUser?.role === "warranty") redirect("/projects");
   const allowedTopLevel = currentUser ? await getAllowedTabSlugs(currentUser.role, TOP_LEVEL_TABS, currentUser.id) : [];
 
   return (

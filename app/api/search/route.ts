@@ -26,6 +26,16 @@ export async function GET(req: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Real stored role, not a Developer's preview one — this is the actual
+  // authorization boundary (the page-level redirect in app/search/page.tsx
+  // is just the normal-navigation UX for it, and deliberately does use the
+  // preview-aware role so "Preview as Warranty" shows the real experience).
+  // No 'warranty' account should be able to reach this by hitting the API
+  // directly either — it surfaces bids, payments, subcontractors, nothing
+  // a homeowner account needs.
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role === "warranty") return NextResponse.json({ error: "Not available for this account." }, { status: 403 });
+
   const q = new URL(req.url).searchParams.get("q")?.trim() ?? "";
   if (q.length < MIN_QUERY_LENGTH) return NextResponse.json({ results: [] });
 

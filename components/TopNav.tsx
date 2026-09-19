@@ -11,6 +11,7 @@ interface NavLink {
 
 export function TopNav({
   showAdmin,
+  showSearch = true,
   showDeals = true,
   showInteriorDesign = true,
   showConstructionCost = true,
@@ -18,6 +19,7 @@ export function TopNav({
   showSubcontractors = true,
 }: {
   showAdmin?: boolean;
+  showSearch?: boolean;
   showDeals?: boolean;
   showInteriorDesign?: boolean;
   showConstructionCost?: boolean;
@@ -42,7 +44,7 @@ export function TopNav({
   const flatLinks: NavLink[] = [
     { href: "/projects", label: "Constructions" },
     { href: "/calendar", label: "Calendar" },
-    { href: "/search", label: "Search" },
+    ...(showSearch ? [{ href: "/search", label: "Search" }] : []),
   ];
 
   // Grouped under one dropdown rather than five flat tabs — same reasoning

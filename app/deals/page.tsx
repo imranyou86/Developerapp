@@ -38,6 +38,7 @@ export default async function DealsPage() {
         </div>
         <TopNav
           showAdmin={currentUser?.isDeveloper}
+          showSearch={currentUser?.role !== "warranty"}
           showDeals={allowedTopLevel.includes("deals")}
           showInteriorDesign={allowedTopLevel.includes("interior-design")}
           showConstructionCost={allowedTopLevel.includes("cost")}

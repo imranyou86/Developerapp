@@ -59,7 +59,12 @@ export function CalendarClient({
 }) {
   const { notify } = useToast();
   const [entries, setEntries] = useState<CalendarEntry[]>(initialEntries);
-  const [filterProjectId, setFilterProjectId] = useState<string>("");
+  // Defaults to that one construction instead of "All constructions" when
+  // there's only one to pick from anyway — the common case for a
+  // 'warranty' account, which is usually assigned to just the one
+  // construction it's tracking. Still just the initial value: the "All
+  // constructions" option is right there if a second one is ever added.
+  const [filterProjectId, setFilterProjectId] = useState<string>(() => (projects.length === 1 ? projects[0].id : ""));
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<CalendarEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);

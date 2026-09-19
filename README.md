@@ -2545,3 +2545,19 @@ yet; each one only adds what a given feature needed.
   component, `WarrantyHomeownerTabs`, switches between them; no new route
   or nav entry, no `tab_permissions` change — it's the same
   `/projects/[id]/warranty-request` page split into two panels client-side.
+
+## Remove Search from warranty accounts + Calendar defaults to your one construction
+
+- **Search is no longer available to the 'warranty' role** — it surfaced
+  bids, payments, subcontractors, and other data a homeowner account has no
+  reason to browse. `TopNav` gained a `showSearch` prop (every page passes
+  `currentUser?.role !== "warranty"`), `/search` itself redirects a
+  'warranty' viewer to `/projects`, and `/api/search` now 403s that role
+  directly, so this is blocked at the nav, the page, and the API — not just
+  a hidden link.
+- **Calendar now defaults its construction filter to the one construction
+  you have** instead of "All constructions," whenever there's only one to
+  pick from — the common case for a 'warranty' account, which is usually
+  tracking just the one construction. "All constructions" is still right
+  there if a second one is ever added.
+- No migration — both changes are application-level only.
