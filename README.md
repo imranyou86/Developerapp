@@ -2594,3 +2594,31 @@ yet; each one only adds what a given feature needed.
   subcontractor to a couple of warranty requests (including at least one
   multi-task group) and generate their report to confirm the PDF looks
   right, especially with a photo attached from a phone camera.
+
+## Photos + notes on individual warranty tasks, both flowing into the job report
+
+- **Each task inside a warranty request group can now have its own photos
+  and notes**, not just the group as a whole. A "Show photos & notes"
+  toggle on each task row (`GroupTaskRow`) expands to a small photo grid
+  with a "+ Add photo" upload and a notes thread with an add-note input —
+  same underlying mechanism as the request-level "Inspection reports" and
+  "Comments & notes" sections that already existed (a photo is just an
+  `inspection_reports` row, a note a `warranty_item_request_comments` row,
+  both scoped to that specific task's own id instead of the group's). A
+  standalone request or a group's own shared evidence already had this at
+  the top level — this closes the gap for the individual tasks inside a
+  group.
+- **The job report PDF now includes notes, not just photos** — previously
+  it pulled in image attachments but never the comment threads. Each
+  request/group and each task inside a group now shows its own notes
+  (author + body) alongside its own photos in the generated PDF, sourced
+  from `warranty_item_request_comments` the same way the UI displays them.
+  A group's shared photos/notes (attached to the group itself) render once
+  at the group level; each task's own photos/notes render under that task,
+  rather than everything being flattened together.
+- No migration — both changes reuse the existing `inspection_reports` and
+  `warranty_item_request_comments` tables and their existing RLS.
+- **Not live-tested**, same sandbox limitation as above — worth confirming
+  once deployed that a photo/note added to one task in a group shows up
+  under that task specifically (not the whole group) in both the app and
+  the generated PDF.

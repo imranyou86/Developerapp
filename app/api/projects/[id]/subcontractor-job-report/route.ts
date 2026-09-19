@@ -84,12 +84,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
     const allIds = [...topLevelRows.map((r) => r.id), ...childRows.map((r) => r.id)];
     let reports: { warranty_item_request_id: string | null; file_name: string; storage_url: string }[] = [];
+    let noteRows: { request_id: string; sender_name: string | null; sender_email: string; body: string }[] = [];
     if (allIds.length > 0) {
-      const { data } = await supabase
-        .from("inspection_reports")
-        .select("warranty_item_request_id, file_name, storage_url")
-        .in("warranty_item_request_id", allIds);
-      reports = (data ?? []).filter((r) => isImageFile(r.file_name));
+      const [{ data: reportData }, { data: commentData }] = await Promise.all([
+        supabase.from("inspection_reports").select("warranty_item_request_id, file_name, storage_url").in("warranty_item_request_id", allIds),
+        supabase
+          .from("warranty_item_request_comments")
+          .select("request_id, sender_name, sender_email, body, created_at")
+          .in("request_id", allIds)
+          .order("created_at", { ascending: true }),
+      ]);
+      reports = (reportData ?? []).filter((r) => isImageFile(r.file_name));
+      noteRows = commentData ?? [];
     }
     const signedUrls = await signStorageUrls(reports.map((r) => r.storage_url));
     const photosByRequestId = new Map<string, string[]>();
@@ -100,6 +106,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       list.push(url);
       photosByRequestId.set(r.warranty_item_request_id, list);
     });
+    const notesByRequestId = new Map<string, { author: string; body: string }[]>();
+    for (const c of noteRows) {
+      const list = notesByRequestId.get(c.request_id) ?? [];
+      list.push({ author: c.sender_name || c.sender_email, body: c.body });
+      notesByRequestId.set(c.request_id, list);
+    }
 
     const childrenByParentId = new Map<string, RequestRow[]>();
     for (const child of childRows) {
@@ -109,10 +121,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       childrenByParentId.set(child.group_id, list);
     }
 
+    // Each row's own photos/notes only — a group's shared evidence stays on
+    // the group, and each task carries just its own (attached to the task's
+    // own id via the "+ Add photo"/note UI on GroupTaskRow), rather than
+    // flattening everything up to the group level.
     const requests: JobReportRequest[] = topLevelRows.map((row) => {
       const children = row.is_group ? childrenByParentId.get(row.id) ?? [] : [];
-      const ownPhotos = photosByRequestId.get(row.id) ?? [];
-      const childPhotos = children.flatMap((c) => photosByRequestId.get(c.id) ?? []);
       return {
         title: row.title,
         category: row.category,
@@ -129,8 +143,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           status: c.status,
           rejectionNote: c.rejection_note,
           comment: c.comment,
+          photos: photosByRequestId.get(c.id) ?? [],
+          notes: notesByRequestId.get(c.id) ?? [],
         })),
-        photos: [...ownPhotos, ...childPhotos],
+        photos: photosByRequestId.get(row.id) ?? [],
+        notes: notesByRequestId.get(row.id) ?? [],
       };
     });
 

@@ -1502,6 +1502,7 @@ function WarrantyRequestGroupCard({
   subcontractors,
   canManageRequests,
   canDeleteRequests = false,
+  currentUserId,
   onApprove,
   onReject,
   onDelete,
@@ -1746,7 +1747,20 @@ function WarrantyRequestGroupCard({
         <span className="mb-1.5 block text-xs font-medium text-blueprint/50">Tasks ({tasks.length})</span>
         <div className="space-y-1.5">
           {tasks.map((task) => (
-            <GroupTaskRow key={task.id} task={task} canManageRequests={canManageRequests} onApprove={onApprove} onReject={onReject} />
+            <GroupTaskRow
+              key={task.id}
+              projectId={projectId}
+              task={task}
+              reports={reports.filter((r) => r.warranty_item_request_id === task.id)}
+              comments={comments.filter((c) => c.request_id === task.id)}
+              canManageRequests={canManageRequests}
+              currentUserId={currentUserId}
+              onApprove={onApprove}
+              onReject={onReject}
+              onReportAdd={onReportAdd}
+              onAddComment={onAddComment}
+              onDeleteComment={onDeleteComment}
+            />
           ))}
         </div>
       </div>
@@ -1823,18 +1837,92 @@ function WarrantyRequestGroupCard({
   );
 }
 
+// Photos attach via the same inspection_reports table every other
+// photo/file upload in this feature uses (see handleUploadReport on the
+// standalone card and the group card above) — scoped to this task's own
+// row id, so a photo taken of one specific task doesn't get mixed in with
+// the group's shared evidence. Notes reuse the same
+// warranty_item_request_comments thread mechanism, also scoped to the
+// task's own id. Both flow straight into the job report PDF (see
+// app/api/projects/[id]/subcontractor-job-report), which looks up photos
+// and notes by each task's id the same way this component does.
 function GroupTaskRow({
+  projectId,
   task,
+  reports,
+  comments,
   canManageRequests,
+  currentUserId,
   onApprove,
   onReject,
+  onReportAdd,
+  onAddComment,
+  onDeleteComment,
 }: {
+  projectId: string;
   task: WarrantyItemRequest;
+  reports: InspectionReportRow[];
+  comments: WarrantyItemRequestComment[];
   canManageRequests: boolean;
+  currentUserId: string | null;
   onApprove: (request: WarrantyItemRequest) => Promise<void>;
   onReject: (request: WarrantyItemRequest, note?: string) => Promise<void>;
+  onReportAdd: (report: InspectionReportRow) => void;
+  onAddComment: (requestId: string, body: string) => Promise<void>;
+  onDeleteComment: (commentId: string) => Promise<void>;
 }) {
+  const { notify } = useToast();
   const [acting, setActing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  async function handleUploadPhoto(file: File) {
+    setUploading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+
+      const path = `${user.id}/${projectId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage.from("project-files").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+      });
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: pub, error: signError } = await supabase.storage.from("project-files").createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+      if (signError || !pub) throw new Error(signError?.message ?? "Could not get a URL for the uploaded file.");
+
+      const res = await addInspectionReport(projectId, file.name, pub.signedUrl, task.id);
+      if (!res.ok || !res.id) throw new Error(res.error ?? "Could not save photo.");
+
+      onReportAdd({
+        id: res.id,
+        project_id: projectId,
+        checklist_item_id: null,
+        warranty_item_request_id: task.id,
+        file_name: file.name,
+        storage_url: pub.signedUrl,
+        created_at: new Date().toISOString(),
+      });
+      notify("success", "Photo added.");
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handlePostComment() {
+    if (!draft.trim()) return;
+    setPosting(true);
+    await onAddComment(task.id, draft);
+    setDraft("");
+    setPosting(false);
+  }
 
   return (
     <div className="rounded border border-blueprint/10 bg-white px-2 py-1.5">
@@ -1864,6 +1952,99 @@ function GroupTaskRow({
       </div>
       {task.comment && <p className="mt-0.5 text-xs text-blueprint/60">{task.comment}</p>}
       {task.status === "rejected" && task.rejection_note && <p className="mt-0.5 text-xs text-red-600">Reason: {task.rejection_note}</p>}
+
+      <button className="mt-1 text-xs text-blueprint/50 hover:underline" onClick={() => setExpanded((v) => !v)}>
+        {expanded ? "Hide" : "Show"} photos &amp; notes
+        {(reports.length > 0 || comments.length > 0) && ` (${reports.length} photo${reports.length === 1 ? "" : "s"}, ${comments.length} note${comments.length === 1 ? "" : "s"})`}
+      </button>
+
+      {expanded && (
+        <div className="mt-1.5 space-y-2 border-t border-blueprint/10 pt-1.5">
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-blueprint/50">Photos</span>
+              {canManageRequests && (
+                <label className="btn-ghost cursor-pointer px-1.5 py-0.5 text-xs">
+                  {uploading ? "Uploading…" : "+ Add photo"}
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleUploadPhoto(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+            {reports.length === 0 ? (
+              <p className="text-xs text-blueprint/40">None yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {reports.map((r) =>
+                  /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(r.file_name) ? (
+                    <a key={r.id} href={r.storage_url} target="_blank" rel="noopener noreferrer" className="relative block h-12 w-12 overflow-hidden rounded">
+                      <Image src={r.storage_url} alt="" fill className="object-cover" unoptimized />
+                    </a>
+                  ) : (
+                    <a
+                      key={r.id}
+                      href={r.storage_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block max-w-[8rem] truncate text-xs text-blueprint-dark hover:text-amber hover:underline"
+                    >
+                      📄 {r.file_name}
+                    </a>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <span className="mb-1 block text-xs font-medium text-blueprint/50">Notes</span>
+            {comments.length === 0 ? (
+              <p className="text-xs text-blueprint/40">No notes yet.</p>
+            ) : (
+              <div className="mb-1.5 space-y-1">
+                {comments.map((c) => (
+                  <div key={c.id} className="rounded bg-concrete px-1.5 py-1 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-blueprint-dark">{c.sender_name || c.sender_email}</span>
+                      <span className="flex items-center gap-2 text-blueprint/40">
+                        {new Date(c.created_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                        {c.user_id === currentUserId && (
+                          <button className="hover:underline" onClick={() => onDeleteComment(c.id)}>
+                            Delete
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words text-blueprint-dark">{c.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {canManageRequests && (
+              <div className="flex gap-1.5">
+                <input
+                  className="input flex-1 py-1 text-xs"
+                  placeholder="Add a note about this task…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handlePostComment()}
+                />
+                <button className="btn-outline px-1.5 py-1 text-xs" onClick={handlePostComment} disabled={posting || !draft.trim()}>
+                  Post
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -26,11 +26,18 @@ import { formatTimeWindow } from "@/lib/timeFormat";
 // into this route's own output instead).
 void [PdfkitHelvetica, PdfkitTimesRoman, PdfkitTimesBold, PdfkitTimesItalic];
 
+export interface JobReportNote {
+  author: string;
+  body: string;
+}
+
 export interface JobReportTask {
   title: string;
   status: "pending" | "approved" | "rejected";
   rejectionNote: string | null;
   comment: string | null;
+  photos: string[];
+  notes: JobReportNote[];
 }
 
 export interface JobReportRequest {
@@ -49,7 +56,10 @@ export interface JobReportRequest {
   scheduledTimeStart: string | null;
   scheduledTimeEnd: string | null;
   tasks: JobReportTask[];
+  // A standalone request's own photos/notes; for a group, its shared
+  // evidence/notes (each task below carries its own separately).
   photos: string[];
+  notes: JobReportNote[];
 }
 
 export interface JobReportInput {
@@ -199,11 +209,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   taskRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     borderTopWidth: 0.5,
     borderTopColor: "#eceff2",
     paddingVertical: 6,
+  },
+  taskHeadRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   taskTitle: {
     fontSize: 10.5,
@@ -226,6 +238,35 @@ const styles = StyleSheet.create({
     height: 90,
     objectFit: "cover",
     borderRadius: 2,
+  },
+  taskPhotoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 4,
+  },
+  taskPhoto: {
+    width: 60,
+    height: 60,
+    objectFit: "cover",
+    borderRadius: 2,
+  },
+  notesHeading: {
+    fontSize: 8.5,
+    fontFamily: "Times-Bold",
+    color: "#9aa0a6",
+    marginTop: 6,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  note: {
+    fontSize: 9.5,
+    color: "#5b6470",
+    marginTop: 2,
+  },
+  noteAuthor: {
+    fontFamily: "Times-Bold",
+    color: "#2b2b2b",
   },
   emptyState: {
     fontSize: 11,
@@ -272,6 +313,42 @@ function PageChrome({ projectName }: { projectName: string }) {
   );
 }
 
+function NotesList({ notes }: { notes: JobReportNote[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <Text style={styles.notesHeading}>Notes</Text>
+      {notes.map((n, i) => (
+        <Text key={i} style={styles.note}>
+          <Text style={styles.noteAuthor}>{n.author}: </Text>
+          {n.body}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+function TaskRow({ task }: { task: JobReportTask }) {
+  return (
+    <View style={styles.taskRow}>
+      <View style={styles.taskHeadRow}>
+        <Text style={styles.taskTitle}>{task.title}</Text>
+        <Text style={[styles.taskStatus, STATUS_STYLE[task.status]]}>{STATUS_LABEL[task.status]}</Text>
+      </View>
+      {task.comment && <Text style={styles.comment}>&quot;{task.comment}&quot;</Text>}
+      {task.status === "rejected" && task.rejectionNote && <Text style={styles.rejectionNote}>Rejected: {task.rejectionNote}</Text>}
+      {task.photos.length > 0 && (
+        <View style={styles.taskPhotoGrid}>
+          {task.photos.map((url, i) => (
+            <Image key={i} src={url} style={styles.taskPhoto} />
+          ))}
+        </View>
+      )}
+      <NotesList notes={task.notes} />
+    </View>
+  );
+}
+
 function RequestCard({ request }: { request: JobReportRequest }) {
   const scheduled = formatScheduled(request);
   return (
@@ -286,22 +363,6 @@ function RequestCard({ request }: { request: JobReportRequest }) {
       {!request.isGroup && request.status === "rejected" && request.rejectionNote && (
         <Text style={styles.rejectionNote}>Rejected: {request.rejectionNote}</Text>
       )}
-      {request.isGroup &&
-        request.tasks.map((task, i) => (
-          <View key={i} style={styles.taskRow}>
-            <Text style={styles.taskTitle}>{task.title}</Text>
-            <Text style={[styles.taskStatus, STATUS_STYLE[task.status]]}>{STATUS_LABEL[task.status]}</Text>
-          </View>
-        ))}
-      {request.isGroup &&
-        request.tasks.some((t) => t.status === "rejected" && t.rejectionNote) &&
-        request.tasks
-          .filter((t) => t.status === "rejected" && t.rejectionNote)
-          .map((t, i) => (
-            <Text key={i} style={styles.rejectionNote}>
-              {t.title} rejected: {t.rejectionNote}
-            </Text>
-          ))}
       {request.photos.length > 0 && (
         <View style={styles.photoGrid}>
           {request.photos.map((url, i) => (
@@ -309,6 +370,8 @@ function RequestCard({ request }: { request: JobReportRequest }) {
           ))}
         </View>
       )}
+      <NotesList notes={request.notes} />
+      {request.isGroup && request.tasks.map((task, i) => <TaskRow key={i} task={task} />)}
     </View>
   );
 }
@@ -382,11 +445,20 @@ async function toEmbeddablePhoto(url: string): Promise<string | null> {
   }
 }
 
+async function embedPhotos(urls: string[]): Promise<string[]> {
+  return (await Promise.all(urls.map((url) => toEmbeddablePhoto(url)))).filter((p): p is string => !!p);
+}
+
 export async function renderJobReportPdf(input: JobReportInput): Promise<Buffer> {
   const requests = await Promise.all(
     input.requests.map(async (req) => {
-      const photos = (await Promise.all(req.photos.map((url) => toEmbeddablePhoto(url)))).filter((p): p is string => !!p);
-      return { ...req, photos };
+      const [photos, tasks] = await Promise.all([
+        embedPhotos(req.photos),
+        Promise.all(
+          req.tasks.map(async (task) => ({ ...task, photos: await embedPhotos(task.photos) }))
+        ),
+      ]);
+      return { ...req, photos, tasks };
     })
   );
   return renderToBuffer(<JobReportDocument input={{ ...input, requests }} />);
