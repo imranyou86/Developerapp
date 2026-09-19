@@ -125,7 +125,12 @@ export default async function CalendarPage({ searchParams }: { searchParams: { p
     // repeating it made the assigned sub harder to spot at a glance.
     subLabel: v.subcontractors?.company_name ?? "Subcontractor TBD",
     projectId: v.project_id,
-    href: `/projects/${v.project_id}/warranty-request`,
+    // The hash anchors to that specific request/group card
+    // (`id={\`wr-${id}\`}` in warranty-request-client.tsx) and gets scrolled
+    // to and briefly highlighted on arrival (useScrollToHash) — a
+    // 'warranty' viewer also lands on the right tab for it
+    // (warranty-homeowner-tabs.tsx checks for this same "#wr-" prefix).
+    href: `/projects/${v.project_id}/warranty-request#wr-${v.id}`,
   }));
 
   const eventEntries: CalendarEntry[] = ((eventRows ?? []) as unknown as CalendarEventRow[]).map((ev) => ({

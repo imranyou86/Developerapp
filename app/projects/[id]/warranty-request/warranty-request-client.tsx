@@ -41,6 +41,7 @@ import { telHref } from "@/lib/phone";
 import { formatTimeWindow } from "@/lib/timeFormat";
 import { extractFindingsFromReport } from "@/lib/inspectionReportExtraction";
 import { WARRANTY_REQUEST_CATEGORIES } from "@/lib/warrantyRequestCategories";
+import { useScrollToHash } from "@/lib/useScrollToHash";
 
 const PROGRESS_LABELS: Record<WarrantyRequestProgress, string> = {
   open: "Open",
@@ -152,6 +153,9 @@ export function WarrantyRequestClient({
   const [adding, setAdding] = useState(false);
   const [fileOnBehalfOpen, setFileOnBehalfOpen] = useState(false);
   const [jobReportOpen, setJobReportOpen] = useState(false);
+  // Lands the viewer on a specific request/group when arriving from a
+  // Calendar warranty-visit link (`#wr-<id>`, see app/calendar/page.tsx).
+  useScrollToHash();
   const fixed = items.filter((i) => i.done).length;
   // The 'warranty' role can watch checklist items, notes, and photos here
   // and chat about them, but can't mutate anything directly — they file a
@@ -1251,7 +1255,7 @@ export function WarrantyRequestCard({
   }
 
   return (
-    <div className="rounded-lg border border-blueprint/10 p-3 text-sm">
+    <div id={`wr-${request.id}`} className="rounded-lg border border-blueprint/10 p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1640,7 +1644,7 @@ function WarrantyRequestGroupCard({
   }
 
   return (
-    <div className="rounded-lg border border-blueprint/20 bg-concrete/40 p-3 text-sm">
+    <div id={`wr-${group.id}`} className="rounded-lg border border-blueprint/20 bg-concrete/40 p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="font-medium text-blueprint-dark">{group.title}</p>

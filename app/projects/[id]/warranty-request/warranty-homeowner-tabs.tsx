@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // Splits the 'warranty' role's page into two tabs instead of one long
 // stacked page — filing something new is a separate concern from checking
@@ -18,6 +18,18 @@ export function WarrantyHomeownerTabs({
   trackTab: React.ReactNode;
 }) {
   const [tab, setTab] = useState<"create" | "track">("create");
+
+  // A Calendar warranty-visit link (`#wr-<id>`) always points at a
+  // request, which only ever lives in the "Track" tab — switch there so
+  // MyWarrantyRequests actually mounts and its own useScrollToHash can find
+  // the target. Done in an effect rather than the initial useState because
+  // the server always renders "create" first (no access to location.hash
+  // during SSR) — reading the hash in useState's initializer would mismatch
+  // that on hydration. The brief flash of "create" before this flips it is
+  // an acceptable tradeoff for avoiding that.
+  useEffect(() => {
+    if (window.location.hash.startsWith("#wr-")) setTab("track");
+  }, []);
 
   return (
     <div>

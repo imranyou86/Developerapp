@@ -2667,3 +2667,19 @@ yet; each one only adds what a given feature needed.
   the signed-in user), so this needed no schema change, migration, or
   per-role visibility toggle in Admin. It's simply linked from one more
   place.
+
+## Calendar warranty-visit items link straight to that request
+
+- **Clicking a scheduled warranty visit on the Calendar now lands you on
+  that specific request/group card**, not just the top of the whole
+  Warranty Request page. The visit's href now carries a `#wr-<id>` hash
+  (`app/calendar/page.tsx`), each request/group card in
+  `warranty-request-client.tsx` carries a matching `id={\`wr-${id}\`}`, and
+  a new `useScrollToHash` hook (`lib/useScrollToHash.ts`) scrolls to and
+  briefly highlights it on arrival — used by both the Contractor/Developer/
+  PM dashboard and the homeowner's own tracking view.
+- **A 'warranty' account's page now switches to the "Track Your Requests"
+  tab automatically** when arriving via one of these links (a request only
+  ever lives there, never on "Create a Request") —
+  `warranty-homeowner-tabs.tsx` checks for the `#wr-` prefix on mount.
+- No migration — purely a client-side navigation/UX change.

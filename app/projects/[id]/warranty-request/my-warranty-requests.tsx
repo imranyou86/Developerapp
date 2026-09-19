@@ -7,6 +7,7 @@ import {
   type SubcontractorOption,
 } from "@/app/projects/[id]/warranty-request/warranty-request-client";
 import type { WarrantyItemRequest, WarrantyItemRequestComment } from "@/lib/types";
+import { useScrollToHash } from "@/lib/useScrollToHash";
 
 // Read-only tracking for the 'warranty' role — every request filed on this
 // construction, not just ones this account filed itself (see migration
@@ -35,6 +36,11 @@ export function MyWarrantyRequests({
   currentUserId: string | null;
 }) {
   const [reports, setReports] = useState<InspectionReportRow[]>(initialReports);
+  // Lands the viewer on a specific request/group when arriving from a
+  // Calendar warranty-visit link (`#wr-<id>`) — this component only ever
+  // mounts once WarrantyHomeownerTabs has switched to the "Track" tab, so
+  // its own mount is exactly the right moment to run this.
+  useScrollToHash();
 
   if (requests.length === 0) return null;
 
