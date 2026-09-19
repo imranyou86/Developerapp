@@ -2530,3 +2530,18 @@ yet; each one only adds what a given feature needed.
   `has_project_access(project_id)` check — no new tables or policies, this
   is the one function every warranty-scoped RLS policy and read query
   already goes through.
+
+## Warranty homeowner page: two tabs instead of one stacked page
+
+- **Removed "Upload an Inspection Report"** from the 'warranty' role
+  entirely — that AI-extraction upload flow is gone from their page (the
+  Contractor/Developer/PM dashboard's own "Generate checklist items" from
+  an uploaded report is unaffected; only the homeowner-facing upload was
+  removed). Attaching a photo/file to a specific request (on the create
+  form, or "+ Attach report" on an existing one) still works as before.
+- **The 'warranty' role's page is now two tabs — "Create a Request" and
+  "Track Your Requests"** — instead of the form and the shared request
+  list stacked on top of each other on one long page. A new client
+  component, `WarrantyHomeownerTabs`, switches between them; no new route
+  or nav entry, no `tab_permissions` change — it's the same
+  `/projects/[id]/warranty-request` page split into two panels client-side.

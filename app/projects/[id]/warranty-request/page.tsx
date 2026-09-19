@@ -4,8 +4,8 @@ import { signRowsUrl } from "@/lib/storage";
 import { getCurrentUser } from "@/lib/permissions-server";
 import { WarrantyRequestClient, type WarrantyMemberOption } from "@/app/projects/[id]/warranty-request/warranty-request-client";
 import { CreateWarrantyRequestForm } from "@/app/projects/[id]/warranty-request/create-warranty-request-form";
-import { WarrantyInspectionUpload } from "@/app/projects/[id]/warranty-request/warranty-inspection-upload";
 import { MyWarrantyRequests } from "@/app/projects/[id]/warranty-request/my-warranty-requests";
+import { WarrantyHomeownerTabs } from "@/app/projects/[id]/warranty-request/warranty-homeowner-tabs";
 
 const REQUEST_COLUMNS =
   "id, project_id, title, comment, category, requested_by, status, progress, subcontractor_id, checklist_item_id, reviewed_by, reviewed_at, scheduled_date, scheduled_time_start, scheduled_time_end, rejection_note, is_group, group_id, created_at";
@@ -44,10 +44,7 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
             .order("created_at", { ascending: true })
         : Promise.resolve({ data: [], error: null }),
       // Every report on this construction, not just this account's own
-      // uploads — same shared-visibility reasoning as requests above. A
-      // report uploaded for AI extraction (WarrantyInspectionUpload) has no
-      // warranty_item_request_id at all until (if ever) manually attached,
-      // so this can't be scoped through requestIds either.
+      // uploads — same shared-visibility reasoning as requests above.
       supabase
         .from("inspection_reports")
         .select("id, project_id, checklist_item_id, warranty_item_request_id, file_name, storage_url, created_at")
@@ -72,21 +69,26 @@ export default async function WarrantyRequestPage({ params }: { params: { id: st
     const signedReports = await signRowsUrl(reports ?? [], "storage_url");
 
     return (
-      <div className="mx-auto max-w-lg space-y-6">
-        <WarrantyInspectionUpload projectId={params.id} />
-        <CreateWarrantyRequestForm projectId={params.id} />
-        {(requestsError || commentsError) && (
-          <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-            Could not load warranty requests: {(requestsError ?? commentsError)?.message}
-          </div>
-        )}
-        <MyWarrantyRequests
-          projectId={params.id}
-          requests={requests ?? []}
-          comments={comments ?? []}
-          initialReports={signedReports}
-          subcontractors={subcontractors ?? []}
-          currentUserId={currentUser?.id ?? null}
+      <div className="mx-auto max-w-lg">
+        <WarrantyHomeownerTabs
+          createTab={<CreateWarrantyRequestForm projectId={params.id} />}
+          trackTab={
+            <>
+              {(requestsError || commentsError) && (
+                <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                  Could not load warranty requests: {(requestsError ?? commentsError)?.message}
+                </div>
+              )}
+              <MyWarrantyRequests
+                projectId={params.id}
+                requests={requests ?? []}
+                comments={comments ?? []}
+                initialReports={signedReports}
+                subcontractors={subcontractors ?? []}
+                currentUserId={currentUser?.id ?? null}
+              />
+            </>
+          }
         />
       </div>
     );
