@@ -11,7 +11,15 @@ interface TaskRow {
   id: string;
   title: string;
   due_date: string;
-  rooms: { id: string; name: string; project_id: string; projects: { name: string }[] | null }[] | null;
+  // A task belongs to one room (room_id references rooms.id) and a room
+  // belongs to one project — PostgREST returns a "belongs-to" embed as a
+  // single object, not an array (an array is only what you get on the
+  // *other* side of the same foreign key, e.g. embedding a project's many
+  // rooms). Both of these were previously typed/accessed as arrays
+  // (`.rooms?.[0]`, `.projects?.[0]`), which is why the construction name
+  // never actually rendered — it was silently falling through to the
+  // "Untitled construction" default every time.
+  rooms: { id: string; name: string; project_id: string; projects: { name: string } | null } | null;
 }
 
 interface WarrantyVisitRow {
@@ -21,8 +29,8 @@ interface WarrantyVisitRow {
   scheduled_date: string;
   scheduled_time_start: string | null;
   scheduled_time_end: string | null;
-  projects: { name: string }[] | null;
-  subcontractors: { company_name: string }[] | null;
+  projects: { name: string } | null;
+  subcontractors: { company_name: string } | null;
 }
 
 interface CalendarEventRow {
@@ -34,7 +42,7 @@ interface CalendarEventRow {
   time_start: string | null;
   time_end: string | null;
   created_by: string;
-  projects: { name: string }[] | null;
+  projects: { name: string } | null;
 }
 
 // Not gated by tab_permissions — same reasoning as /search, this is a
@@ -87,7 +95,7 @@ export default async function CalendarPage() {
   // can see, same as every other query here.
   const taskEntries: CalendarEntry[] = ((taskRows ?? []) as unknown as TaskRow[])
     .map((t) => {
-      const room = t.rooms?.[0];
+      const room = t.rooms;
       if (!room) return null;
       const entry: CalendarEntry = {
         id: `task-${t.id}`,
@@ -96,7 +104,7 @@ export default async function CalendarPage() {
         dueDate: t.due_date,
         timeStart: null,
         timeEnd: null,
-        subLabel: `${room.name} — ${room.projects?.[0]?.name ?? "Untitled construction"}`,
+        subLabel: `${room.name} — ${room.projects?.name ?? "Untitled construction"}`,
         projectId: room.project_id,
         href: `/projects/${room.project_id}/rooms`,
       };
@@ -111,7 +119,11 @@ export default async function CalendarPage() {
     dueDate: v.scheduled_date,
     timeStart: v.scheduled_time_start,
     timeEnd: v.scheduled_time_end,
-    subLabel: `${v.subcontractors?.[0]?.company_name ?? "Subcontractor TBD"} — ${v.projects?.[0]?.name ?? "Untitled construction"}`,
+    // Just the subcontractor — the construction name used to be appended
+    // here too, but every entry on this page is already either filtered to
+    // one construction or, unfiltered, the title/href already identify it;
+    // repeating it made the assigned sub harder to spot at a glance.
+    subLabel: v.subcontractors?.company_name ?? "Subcontractor TBD",
     projectId: v.project_id,
     href: `/projects/${v.project_id}/warranty-request`,
   }));
@@ -124,7 +136,7 @@ export default async function CalendarPage() {
     dueDate: ev.event_date,
     timeStart: ev.time_start,
     timeEnd: ev.time_end,
-    subLabel: ev.projects?.[0]?.name ?? "Untitled construction",
+    subLabel: ev.projects?.name ?? "Untitled construction",
     notes: ev.notes,
     createdBy: ev.created_by,
     projectId: ev.project_id,

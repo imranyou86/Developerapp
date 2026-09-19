@@ -1190,6 +1190,18 @@ export function WarrantyRequestCard({
     setSavingSchedule(false);
   }
 
+  // A native <input type="date"> has no visible way to clear it back to
+  // empty on iOS Safari (unlike desktop Chrome's little "x") — this button
+  // is the only way to actually remove a visit's schedule once one's set.
+  async function handleClearSchedule() {
+    setSavingSchedule(true);
+    await onSetSchedule(request, { date: null, timeStart: null, timeEnd: null });
+    setSavingSchedule(false);
+    setScheduleDate("");
+    setScheduleStart("");
+    setScheduleEnd("");
+  }
+
   async function handleUploadReport(file: File) {
     setUploading(true);
     try {
@@ -1403,6 +1415,11 @@ export function WarrantyRequestCard({
             <button className="btn-outline px-2 py-1 text-xs" onClick={handleSaveSchedule} disabled={savingSchedule}>
               {savingSchedule ? "Saving…" : "Save"}
             </button>
+            {(scheduleDate || request.scheduled_date) && (
+              <button className="text-xs text-red-500 hover:underline" onClick={handleClearSchedule} disabled={savingSchedule}>
+                Clear
+              </button>
+            )}
           </div>
         ) : (
           <span className="text-xs text-blueprint-dark">{scheduledVisitLabel ?? "Not yet scheduled"}</span>
@@ -1560,6 +1577,18 @@ function WarrantyRequestGroupCard({
       timeEnd: scheduleDate && scheduleStart && scheduleEnd ? scheduleEnd : null,
     });
     setSavingSchedule(false);
+  }
+
+  // Same as the standalone card's — a native <input type="date"> has no
+  // visible way to clear itself back to empty on iOS Safari, so this is the
+  // only way to remove a group's schedule once one's set.
+  async function handleClearSchedule() {
+    setSavingSchedule(true);
+    await onSetSchedule(group, { date: null, timeStart: null, timeEnd: null });
+    setSavingSchedule(false);
+    setScheduleDate("");
+    setScheduleStart("");
+    setScheduleEnd("");
   }
 
   async function handleUploadReport(file: File) {
@@ -1737,6 +1766,11 @@ function WarrantyRequestGroupCard({
             <button className="btn-outline px-2 py-1 text-xs" onClick={handleSaveSchedule} disabled={savingSchedule}>
               {savingSchedule ? "Saving…" : "Save"}
             </button>
+            {(scheduleDate || group.scheduled_date) && (
+              <button className="text-xs text-red-500 hover:underline" onClick={handleClearSchedule} disabled={savingSchedule}>
+                Clear
+              </button>
+            )}
           </div>
         ) : (
           <span className="text-xs text-blueprint-dark">{scheduledVisitLabel ?? "Not yet scheduled"}</span>

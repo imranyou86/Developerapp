@@ -2622,3 +2622,33 @@ yet; each one only adds what a given feature needed.
   once deployed that a photo/note added to one task in a group shows up
   under that task specifically (not the whole group) in both the app and
   the generated PDF.
+
+## Fix: Calendar showing the wrong subcontractor/construction name
+
+- **A scheduled warranty visit always showed "Subcontractor TBD — Untitled
+  construction" on the Calendar, even after assigning a real subcontractor**
+  — confirmed live by the user, not just suspected. Root cause:
+  `app/calendar/page.tsx` read PostgREST's embedded `projects(name)`,
+  `subcontractors(company_name)`, and (for room tasks) `rooms(...)` as
+  arrays (`.projects?.[0]?.name`), but these are all "belongs-to" foreign
+  keys (a warranty request/task/room belongs to exactly one project or
+  subcontractor) — PostgREST returns those as a single object, not an
+  array. `?.[0]` on a plain object is always `undefined`, so it silently
+  fell through to the placeholder text every time, regardless of what was
+  actually assigned. Fixed by reading them as plain objects
+  (`.projects?.name`) instead. This is the same class of bug wherever this
+  codebase reads a belongs-to embed via `?.[0]` — this pass only touched
+  `app/calendar/page.tsx`, the file the user actually hit; worth a wider
+  sweep if the same symptom (a name that never fills in even once the
+  underlying field is set) shows up elsewhere.
+- **A scheduled visit's Calendar line now shows just the subcontractor's
+  name**, not `"<sub> — <construction>"` — the construction name was
+  redundant with the page's own construction filter/title and made the
+  actually-useful part (who's coming) harder to spot at a glance.
+- **Added a "Clear" button to a warranty request's/group's "Scheduled
+  visit" editor** — a native `<input type="date">` has no way to clear
+  itself back to empty on iOS Safari (unlike desktop Chrome's built-in "x"),
+  so there was previously no way to remove a visit's date/time once set.
+  Clearing removes it from the Calendar too, since a visit only shows up
+  there while `scheduled_date` is set.
+- No migration — all three fixes are application-level only.
