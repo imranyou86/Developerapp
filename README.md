@@ -2652,3 +2652,18 @@ yet; each one only adds what a given feature needed.
   Clearing removes it from the Calendar too, since a visit only shows up
   there while `scheduled_date` is set.
 - No migration — all three fixes are application-level only.
+
+## Calendar reachable from inside a construction, not just the top nav
+
+- **Every construction's own tab strip now has a "Calendar" link** —
+  clicking into a construction (Plan, Rooms, Checklist, etc.) previously
+  meant leaving to the top-nav's Calendar and re-picking that construction
+  from "All constructions" every time. The new link
+  (`app/projects/[id]/project-tabs.tsx`) goes to `/calendar?project=<id>`,
+  which pre-selects that construction's filter automatically.
+- **Not a new `tab_permissions` entry** — Calendar is deliberately kept as
+  the same kind of ungated utility view as the top nav's own Calendar/
+  Search links (it shows only what each entry's own RLS already scopes to
+  the signed-in user), so this needed no schema change, migration, or
+  per-role visibility toggle in Admin. It's simply linked from one more
+  place.

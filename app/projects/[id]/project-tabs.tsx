@@ -90,6 +90,21 @@ export function ProjectTabs({
   const labelBySlug = new Map(PROJECT_TABS.map((t) => [t.slug, t.label]));
   const isTabActive = (slug: string) => pathname?.startsWith(`/projects/${projectId}/${slug}`);
 
+  // Not one of PROJECT_TABS/allowedSlugs — Calendar is an ungated utility
+  // view (same as the top-nav's own Calendar/Search links), just linked
+  // here too with this construction pre-selected, so it's reachable
+  // without leaving to the top nav and re-picking it from "All
+  // constructions" every time.
+  const calendarLink = (
+    <Link
+      key="calendar"
+      href={`/calendar?project=${projectId}`}
+      className="whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium text-blueprint/60 transition-all duration-200 hover:bg-blueprint/5 hover:text-blueprint-dark"
+    >
+      Calendar
+    </Link>
+  );
+
   function renderBadge(slug: string) {
     if (slug !== "chat" || unreadChat === 0) return null;
     return (
@@ -124,6 +139,7 @@ export function ProjectTabs({
             </Link>
           );
         })}
+        {calendarLink}
       </nav>
     );
   }
@@ -218,6 +234,7 @@ export function ProjectTabs({
           </div>
         );
       })}
+      {calendarLink}
     </nav>
   );
 }

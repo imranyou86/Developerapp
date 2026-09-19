@@ -47,7 +47,7 @@ interface CalendarEventRow {
 
 // Not gated by tab_permissions — same reasoning as /search, this is a
 // utility view over data every visible entry's own RLS already scopes.
-export default async function CalendarPage() {
+export default async function CalendarPage({ searchParams }: { searchParams: { project?: string } }) {
   const supabase = createClient();
   const {
     data: { user },
@@ -145,6 +145,15 @@ export default async function CalendarPage() {
 
   const entries = [...taskEntries, ...visitEntries, ...eventEntries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
+  // Set when arriving via a construction's own "Calendar" tab
+  // (app/projects/[id]/project-tabs.tsx links to /calendar?project=<id>)
+  // rather than the top-nav's unscoped Calendar — pre-selects that
+  // construction's filter instead of leaving it on "All constructions".
+  // Validated against the actual project list rather than trusted outright,
+  // same reasoning as every other `?project=` picker in this app.
+  const requestedProjectId = searchParams.project;
+  const initialProjectId = requestedProjectId && (projects ?? []).some((p) => p.id === requestedProjectId) ? requestedProjectId : undefined;
+
   return (
     <div className="min-h-screen bg-concrete">
       <header className="border-b border-blueprint/10 bg-white">
@@ -192,6 +201,7 @@ export default async function CalendarPage() {
           projects={projects ?? []}
           currentUserId={currentUser?.id ?? null}
           canAddEvents={!!currentUser && currentUser.role !== "warranty"}
+          initialProjectId={initialProjectId}
         />
       </main>
     </div>

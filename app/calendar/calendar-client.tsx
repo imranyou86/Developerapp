@@ -51,11 +51,16 @@ export function CalendarClient({
   projects,
   currentUserId,
   canAddEvents,
+  initialProjectId,
 }: {
   entries: CalendarEntry[];
   projects: ProjectOption[];
   currentUserId: string | null;
   canAddEvents: boolean;
+  // Set when arriving from a specific construction's own "Calendar" tab
+  // (via /calendar?project=<id>) — pre-selects that construction's filter
+  // instead of the usual defaulting logic below.
+  initialProjectId?: string;
 }) {
   const { notify } = useToast();
   const [entries, setEntries] = useState<CalendarEntry[]>(initialEntries);
@@ -64,7 +69,9 @@ export function CalendarClient({
   // 'warranty' account, which is usually assigned to just the one
   // construction it's tracking. Still just the initial value: the "All
   // constructions" option is right there if a second one is ever added.
-  const [filterProjectId, setFilterProjectId] = useState<string>(() => (projects.length === 1 ? projects[0].id : ""));
+  const [filterProjectId, setFilterProjectId] = useState<string>(
+    () => initialProjectId ?? (projects.length === 1 ? projects[0].id : "")
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<CalendarEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
