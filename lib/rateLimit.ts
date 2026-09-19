@@ -29,6 +29,7 @@ export const RATE_LIMITS: Record<string, { limit: number; windowSeconds: number 
   "room-concept": { limit: 30, windowSeconds: 3600 },
   "suggest-room-layout": { limit: 30, windowSeconds: 3600 },
   "house-book": { limit: 10, windowSeconds: 3600 },
+  "subcontractor-job-report": { limit: 20, windowSeconds: 3600 },
   "generate-room-image": { limit: 15, windowSeconds: 3600 },
   "edit-room-image": { limit: 15, windowSeconds: 3600 },
 };

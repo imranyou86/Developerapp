@@ -2561,3 +2561,36 @@ yet; each one only adds what a given feature needed.
   tracking just the one construction. "All constructions" is still right
   there if a second one is ever added.
 - No migration — both changes are application-level only.
+
+## Subcontractor job report (PDF)
+
+- **A Contractor, Developer, or PM can now generate a PDF "job report" for
+  a subcontractor** — a "Generate job report" button next to "Warranty Item
+  Requests" opens a picker (any subcontractor in the shared directory,
+  same as the existing assignment dropdown — no `project_subcontractors`
+  link required), and downloads a PDF summarizing everything currently
+  assigned to that sub on this construction: the project name/address, the
+  sub's own contact info, and every warranty request/trade group assigned
+  to them (`subcontractor_id`) grouped by category, each with its status,
+  progress, scheduled visit window, comments/rejection notes, a group's
+  individual task list, and any attached inspection-report photos.
+- **New route:** `app/api/projects/[id]/subcontractor-job-report` (POST,
+  `{ subcontractorId }`) — same shape as the existing House Book route:
+  auth check, rate-limited (`subcontractor-job-report`, 20/hour), re-scopes
+  every id by `project_id`/`subcontractor_id` server-side rather than
+  trusting the client, signs storage URLs for any photos, and returns
+  `application/pdf`.
+- **New renderer:** `lib/subcontractorJobReportPdf.tsx`, mirroring
+  `lib/houseBookPdf.tsx`'s `@react-pdf/renderer` pattern exactly — the same
+  required pdfkit standard-font force-bundle imports (necessary on Vercel,
+  see that file's own comment), base-14 fonts only, and a `sharp`-based
+  `toEmbeddablePhoto`/`prepareImages` step so an unsupported photo format
+  (HEIC, WEBP, GIF — common from phone-camera uploads) is re-encoded to a
+  JPEG data URI rather than crashing the whole PDF.
+- No migration — reads only existing columns/tables.
+- **Not live-tested** — this sandbox has no network access to the real
+  Supabase-backed deployment, so this was verified via `tsc`/`lint`/`build`
+  and careful reading only. Worth a real run once deployed: assign a
+  subcontractor to a couple of warranty requests (including at least one
+  multi-task group) and generate their report to confirm the PDF looks
+  right, especially with a photo attached from a phone camera.

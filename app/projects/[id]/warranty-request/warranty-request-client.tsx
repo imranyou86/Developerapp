@@ -5,6 +5,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import {
@@ -150,6 +151,7 @@ export function WarrantyRequestClient({
   const [newTitle, setNewTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [fileOnBehalfOpen, setFileOnBehalfOpen] = useState(false);
+  const [jobReportOpen, setJobReportOpen] = useState(false);
   const fixed = items.filter((i) => i.done).length;
   // The 'warranty' role can watch checklist items, notes, and photos here
   // and chat about them, but can't mutate anything directly — they file a
@@ -553,16 +555,20 @@ export function WarrantyRequestClient({
         onDeleteComment={handleDeleteComment}
         onReportAdd={(r) => setReports((prev) => [r, ...prev])}
         onFileOnBehalf={() => setFileOnBehalfOpen(true)}
+        onGenerateJobReport={() => setJobReportOpen(true)}
       />
 
       {canManageRequests && (
-        <FileOnBehalfModal
-          open={fileOnBehalfOpen}
-          projectId={projectId}
-          warrantyMembers={warrantyMembers}
-          onClose={() => setFileOnBehalfOpen(false)}
-          onSubmitted={(newRequests) => setRequests((prev) => [...newRequests, ...prev])}
-        />
+        <>
+          <FileOnBehalfModal
+            open={fileOnBehalfOpen}
+            projectId={projectId}
+            warrantyMembers={warrantyMembers}
+            onClose={() => setFileOnBehalfOpen(false)}
+            onSubmitted={(newRequests) => setRequests((prev) => [...newRequests, ...prev])}
+          />
+          <JobReportModal projectId={projectId} subcontractors={subcontractors} open={jobReportOpen} onClose={() => setJobReportOpen(false)} />
+        </>
       )}
     </div>
   );
@@ -745,6 +751,103 @@ function FileOnBehalfModal({
   );
 }
 
+// Lets a Contractor/Developer/PM download a PDF summary of everything
+// currently assigned to one subcontractor on this construction — grouped by
+// trade, with each task's status and any scheduled visit — to hand or email
+// to that sub. Generated server-side (app/api/projects/[id]/subcontractor-job-report),
+// same @react-pdf/renderer pattern as the House Book.
+function JobReportModal({
+  projectId,
+  subcontractors,
+  open,
+  onClose,
+}: {
+  projectId: string;
+  subcontractors: SubcontractorOption[];
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
+  const taskKey = `subcontractor-job-report:${projectId}`;
+  const [subcontractorId, setSubcontractorId] = useState(subcontractors[0]?.id ?? "");
+  const [generating, setGenerating] = useState(false);
+
+  async function handleGenerate() {
+    if (!subcontractorId) return;
+    const sub = subcontractors.find((s) => s.id === subcontractorId);
+    setGenerating(true);
+    try {
+      await run(taskKey, "Putting together the job report…", async () => {
+        const res = await fetchWithRetry(`/api/projects/${projectId}/subcontractor-job-report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subcontractorId }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error ?? "Could not generate the job report.");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(sub?.company_name ?? "subcontractor").replace(/[^a-z0-9]+/gi, "-")}-job-report.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        notify("success", "Job report generated.");
+      });
+      onClose();
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not generate the job report.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const working = generating || isRunning(taskKey);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Generate a job report"
+      footer={
+        <>
+          <button className="btn-outline" onClick={onClose} disabled={working}>
+            Cancel
+          </button>
+          <button className="btn-primary" disabled={working || !subcontractorId} onClick={handleGenerate}>
+            {working ? "Generating…" : "Download PDF"}
+          </button>
+        </>
+      }
+    >
+      {subcontractors.length === 0 ? (
+        <p className="text-sm text-blueprint/60">No subcontractors in the directory yet — add one from the Subcontractors tab first.</p>
+      ) : (
+        <div>
+          <label className="label">Subcontractor</label>
+          <select className="input" value={subcontractorId} onChange={(e) => setSubcontractorId(e.target.value)}>
+            {subcontractors.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.company_name}
+                {s.trade ? ` — ${s.trade}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-blueprint/50">
+            Pulls in every warranty request or trade group currently assigned to this subcontractor on this construction — its status,
+            scheduled visit, and task list — as a PDF you can send them.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export interface GroupedRequestCardsProps {
   projectId: string;
   requests: WarrantyItemRequest[];
@@ -897,7 +1000,8 @@ function RequestsSection({
   onDeleteComment,
   onReportAdd,
   onFileOnBehalf,
-}: GroupedRequestCardsProps & { onFileOnBehalf: () => void }) {
+  onGenerateJobReport,
+}: GroupedRequestCardsProps & { onFileOnBehalf: () => void; onGenerateJobReport: () => void }) {
   if (requests.length === 0 && !canManageRequests) return null;
 
   return (
@@ -905,9 +1009,14 @@ function RequestsSection({
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold text-blueprint-dark">Warranty Item Requests</h2>
         {canManageRequests && (
-          <button className="btn-outline text-xs" onClick={onFileOnBehalf}>
-            + File on behalf of a homeowner
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-outline text-xs" onClick={onGenerateJobReport}>
+              Generate job report
+            </button>
+            <button className="btn-outline text-xs" onClick={onFileOnBehalf}>
+              + File on behalf of a homeowner
+            </button>
+          </div>
         )}
       </div>
       <p className="mb-4 text-sm text-blueprint/60">
