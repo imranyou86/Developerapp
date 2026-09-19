@@ -2700,3 +2700,24 @@ yet; each one only adds what a given feature needed.
   places (`onReportRemove` threaded through `GroupedRequestCards` →
   `WarrantyRequestCard`/`WarrantyRequestGroupCard`/`GroupTaskRow`). No
   migration.
+
+## Remove the redundant per-item review status from the Warranty Request checklist
+
+- **Each checklist item in the "Warranty Request" section had its own
+  "Pending review / Validate / Not covered by warranty" status dropdown**
+  — a leftover from before the request/approve/reject workflow existed
+  (an item only ever lands in this section after its originating request
+  was already approved above, or was added directly by a Contractor/
+  Developer/PM). Re-reviewing it a second time here was pure duplicate
+  work, so that dropdown is gone.
+- **Kept everything else about this section** — the item list, the
+  "Fixed" checkbox, per-item photos and notes, bulk select/mark-fixed/
+  delete, and "Generate checklist items" from an uploaded inspection
+  report all work exactly as before. A pre-existing item already marked
+  "Not covered" (from before this change) still shows a plain "Not
+  covered" badge so it's clear why its checkbox is disabled, but nothing
+  can set that status from here anymore going forward.
+- No migration — `checklist_items.status` still exists in the schema
+  (existing "invalidated" rows keep their disabled-checkbox behavior), the
+  now-unused `setWarrantyStatus` server action was left in place rather
+  than deleted outright.

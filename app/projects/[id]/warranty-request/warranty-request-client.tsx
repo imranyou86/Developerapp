@@ -27,7 +27,6 @@ import {
   requestWarrantyItems,
   setWarrantyRequestProgress,
   setWarrantyRequestSchedule,
-  setWarrantyStatus,
   toggleWarrantyItem,
   toggleWarrantyItems,
   updateWarrantyComment,
@@ -2403,23 +2402,6 @@ function WarrantyItem({
     }
   }
 
-  async function handleStatusChange(status: WarrantyItemStatus) {
-    const previous = item.status;
-    onUpdate(item.id, { status });
-    const res = await setWarrantyStatus(projectId, item.id, status, item.title);
-    if (!res.ok) {
-      notify("error", res.error ?? "Could not update status.");
-      onUpdate(item.id, { status: previous });
-      return;
-    }
-    // Not covered by warranty means it was never going to be fixed under
-    // this claim — clear a stray "Fixed" check rather than leaving it
-    // checked-but-disabled.
-    if (status === "invalidated" && item.done) {
-      handleToggle(false);
-    }
-  }
-
   async function handleSaveComment() {
     setSavingComment(true);
     const res = await updateWarrantyComment(projectId, item.id, comment);
@@ -2498,30 +2480,17 @@ function WarrantyItem({
           {item.title}
         </button>
         {/* Wraps onto its own right-aligned line on a narrow screen rather
-            than squeezing the status select/badge and two buttons next to
-            a long, wrapped title on the same row. */}
+            than squeezing the badge/buttons next to a long, wrapped title
+            on the same row. */}
         <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
-          {canManage ? (
-            <select
-              className={`input w-auto shrink-0 text-xs ${
-                item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
-              }`}
-              value={item.status}
-              onChange={(e) => handleStatusChange(e.target.value as WarrantyItemStatus)}
-            >
-              <option value="pending">Pending review</option>
-              <option value="validated">Validate</option>
-              <option value="invalidated">Not covered by warranty</option>
-            </select>
-          ) : (
-            <span
-              className={`shrink-0 text-xs ${
-                item.status === "validated" ? "text-sage-dark" : item.status === "invalidated" ? "text-red-600" : "text-blueprint/50"
-              }`}
-            >
-              {item.status === "validated" ? "Validated" : item.status === "invalidated" ? "Not covered" : "Pending review"}
-            </span>
-          )}
+          {/* The old per-item "Pending review / Validate / Not covered"
+              status dropdown is gone — it duplicated the approve/reject a
+              Contractor/Developer/PM already does on the request itself
+              above, before an item ever lands here. A pre-existing
+              "invalidated" item (from before this change) still shows a
+              plain badge so it's clear why its checkbox is disabled, but
+              nothing can set that status anymore from this page. */}
+          {item.status === "invalidated" && <span className="shrink-0 text-xs text-red-600">Not covered</span>}
           <button
             className={`shrink-0 text-xs hover:underline ${
               item.comment || item.checklist_photos.length > 0 || reports.length > 0 ? "text-amber-dark" : "text-blueprint/40"
