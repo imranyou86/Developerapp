@@ -5,10 +5,9 @@ import { BrandMark } from "@/components/BrandMark";
 
 export const dynamic = "force-dynamic";
 
-// Swap this for a real inbox before sending this page to anyone — there's
-// no self-serve signup path today (see middleware.ts's approval gate), so
-// "Request access" has to reach a person, not a form.
-const CONTACT_EMAIL = "hello@yourdomain.com";
+// There's no self-serve signup path today (see middleware.ts's approval
+// gate), so "Request access" has to reach a person, not a form.
+const CONTACT_EMAIL = "imran@alaiahome.com";
 
 interface Feature {
   icon: string;
