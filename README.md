@@ -2820,3 +2820,56 @@ yet; each one only adds what a given feature needed.
   and careful reading only. Worth a real run once deployed: add a trade bid
   with a deliberately thin scope description and confirm the completeness
   check and questions actually read as useful, not generic.
+
+## Chat: named, scoped threads alongside the General chat
+
+- **A Developer/Contractor/PM can start a named chat thread** with just a
+  subset of the team, instead of every message always going to the whole
+  project's General chat — e.g. a thread called "Acme Electric —
+  rough-in" with just the owner and that subcontractor's account in it.
+  Subcontractors aren't a new account type — per the app's existing
+  design, a subcontractor who needs to use the app is just invited as a
+  `contractor`-role account and has their individual tab access stripped
+  down from Admin, same as any other account.
+- **The existing General chat is unchanged** — it's still the default,
+  project-wide stream every member sees, and Chat's own tab-strip badge
+  still only tracks General's unread count (a thread's unread state shows
+  in the thread list itself, not the tab badge — kept simple for this
+  first pass).
+- **New Chat page layout**: a left-hand sidebar lists "General" plus every
+  thread the signed-in account participates in, with a "+ New thread"
+  button only for Developer/Contractor/PM. Creating one asks for a name
+  (required — the whole point is to stay organized as the thread list
+  grows) and a picker of who else is in it, defaulting to nobody selected
+  beyond the creator (who's always included); a thread's own creator (or
+  a Developer) can delete it, which removes every message in it.
+- **New tables** (migration 060): `chat_threads` (id, project_id,
+  created_by, title, created_at), `chat_thread_participants`
+  (thread_id, user_id), and `chat_thread_reads` (same shape as the
+  existing `project_chat_reads`, scoped to a thread instead of a whole
+  project). `project_messages` gained a nullable `thread_id` — null keeps
+  meaning "the project-wide General chat" (unchanged behavior), set means
+  it belongs to one scoped thread.
+- **RLS is the actual privacy boundary, not just the UI**: a new
+  `is_thread_participant()` function replaces `project_messages`' old
+  blanket "any project member can read/post" policies for thread-scoped
+  rows — only that thread's own participants (or a Developer) can select
+  or insert into it. A `can_create_chat_thread()` function gates who can
+  create a `chat_threads` row (Developer/Contractor/PM + project access),
+  matching the "+ New thread" UI gate. `clearChat` (the Developer-only
+  "wipe this chat" button) was narrowed to only ever clear General's
+  messages — it never touches a thread's, which has its own delete.
+- **Thread messages notify only their own participants**, via a new
+  `notifyThreadParticipants()` in `lib/alerts.ts` — deliberately not
+  `notifyForAction`'s existing project-wide subscriber/forced-role
+  fan-out, which would have emailed/pushed people with a project chat
+  alert subscription but no seat in the thread, defeating the point of
+  scoping it in the first place. General's messages still go through
+  `notifyForAction` exactly as before.
+- **Not live-tested** — same sandbox network limitation as the rest of
+  this session's work; verified via `tsc`/`lint`/`build` and a careful
+  read of the new RLS policies. Worth a real run once deployed: as a
+  Contractor, start a thread with the owner and a subcontractor account,
+  confirm a Developer previewing as that subcontractor can see and post
+  in it, and confirm an account NOT added to the thread can't see it even
+  though they can see General.

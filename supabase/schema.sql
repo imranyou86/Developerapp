@@ -584,6 +584,39 @@ create table if not exists project_chat_reads (
   primary key (project_id, user_id)
 );
 
+-- Scoped chat threads — alongside the project-wide General chat above (the
+-- default, unchanged), a Developer/Contractor/PM can start a named thread
+-- with just a subset of the team (typically: themselves, the owner, and
+-- one subcontractor account on the project). See migration 060.
+create table if not exists chat_threads (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  title text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists chat_thread_participants (
+  thread_id uuid not null references chat_threads (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  primary key (thread_id, user_id)
+);
+
+-- Same shape as project_chat_reads, scoped to a thread instead of a whole
+-- project.
+create table if not exists chat_thread_reads (
+  thread_id uuid not null references chat_threads (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  last_read_at timestamptz not null default now(),
+  primary key (thread_id, user_id)
+);
+
+-- Null means "the project-wide General chat" (project_messages' original
+-- behavior); set means this message belongs to one scoped thread instead
+-- and only that thread's participants can see it (see the
+-- project_messages_select/insert policies below).
+alter table project_messages add column if not exists thread_id uuid references chat_threads (id) on delete cascade;
+
 -- Opt-in email alerts, one row per (project, subscriber) — a chat message,
 -- a checklist/warranty item added or marked fixed, or a warranty item's
 -- review status changing all notify every subscriber on that project (see
@@ -826,6 +859,9 @@ create index if not exists idx_project_members_user on project_members (user_id)
 create index if not exists idx_project_invites_project on project_invites (project_id, created_at desc);
 create index if not exists idx_project_invites_token on project_invites (token);
 create index if not exists idx_project_messages_project on project_messages (project_id, created_at);
+create index if not exists idx_chat_threads_project on chat_threads (project_id, created_at desc);
+create index if not exists idx_chat_thread_participants_user on chat_thread_participants (user_id);
+create index if not exists idx_project_messages_thread on project_messages (thread_id, created_at);
 create index if not exists idx_project_alert_subscriptions_project on project_alert_subscriptions (project_id);
 create index if not exists idx_push_subscriptions_user on push_subscriptions (user_id);
 create index if not exists idx_subcontractors_created_by on subcontractors (created_by);
@@ -960,6 +996,9 @@ alter table project_members enable row level security;
 alter table project_invites enable row level security;
 alter table project_messages enable row level security;
 alter table project_chat_reads enable row level security;
+alter table chat_threads enable row level security;
+alter table chat_thread_participants enable row level security;
+alter table chat_thread_reads enable row level security;
 alter table user_tab_permissions enable row level security;
 alter table project_alert_subscriptions enable row level security;
 alter table push_subscriptions enable row level security;
@@ -995,6 +1034,33 @@ as $$
     is_developer()
     or exists (select 1 from projects p where p.id = pid and p.user_id = auth.uid())
     or exists (select 1 from project_members m where m.project_id = pid and m.user_id = auth.uid());
+$$;
+
+create or replace function is_thread_participant(tid uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select is_developer() or exists (
+    select 1 from chat_thread_participants p where p.thread_id = tid and p.user_id = auth.uid()
+  );
+$$;
+
+-- Only Developer/Contractor/PM project members can start a thread — Owner
+-- and Warranty accounts can be included as participants but don't get the
+-- "+ New thread" option themselves.
+create or replace function can_create_chat_thread(pid uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select has_project_access(pid) and exists (
+    select 1 from profiles where id = auth.uid() and role in ('developer', 'contractor', 'pm')
+  );
 $$;
 
 -- Security definer so it can be called from warranty_item_requests' own
@@ -1345,13 +1411,25 @@ create policy "project_members_delete" on project_members
 create policy "project_invites_all" on project_invites
   for all using (is_developer()) with check (is_developer());
 
--- Chat: any project member can read and post; only the sender (or a
--- Developer) can delete a message. No update policy — messages aren't
--- editable in this first pass.
+-- Chat: a General (thread_id null) message follows the original rule —
+-- any project member can read/post. A scoped-thread message (thread_id
+-- set) is only visible to/postable by that thread's own participants,
+-- never the whole project. Only the sender (or a Developer) can delete a
+-- message either way. No update policy — messages aren't editable in this
+-- first pass.
 create policy "project_messages_select" on project_messages
-  for select using (has_project_access(project_id));
+  for select using (
+    (thread_id is null and has_project_access(project_id))
+    or (thread_id is not null and is_thread_participant(thread_id))
+  );
 create policy "project_messages_insert" on project_messages
-  for insert with check (has_project_access(project_id) and auth.uid() = user_id);
+  for insert with check (
+    auth.uid() = user_id
+    and (
+      (thread_id is null and has_project_access(project_id))
+      or (thread_id is not null and is_thread_participant(thread_id))
+    )
+  );
 create policy "project_messages_delete" on project_messages
   for delete using (auth.uid() = user_id or is_developer());
 
@@ -1360,6 +1438,30 @@ create policy "project_messages_delete" on project_messages
 create policy "project_chat_reads_owner" on project_chat_reads
   for all using (auth.uid() = user_id)
   with check (has_project_access(project_id) and auth.uid() = user_id);
+
+create policy "chat_threads_select" on chat_threads
+  for select using (is_thread_participant(id));
+create policy "chat_threads_insert" on chat_threads
+  for insert with check (can_create_chat_thread(project_id) and auth.uid() = created_by);
+create policy "chat_threads_delete" on chat_threads
+  for delete using (auth.uid() = created_by or is_developer());
+
+create policy "chat_thread_participants_select" on chat_thread_participants
+  for select using (is_thread_participant(thread_id));
+-- Only the thread's own creator (or a Developer) adds/removes
+-- participants — same "creator manages membership" shape as
+-- project_shares_owner.
+create policy "chat_thread_participants_manage" on chat_thread_participants
+  for all using (
+    exists (select 1 from chat_threads t where t.id = chat_thread_participants.thread_id and (t.created_by = auth.uid() or is_developer()))
+  )
+  with check (
+    exists (select 1 from chat_threads t where t.id = chat_thread_participants.thread_id and (t.created_by = auth.uid() or is_developer()))
+  );
+
+create policy "chat_thread_reads_owner" on chat_thread_reads
+  for all using (auth.uid() = user_id)
+  with check (is_thread_participant(thread_id) and auth.uid() = user_id);
 
 -- Self-service only — a user manages just their own subscription row, never
 -- another member's. Dispatching alerts (reading every subscriber's email
@@ -1483,5 +1585,17 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'project_messages'
   ) then
     alter publication supabase_realtime add table project_messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'chat_threads'
+  ) then
+    alter publication supabase_realtime add table chat_threads;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'chat_thread_participants'
+  ) then
+    alter publication supabase_realtime add table chat_thread_participants;
   end if;
 end $$;

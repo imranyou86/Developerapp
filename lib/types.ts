@@ -306,6 +306,26 @@ export interface ProjectMessage {
   sender_name: string | null;
   body: string;
   created_at: string;
+  // Null = the project-wide General chat; set = a scoped chat_threads row
+  // (see ChatThread below) — only that thread's participants can see it.
+  thread_id: string | null;
+}
+
+// A named, scoped chat thread within a construction's Chat tab — created
+// by a Developer/Contractor/PM to talk with just a subset of the team
+// (e.g. one subcontractor account + the owner) instead of the whole
+// project. See migration 060.
+export interface ChatThread {
+  id: string;
+  project_id: string;
+  created_by: string;
+  title: string;
+  created_at: string;
+}
+
+export interface ChatThreadParticipant {
+  thread_id: string;
+  user_id: string;
 }
 
 export interface ActivityLogEntry {

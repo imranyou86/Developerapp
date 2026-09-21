@@ -2,27 +2,32 @@
 
 import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
-import { notifyForAction } from "@/lib/alerts";
+import { notifyForAction, notifyThreadParticipants } from "@/lib/alerts";
 import { CHAT_PAGE_SIZE } from "@/lib/pagination";
 import type { ProjectMessage } from "@/lib/types";
 
-// Cursor-paginated "load older" for a chat that's grown past the first
-// page — the initial page load (chat/page.tsx) only fetches the most
-// recent CHAT_PAGE_SIZE messages; this fetches the next page further back
-// in time, ordered by created_at (with id as a tiebreaker for messages
-// sharing the same instant, e.g. a bulk import).
-export async function loadOlderMessages(
+// Cursor-paginated message fetch, newest page first — used both for a
+// thread's initial load (beforeCreatedAt omitted, e.g. switching to it in
+// the sidebar) and "load older" once it's grown past the first page
+// (chat/page.tsx's own SSR query covers General's very first load).
+// threadId null means the project-wide General chat; a thread's own id
+// scopes to that thread only (RLS enforces the same either way — this
+// just filters which page loads).
+export async function loadMessages(
   projectId: string,
-  beforeCreatedAt: string
+  threadId: string | null,
+  beforeCreatedAt?: string
 ): Promise<{ messages: ProjectMessage[]; hasMore: boolean }> {
   const supabase = createClient();
-  const { data } = await supabase
+  let query = supabase
     .from("project_messages")
-    .select("id, project_id, user_id, sender_email, sender_name, body, created_at")
+    .select("id, project_id, user_id, sender_email, sender_name, body, created_at, thread_id")
     .eq("project_id", projectId)
-    .lt("created_at", beforeCreatedAt)
     .order("created_at", { ascending: false })
     .limit(CHAT_PAGE_SIZE + 1);
+  query = threadId ? query.eq("thread_id", threadId) : query.is("thread_id", null);
+  if (beforeCreatedAt) query = query.lt("created_at", beforeCreatedAt);
+  const { data } = await query;
 
   const rows = (data ?? []) as ProjectMessage[];
   const hasMore = rows.length > CHAT_PAGE_SIZE;
@@ -34,7 +39,7 @@ export async function loadOlderMessages(
 // Supabase Realtime (see chat-client.tsx), so a server-driven refetch on
 // send would just be redundant extra work.
 
-export async function sendMessage(projectId: string, id: string, body: string): Promise<ActionResult> {
+export async function sendMessage(projectId: string, threadId: string | null, id: string, body: string): Promise<ActionResult> {
   const supabase = createClient();
   const {
     data: { user },
@@ -58,6 +63,7 @@ export async function sendMessage(projectId: string, id: string, body: string): 
   const { error } = await supabase.from("project_messages").insert({
     id,
     project_id: projectId,
+    thread_id: threadId,
     user_id: user.id,
     sender_email: user.email ?? "unknown",
     sender_name: senderName,
@@ -65,14 +71,28 @@ export async function sendMessage(projectId: string, id: string, body: string): 
   });
   if (error) return { ok: false, error: error.message };
 
-  // No excludeUserId here (unlike checklist/warranty notifications) — a
-  // subscribed account gets emailed about every new chat message,
-  // including its own, so someone watching a project's chat by email sees
-  // a complete thread rather than a gapped one missing their own replies.
-  await notifyForAction(projectId, "chat_message", {
-    subject: "New chat message",
-    body: `${senderName ?? user.email ?? "Someone"} sent a chat message:\n\n${trimmed}`,
-  });
+  if (threadId) {
+    const { data: participants } = await supabase.from("chat_thread_participants").select("user_id").eq("thread_id", threadId);
+    await notifyThreadParticipants(
+      projectId,
+      (participants ?? []).map((p) => p.user_id),
+      {
+        subject: "New chat message",
+        body: `${senderName ?? user.email ?? "Someone"} sent a chat message:\n\n${trimmed}`,
+        excludeUserId: user.id,
+      }
+    );
+  } else {
+    // No excludeUserId here (unlike checklist/warranty notifications) — a
+    // subscribed account gets emailed about every new chat message,
+    // including its own, so someone watching a project's chat by email
+    // sees a complete thread rather than a gapped one missing their own
+    // replies.
+    await notifyForAction(projectId, "chat_message", {
+      subject: "New chat message",
+      body: `${senderName ?? user.email ?? "Someone"} sent a chat message:\n\n${trimmed}`,
+    });
+  }
 
   return { ok: true, id };
 }
@@ -84,7 +104,9 @@ export async function deleteMessage(messageId: string): Promise<ActionResult> {
   return { ok: true };
 }
 
-// Wipes the entire thread for this construction — a stronger action than
+// Wipes the General chat for this construction only — thread messages are
+// untouched (delete the thread itself, via deleteChatThread in
+// thread-actions.ts, to wipe one of those). A stronger action than
 // deleting a single message, so it's Developer-only (matches
 // project_messages_delete's RLS: auth.uid() = user_id or is_developer(),
 // which already lets a Developer delete any message, not just their own).
@@ -100,23 +122,30 @@ export async function clearChat(projectId: string): Promise<ActionResult> {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (profile?.role !== "developer") return { ok: false, error: "Only a Developer can clear this chat." };
 
-  const { error } = await supabase.from("project_messages").delete().eq("project_id", projectId);
+  const { error } = await supabase.from("project_messages").delete().eq("project_id", projectId).is("thread_id", null);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
-// Marks this project's chat as read up to now for the current user — called
-// by ProjectTabs (app/projects/[id]/project-tabs.tsx) whenever it's the
-// active tab, including on every new Realtime message that arrives while
-// it's open, so navigating away and back doesn't immediately re-flag
-// messages the user already saw arrive live. No revalidatePath: this only
-// feeds the unread badge, which ProjectTabs already updates locally.
-export async function markChatRead(projectId: string): Promise<ActionResult> {
+// Marks a chat surface as read up to now for the current user — called by
+// ProjectTabs (app/projects/[id]/project-tabs.tsx) for the General chat
+// (threadId omitted) whenever it's the active tab, and by the thread view
+// for whichever thread is open. No revalidatePath: this only feeds unread
+// badges, which update locally on the client.
+export async function markChatRead(projectId: string, threadId?: string): Promise<ActionResult> {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  if (threadId) {
+    const { error } = await supabase
+      .from("chat_thread_reads")
+      .upsert({ thread_id: threadId, user_id: user.id, last_read_at: new Date().toISOString() }, { onConflict: "thread_id,user_id" });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
 
   const { error } = await supabase
     .from("project_chat_reads")

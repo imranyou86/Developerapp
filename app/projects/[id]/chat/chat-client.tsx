@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { sendMessage, deleteMessage, clearChat, loadOlderMessages } from "@/app/projects/[id]/chat/actions";
-import type { ProjectMessage } from "@/lib/types";
+import { Modal } from "@/components/Modal";
+import { sendMessage, deleteMessage, clearChat, loadMessages, markChatRead } from "@/app/projects/[id]/chat/actions";
+import { createChatThread, deleteChatThread, type ThreadPickerMember } from "@/app/projects/[id]/chat/thread-actions";
+import { ROLE_LABELS } from "@/lib/permissions";
+import type { ChatThread, ProjectMessage, UserRole } from "@/lib/types";
 
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
@@ -21,16 +24,176 @@ export function ChatClient({
   initialMessages,
   initialHasMore,
   isDeveloper,
+  initialThreads,
+  canCreateThread,
+  pickerMembers,
 }: {
   projectId: string;
   currentUserId: string;
   initialMessages: ProjectMessage[];
   initialHasMore: boolean;
   isDeveloper: boolean;
+  initialThreads: ChatThread[];
+  canCreateThread: boolean;
+  pickerMembers: ThreadPickerMember[];
 }) {
   const { notify } = useToast();
-  const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages);
-  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [threads, setThreads] = useState<ChatThread[]>(initialThreads);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
+
+  const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
+
+  // The general (thread_id null) chat's realtime channel also picks up new
+  // threads (see chat_threads' own INSERT in the publication) so every
+  // participant's sidebar updates live without a full reload — including
+  // whoever the creator just added, who wasn't watching this page yet.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`project-chat-threads:${projectId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_threads", filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const row = payload.new as ChatThread;
+          setThreads((prev) => (prev.some((t) => t.id === row.id) ? prev : [...prev, row]));
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "chat_threads", filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const row = payload.old as { id: string };
+          setThreads((prev) => prev.filter((t) => t.id !== row.id));
+          setActiveThreadId((prev) => (prev === row.id ? null : prev));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
+
+  async function handleDeleteThread() {
+    if (!deletingThread) return;
+    setDeletingBusy(true);
+    const res = await deleteChatThread(deletingThread.id, projectId, deletingThread.title);
+    setDeletingBusy(false);
+    setDeletingThread(null);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not delete this thread.");
+      return;
+    }
+    setThreads((prev) => prev.filter((t) => t.id !== deletingThread.id));
+    setActiveThreadId((prev) => (prev === deletingThread.id ? null : prev));
+    notify("success", "Thread deleted.");
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-220px)] min-h-[420px] gap-4">
+      <div className="flex w-52 shrink-0 flex-col gap-1 overflow-y-auto border-r border-blueprint/10 pr-3">
+        <button
+          className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+            activeThreadId === null ? "bg-amber/15 text-amber-dark" : "text-blueprint/70 hover:bg-concrete"
+          }`}
+          onClick={() => setActiveThreadId(null)}
+        >
+          General
+        </button>
+        {threads.map((t) => (
+          <div key={t.id} className="group flex items-center gap-1">
+            <button
+              className={`flex-1 truncate rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                activeThreadId === t.id ? "bg-amber/15 text-amber-dark" : "text-blueprint/70 hover:bg-concrete"
+              }`}
+              onClick={() => setActiveThreadId(t.id)}
+              title={t.title}
+            >
+              {t.title}
+            </button>
+            {(t.created_by === currentUserId || isDeveloper) && (
+              <button
+                className="hidden shrink-0 text-xs text-red-500 hover:underline group-hover:inline"
+                onClick={() => setDeletingThread(t)}
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        ))}
+        {canCreateThread && (
+          <button className="btn-ghost mt-2 text-xs" onClick={() => setCreateOpen(true)}>
+            + New thread
+          </button>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <ThreadMessages
+          key={activeThreadId ?? "general"}
+          projectId={projectId}
+          threadId={activeThreadId}
+          currentUserId={currentUserId}
+          isDeveloper={isDeveloper}
+          initialMessages={activeThreadId === null ? initialMessages : null}
+          initialHasMore={activeThreadId === null ? initialHasMore : null}
+          threadTitle={activeThread?.title ?? null}
+        />
+      </div>
+
+      {createOpen && (
+        <CreateThreadModal
+          projectId={projectId}
+          members={pickerMembers}
+          currentUserId={currentUserId}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(thread) => {
+            setThreads((prev) => [...prev, thread]);
+            setActiveThreadId(thread.id);
+            setCreateOpen(false);
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!deletingThread}
+        title="Delete this thread?"
+        message={`Delete "${deletingThread?.title}" and every message in it? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        busy={deletingBusy}
+        onCancel={() => setDeletingThread(null)}
+        onConfirm={handleDeleteThread}
+      />
+    </div>
+  );
+}
+
+function ThreadMessages({
+  projectId,
+  threadId,
+  currentUserId,
+  isDeveloper,
+  initialMessages,
+  initialHasMore,
+  threadTitle,
+}: {
+  projectId: string;
+  threadId: string | null;
+  currentUserId: string;
+  isDeveloper: boolean;
+  initialMessages: ProjectMessage[] | null;
+  initialHasMore: boolean | null;
+  threadTitle: string | null;
+}) {
+  const { notify } = useToast();
+  const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages ?? []);
+  const [hasMore, setHasMore] = useState(initialHasMore ?? false);
+  const [loadingInitial, setLoadingInitial] = useState(initialMessages === null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -41,10 +204,33 @@ export function ChatClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasLoadedOlder = useRef(false);
 
+  // A freshly selected thread (initialMessages null — not the SSR-loaded
+  // General view) fetches its own first page on mount.
   useEffect(() => {
-    // Only auto-scroll to the newest message on first render and when a new
-    // message arrives — not after prepending older history, which would
-    // otherwise yank the view back down away from what was just loaded.
+    if (initialMessages !== null) return;
+    let cancelled = false;
+    setLoadingInitial(true);
+    loadMessages(projectId, threadId)
+      .then(({ messages: page, hasMore: more }) => {
+        if (cancelled) return;
+        setMessages(page);
+        setHasMore(more);
+      })
+      .catch((err) => notify("error", err instanceof Error ? err.message : "Could not load this thread."))
+      .finally(() => {
+        if (!cancelled) setLoadingInitial(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, threadId]);
+
+  useEffect(() => {
+    markChatRead(projectId, threadId ?? undefined);
+  }, [projectId, threadId]);
+
+  useEffect(() => {
     if (hasLoadedOlder.current) {
       hasLoadedOlder.current = false;
       return;
@@ -59,13 +245,10 @@ export function ChatClient({
 
     setLoadingOlder(true);
     try {
-      const { messages: older, hasMore: more } = await loadOlderMessages(projectId, messages[0].created_at);
+      const { messages: older, hasMore: more } = await loadMessages(projectId, threadId, messages[0].created_at);
       hasLoadedOlder.current = true;
       setMessages((prev) => [...older, ...prev]);
       setHasMore(more);
-      // Keep the same messages in view instead of jumping to the top —
-      // restore scroll position relative to the content just inserted
-      // above it, once the new rows have actually rendered.
       requestAnimationFrame(() => {
         if (container) container.scrollTop = container.scrollHeight - previousScrollHeight;
       });
@@ -76,21 +259,21 @@ export function ChatClient({
     }
   }
 
-  // Live updates for every viewer of this project's chat — Realtime's
-  // postgres_changes respects RLS on its own, so this only ever receives
-  // rows project_messages_select would let this user read anyway. Dedupes
-  // by id: the sender's own optimistic entry (added in handleSend, below)
-  // already has the exact id this INSERT event carries, so it's just
-  // ignored rather than appended a second time.
+  // Live updates — postgres_changes respects RLS, so this only ever
+  // receives rows this user is allowed to read (a thread's own
+  // participants, or any project member for General). Filtered again by
+  // thread_id client-side since the subscription itself is project-wide,
+  // in case this user participates in more than one thread at once.
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
-      .channel(`project-chat:${projectId}`)
+      .channel(`project-chat:${projectId}:${threadId ?? "general"}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "project_messages", filter: `project_id=eq.${projectId}` },
         (payload) => {
           const row = payload.new as ProjectMessage;
+          if ((row.thread_id ?? null) !== threadId) return;
           setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
         }
       )
@@ -107,7 +290,7 @@ export function ChatClient({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId]);
+  }, [projectId, threadId]);
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -115,17 +298,14 @@ export function ChatClient({
     if (!body) return;
 
     const id = crypto.randomUUID();
-    // Optimistic — appended immediately so sending feels instant; the
-    // Realtime INSERT event for this exact id arrives shortly after and is
-    // a no-op against this same entry (see the dedupe above).
     setMessages((prev) => [
       ...prev,
-      { id, project_id: projectId, user_id: currentUserId, sender_email: "", sender_name: null, body, created_at: new Date().toISOString() },
+      { id, project_id: projectId, thread_id: threadId, user_id: currentUserId, sender_email: "", sender_name: null, body, created_at: new Date().toISOString() },
     ]);
     setDraft("");
     setSending(true);
     try {
-      const res = await sendMessage(projectId, id, body);
+      const res = await sendMessage(projectId, threadId, id, body);
       if (!res.ok) {
         notify("error", res.error ?? "Could not send message.");
         setMessages((prev) => prev.filter((m) => m.id !== id));
@@ -166,18 +346,23 @@ export function ChatClient({
   }
 
   return (
-    <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col">
-      {isDeveloper && messages.length > 0 && (
-        <div className="mb-2 flex justify-end">
+    <div className="flex h-full flex-col">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="truncate text-sm font-semibold text-blueprint-dark">{threadTitle ?? "General"}</h3>
+        {isDeveloper && threadId === null && messages.length > 0 && (
           <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmClear(true)}>
             Clear chat
           </button>
-        </div>
-      )}
+        )}
+      </div>
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-blueprint/10 bg-white p-4">
-        {messages.length === 0 ? (
+        {loadingInitial ? (
+          <p className="text-center text-sm text-blueprint/50">Loading…</p>
+        ) : messages.length === 0 ? (
           <p className="text-center text-sm text-blueprint/50">
-            No messages yet — say something about this construction to get the thread going.
+            {threadId === null
+              ? "No messages yet — say something about this construction to get the thread going."
+              : "No messages yet in this thread."}
           </p>
         ) : (
           <>
@@ -221,7 +406,7 @@ export function ChatClient({
           className="input flex-1"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Message the team about this construction…"
+          placeholder={threadId === null ? "Message the team about this construction…" : `Message in "${threadTitle}"…`}
           maxLength={4000}
         />
         <button type="submit" className="btn-amber" disabled={sending || !draft.trim()}>
@@ -232,7 +417,7 @@ export function ChatClient({
       <ConfirmDialog
         open={confirmClear}
         title="Clear this chat?"
-        message="Every message in this construction's chat will be permanently removed for everyone. This cannot be undone."
+        message="Every message in this construction's General chat will be permanently removed for everyone. This cannot be undone."
         confirmLabel="Clear chat"
         danger
         busy={clearing}
@@ -240,5 +425,102 @@ export function ChatClient({
         onConfirm={handleClearChat}
       />
     </div>
+  );
+}
+
+function CreateThreadModal({
+  projectId,
+  members,
+  currentUserId,
+  onClose,
+  onCreated,
+}: {
+  projectId: string;
+  members: ThreadPickerMember[];
+  currentUserId: string;
+  onClose: () => void;
+  onCreated: (thread: ChatThread) => void;
+}) {
+  const { notify } = useToast();
+  const [title, setTitle] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  const pickable = members.filter((m) => m.userId !== currentUserId);
+
+  function toggle(userId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!title.trim()) return;
+    setSaving(true);
+    const res = await createChatThread(projectId, title.trim(), Array.from(selected));
+    setSaving(false);
+    if (!res.ok || !res.thread) {
+      notify("error", res.error ?? "Could not create this thread.");
+      return;
+    }
+    notify("success", "Thread created.");
+    onCreated(res.thread);
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="New chat thread"
+      footer={
+        <>
+          <button className="btn-outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button className="btn-primary" disabled={saving || !title.trim()} onClick={handleSave}>
+            {saving ? "Creating…" : "Create thread"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="label">Thread name</label>
+          <input
+            className="input"
+            placeholder='e.g. "Acme Electric — rough-in"'
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+            maxLength={100}
+          />
+          <p className="mt-1 text-xs text-blueprint/50">Name it something that&apos;ll make sense in the thread list later.</p>
+        </div>
+
+        <div>
+          <label className="label">Who&apos;s in this thread</label>
+          <p className="mb-2 text-xs text-blueprint/50">
+            You&apos;re included automatically. Pick anyone else — typically the owner and the subcontractor account you&apos;re
+            talking to.
+          </p>
+          {pickable.length === 0 ? (
+            <p className="text-sm text-blueprint/50">No one else is on this construction yet.</p>
+          ) : (
+            <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-blueprint/10 p-2">
+              {pickable.map((m) => (
+                <label key={m.userId} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-concrete">
+                  <input type="checkbox" checked={selected.has(m.userId)} onChange={() => toggle(m.userId)} />
+                  <span className="flex-1 truncate">{m.displayName || m.email || "Unknown"}</span>
+                  <span className="badge bg-blueprint/10 text-blueprint/60">{ROLE_LABELS[m.role as UserRole] ?? m.role}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -113,6 +113,38 @@ export async function notifyForAction(
   }
 }
 
+// A scoped chat thread's message — unlike notifyForAction's project-wide
+// subscriber/forced-role fan-out, this notifies exactly the thread's own
+// participant list (minus the sender). Using notifyForAction here would
+// defeat the point of scoping the thread in the first place: someone
+// with a project-wide "chat_message" alert subscription but no seat in
+// the thread would get emailed about a conversation they can't open.
+export async function notifyThreadParticipants(
+  projectId: string,
+  participantUserIds: string[],
+  options: { subject: string; body: string; excludeUserId?: string }
+): Promise<void> {
+  try {
+    const admin = createAdminClient();
+    const ids = participantUserIds.filter((id) => id !== options.excludeUserId);
+    if (ids.length === 0) return;
+
+    const [{ data: profiles, error: profilesError }, { data: project }] = await Promise.all([
+      admin.from("profiles").select("id, email").in("id", ids),
+      admin.from("projects").select("name").eq("id", projectId).maybeSingle(),
+    ]);
+    if (profilesError) {
+      console.warn("notifyThreadParticipants: could not read profiles:", profilesError.message);
+      return;
+    }
+
+    const recipients: AlertRecipient[] = (profiles ?? []).map((p) => ({ userId: p.id, email: p.email }));
+    await deliverAlert(admin, recipients, { title: project?.name ?? "your construction", path: `/projects/${projectId}/chat` }, options);
+  } catch (err) {
+    console.warn("notifyThreadParticipants failed (non-fatal):", err);
+  }
+}
+
 // Every profile with role='developer' — the sole audience for an
 // account-level alert like a new access request, which (unlike everything
 // notifyForAction handles) has no project to scope recipients by.
