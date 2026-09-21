@@ -2721,3 +2721,23 @@ yet; each one only adds what a given feature needed.
   (existing "invalidated" rows keep their disabled-checkbox behavior), the
   now-unused `setWarrantyStatus` server action was left in place rather
   than deleted outright.
+
+## Public marketing/landing page at "/"
+
+- **A signed-out visitor hitting "/" now sees an actual landing page**
+  (`app/page.tsx`) instead of getting bounced straight to the bare login
+  form — a hero, six feature highlights pulled from what's actually built
+  (Plans & Rooms, Budget/Bids/Payments, Warranty, Subcontractors &
+  Compliance, AI tools, Chat/Calendar), a "built for every role" section,
+  and a "Request access" CTA. A signed-in user hitting "/" is redirected
+  straight to `/projects`, same as before.
+- **Middleware now treats "/" as a public route** (`lib/supabase/middleware.ts`)
+  — previously every path except `/login`/`/auth`/static assets forced a
+  signed-out visitor to `/login`, so this page would never have rendered
+  for one without this change.
+- **"Request access" is a `mailto:` CTA to a placeholder address**
+  (`CONTACT_EMAIL` in `app/page.tsx`) — there's no self-serve signup path
+  today (any account still needs a Developer to approve it, or a project
+  invite), so the CTA has to reach a person rather than a form. Swap in a
+  real inbox before sending this page to anyone.
+- No migration — this is a new page plus one middleware condition.

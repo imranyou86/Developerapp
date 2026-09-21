@@ -68,8 +68,13 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute = path.startsWith("/login") || path.startsWith("/auth");
   const isPublicAsset = path.startsWith("/_next") || path.startsWith("/favicon");
   const isPendingApprovalRoute = path.startsWith("/pending-approval");
+  // The marketing/landing page (app/page.tsx) — the one route a signed-out
+  // visitor should actually see instead of getting bounced to /login. It
+  // redirects a signed-in user straight to /projects itself, so this only
+  // ever matters for someone with no session yet.
+  const isLandingRoute = path === "/";
 
-  if (!user && !isAuthRoute && !isPublicAsset) {
+  if (!user && !isAuthRoute && !isPublicAsset && !isLandingRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);
