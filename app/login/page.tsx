@@ -4,6 +4,8 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BrandMark } from "@/components/BrandMark";
+import { notifyAccessRequested } from "@/app/login/actions";
+import { ROLE_LABELS } from "@/lib/permissions";
 
 type Mode = "password" | "magic-link" | "sign-up";
 
@@ -59,6 +61,11 @@ function LoginForm() {
         setStatus({ kind: "error", message: error.message });
       } else {
         setStatus({ kind: "sent", message: "Check your email to confirm your account." });
+        // Fire-and-forget — a Developer gets a push/email the moment someone
+        // requests access, instead of only finding out next time they happen
+        // to check Admin. Best-effort (notifyAccessRequested never throws),
+        // so a slow/failed call here never affects what the signup form shows.
+        notifyAccessRequested(email, ROLE_LABELS[role]).catch(() => {});
       }
       return;
     }

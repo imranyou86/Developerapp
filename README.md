@@ -2741,3 +2741,39 @@ yet; each one only adds what a given feature needed.
   invite), so the CTA has to reach a person rather than a form. Swap in a
   real inbox before sending this page to anyone.
 - No migration — this is a new page plus one middleware condition.
+
+## Alert every Developer on a new access request (push and/or email)
+
+- **A Developer now gets a push notification (or email, if push isn't set
+  up on their device) the moment someone self-signs-up** through `/login`'s
+  "Create an account" form — instead of only finding out next time they
+  happen to check Admin's "Access requests" section. Only a genuine
+  self-signup triggers this: an account created via a project invite or
+  Admin's "Create account" form is pre-approved and never touches this path
+  (see `handle_new_user()` in `supabase/schema.sql`).
+- **New `notifyDevelopersOfAccessRequest(email, roleLabel)`** in
+  `lib/alerts.ts` — looks up every `profiles` row with `role = 'developer'`
+  and reuses the existing push-then-email dispatch (`deliverAlert`, the
+  same one project notifications already go through). Confirms the email
+  actually has a `status = 'pending'` profile row before alerting, as a
+  basic sanity check against a stale/garbage call — not a security
+  boundary, since this is a best-effort convenience alert like every other
+  one in this file.
+- **`deliverAlert` is now generic** — it used to take a project's
+  name/id specifically; now it takes `{ title, path }`, so both the
+  existing per-project notifications and this new account-level one share
+  the same push/email dispatch code instead of duplicating it.
+- **New `app/login/actions.ts`** — a tiny server action
+  (`notifyAccessRequested`) the sign-up form calls right after a successful
+  `supabase.auth.signUp()`, fire-and-forget so it never delays or affects
+  the "Check your email to confirm your account" message.
+- **To actually receive push notifications**, a Developer needs to turn
+  them on once from the "Constructions" page (the existing
+  `PushNotificationToggle` — account-wide, not project-specific) and have
+  `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` configured on the
+  server; otherwise (or on a device where push isn't enabled) they get the
+  email fallback, which needs `RESEND_API_KEY` configured. Both were
+  already required for the existing alerts feature — nothing new to set up
+  beyond what push/email alerts already needed.
+- No migration — reuses the existing `profiles`, `push_subscriptions`, and
+  alert-dispatch infrastructure as-is.

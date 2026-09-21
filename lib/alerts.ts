@@ -107,22 +107,69 @@ export async function notifyForAction(
     }
 
     const recipients = Array.from(recipientsByUser.values());
-    await deliverAlert(admin, recipients, project?.name ?? "your construction", projectId, options);
+    await deliverAlert(admin, recipients, { title: project?.name ?? "your construction", path: `/projects/${projectId}` }, options);
   } catch (err) {
     console.warn(`notifyForAction(${action}) failed (non-fatal):`, err);
   }
 }
 
-// Shared by notifyForAction: emails everyone, EXCEPT a recipient who has
-// at least one enabled push subscription gets pushed instead — "when push
-// notifications are enabled, disable emails" for that person. A recipient
-// with no push subscription (or when push isn't configured at all) still
-// gets the email exactly as before.
+// Every profile with role='developer' — the sole audience for an
+// account-level alert like a new access request, which (unlike everything
+// notifyForAction handles) has no project to scope recipients by.
+export async function notifyDevelopersOfAccessRequest(email: string, roleLabel: string): Promise<void> {
+  try {
+    const admin = createAdminClient();
+    // Only alert for a request that's actually sitting in the approval
+    // queue right now — protects against this being called with a stale or
+    // already-resolved email (or called speculatively before the
+    // handle_new_user() trigger's insert has landed), not against a
+    // determined caller replaying the same email repeatedly; this is a
+    // best-effort convenience alert, not a security boundary.
+    const { data: profile, error: profileError } = await admin
+      .from("profiles")
+      .select("email, status")
+      .eq("email", email.toLowerCase())
+      .maybeSingle();
+    if (profileError) {
+      console.warn("notifyDevelopersOfAccessRequest: could not read profile:", profileError.message);
+      return;
+    }
+    if (profile?.status !== "pending") return;
+
+    const { data: developers, error: devError } = await admin.from("profiles").select("id, email").eq("role", "developer");
+    if (devError) {
+      console.warn("notifyDevelopersOfAccessRequest: could not read developers:", devError.message);
+      return;
+    }
+    if (!developers || developers.length === 0) return;
+
+    const recipients: AlertRecipient[] = developers.map((d) => ({ userId: d.id, email: d.email }));
+    await deliverAlert(
+      admin,
+      recipients,
+      { title: "Alaia Homes Dev", path: "/admin" },
+      {
+        subject: "New access request",
+        body: `${email} just signed up requesting access as ${roleLabel}. Approve or decline it from Admin → Access requests.`,
+      }
+    );
+  } catch (err) {
+    console.warn("notifyDevelopersOfAccessRequest failed (non-fatal):", err);
+  }
+}
+
+// Shared by notifyForAction and notifyDevelopersOfAccessRequest: emails
+// everyone, EXCEPT a recipient who has at least one enabled push
+// subscription gets pushed instead — "when push notifications are enabled,
+// disable emails" for that person. A recipient with no push subscription
+// (or when push isn't configured at all) still gets the email exactly as
+// before. `context.path` is a relative path (e.g. "/projects/<id>" or
+// "/admin") the push notification opens when clicked — resolved against
+// the current request's origin, same as the unsubscribe link below.
 async function deliverAlert(
   admin: AdminClient,
   recipients: AlertRecipient[],
-  projectName: string,
-  projectId: string,
+  context: { title: string; path?: string },
   options: { subject: string; body: string }
 ): Promise<void> {
   if (recipients.length === 0) return;
@@ -171,7 +218,7 @@ async function deliverAlert(
         : "";
       return sendEmail({
         to: r.email,
-        subject: `${projectName}: ${options.subject}`,
+        subject: `${context.title}: ${options.subject}`,
         text: `${options.body}\n\n— Alaia Homes Dev.${unsubscribeLine}`,
       }).catch((err) => console.warn(`deliverAlert: failed to email ${r.email}:`, err));
     })
@@ -184,9 +231,9 @@ async function deliverAlert(
     pushRecipients.flatMap((r) =>
       (pushByUser.get(r.userId) ?? []).map(async (sub) => {
         const result = await sendPush(sub, {
-          title: projectName,
+          title: context.title,
           body: options.body.slice(0, 180),
-          url: origin ? `${origin}/projects/${projectId}` : undefined,
+          url: origin && context.path ? `${origin}${context.path}` : undefined,
         });
         if (!result.ok) {
           if (result.gone) goneIds.push(sub.id);
