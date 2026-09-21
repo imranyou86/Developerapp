@@ -322,6 +322,7 @@ function AddTradeBidModal({
   onSaved: (review: TradeBidReview) => void;
 }) {
   const { notify } = useToast();
+  const { run, isRunning } = useBackgroundTasks();
   const [trade, setTrade] = useState("");
   const [subcontractorId, setSubcontractorId] = useState("");
   const [subcontractorName, setSubcontractorName] = useState("");
@@ -329,6 +330,9 @@ function AddTradeBidModal({
   const [scopeNotes, setScopeNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [extractStatus, setExtractStatus] = useState("");
+  const extractTaskKey = `trade-bid-extract:${projectId}:${subcontractorName || "new"}`;
+  const extracting = isRunning(extractTaskKey);
 
   function handlePickSubcontractor(id: string) {
     setSubcontractorId(id);
@@ -336,6 +340,95 @@ function AddTradeBidModal({
     if (sub) {
       setSubcontractorName(sub.company_name);
       if (!trade && sub.trade) setTrade(sub.trade);
+    }
+  }
+
+  async function handleFile(selected: File) {
+    setFile(selected);
+    if (selected.type !== "application/pdf") return;
+
+    try {
+      await run(extractTaskKey, `Reading "${selected.name}"…`, async () => {
+        setExtractStatus("Reading PDF…");
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+        const arrayBuffer = await selected.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+
+        // Extract the full text of every page first — most bids are
+        // text-based PDFs and this is by far the cheapest path.
+        let fullText = "";
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((it) => ("str" in it ? it.str : "")).join(" ");
+          fullText += `\n\n--- Page ${pageNum} ---\n${pageText}`;
+        }
+
+        let requestBody: { text?: string; pageImageUrls?: string[] };
+
+        if (fullText.trim().length > 200) {
+          requestBody = { text: fullText };
+        } else {
+          // Likely a scanned/image-only document — render pages to images
+          // and read those instead.
+          setExtractStatus("Document looks scanned — rendering pages for image-based reading…");
+          const supabase = createClient();
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (!user) throw new Error("Not signed in.");
+
+          const pageImageUrls: string[] = [];
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("Canvas rendering is not supported in this browser.");
+            await page.render({ canvasContext: context, viewport }).promise;
+            const blob: Blob = await new Promise((resolve, reject) =>
+              canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode page image."))), "image/png")
+            );
+            const imgPath = `${user.id}/${projectId}/${Date.now()}-p${pageNum}-${selected.name}.png`;
+            const { error: imgUploadError } = await supabase.storage.from("bid-files").upload(imgPath, blob, {
+              contentType: "image/png",
+            });
+            if (imgUploadError) throw new Error(imgUploadError.message);
+            const { data: imgPub, error: imgPubSignError } = await supabase.storage
+              .from("bid-files")
+              .createSignedUrl(imgPath, SIGNED_URL_TTL_SECONDS);
+            if (imgPubSignError || !imgPub) throw new Error(imgPubSignError?.message ?? "Could not get a URL for the uploaded file.");
+            pageImageUrls.push(imgPub.signedUrl);
+          }
+          requestBody = { pageImageUrls };
+        }
+
+        setExtractStatus("Reading trade, subcontractor, amount & scope…");
+        const res = await fetchWithRetry("/api/claude/extract-trade-bid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Extraction failed.");
+
+        if (json.trade) setTrade(json.trade);
+        if (json.subcontractor_name) {
+          setSubcontractorId("");
+          setSubcontractorName(json.subcontractor_name);
+        }
+        if (json.bid_amount) setBidAmount(String(json.bid_amount));
+        if (json.scope_notes) setScopeNotes(json.scope_notes);
+        notify("success", "Filled in from the PDF — check it over before saving.");
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not read this PDF — you can still fill the fields in by hand.");
+    } finally {
+      setExtractStatus("");
     }
   }
 
@@ -416,7 +509,7 @@ function AddTradeBidModal({
           </button>
           <button
             className="btn-primary"
-            disabled={saving || !trade.trim() || !subcontractorName.trim() || !bidAmount}
+            disabled={saving || extracting || !trade.trim() || !subcontractorName.trim() || !bidAmount}
             onClick={handleSave}
           >
             {saving ? "Saving…" : "Save"}
@@ -493,8 +586,17 @@ function AddTradeBidModal({
             type="file"
             accept="application/pdf,image/*,.doc,.docx"
             className="input"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            disabled={extracting}
+            onChange={(e) => {
+              const selected = e.target.files?.[0];
+              if (selected) handleFile(selected);
+            }}
           />
+          <p className="mt-1 text-xs text-blueprint/50">
+            {extracting
+              ? extractStatus || "Reading…"
+              : "A PDF is read automatically to fill in the fields above — check them over before saving."}
+          </p>
         </div>
       </div>
     </Modal>

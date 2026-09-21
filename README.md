@@ -2786,13 +2786,18 @@ yet; each one only adds what a given feature needed.
   whole-contract/GC bids (which track a payment draw schedule through to
   Payments once accepted). A trade bid review never touches Payments — it's
   purely a "should I sign this" check.
-- **Entry is manual, not extracted from a PDF** — trade, subcontractor name
-  (optionally linked to an existing entry in your Subcontractors directory,
-  which auto-fills the name and trade), bid amount, a scope-notes textarea
-  ("what does this bid say is included"), and an optional file attachment
-  for reference. A trade sub's bid rarely arrives as a clean payment
-  schedule the way extract-bid's GC-bid extraction expects, so this skips
-  that pipeline in favor of just describing the scope directly.
+- **Entry is manual, with an optional PDF read to auto-fill it** — trade,
+  subcontractor name (optionally linked to an existing entry in your
+  Subcontractors directory, which auto-fills the name and trade), bid
+  amount, a scope-notes textarea ("what does this bid say is included"),
+  and a file attachment. Attaching a PDF reads it client-side (pdf.js text
+  extraction, same scanned-document image fallback as the Bids tab) and
+  calls a new route (`app/api/claude/extract-trade-bid`) that fills in
+  trade, subcontractor name, bid amount, and a scope summary for you to
+  review before saving — nothing is written until you hit Save. Unlike
+  extract-bid's GC-bid extraction (which expects a clean payment/draw
+  schedule), this reads whatever scope language the trade bid actually
+  contains and summarizes it in plain terms.
 - **"Evaluate" does three things**, via a new web-search-grounded route
   (`app/api/claude/evaluate-trade-bid`): a price verdict (good/fair/high)
   with a typical market range for that trade in the project's region, same
