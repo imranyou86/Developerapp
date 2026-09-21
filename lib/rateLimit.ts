@@ -18,6 +18,7 @@ export const RATE_LIMITS: Record<string, { limit: number; windowSeconds: number 
   "estimate-construction-cost": { limit: 15, windowSeconds: 3600 },
   "evaluate-deal": { limit: 15, windowSeconds: 3600 },
   "evaluate-bid": { limit: 20, windowSeconds: 3600 },
+  "evaluate-trade-bid": { limit: 20, windowSeconds: 3600 },
   "extract-bid": { limit: 20, windowSeconds: 3600 },
   "extract-inspection-report": { limit: 20, windowSeconds: 3600 },
   "find-product": { limit: 30, windowSeconds: 3600 },

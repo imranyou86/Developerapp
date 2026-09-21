@@ -16,6 +16,7 @@ import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 const CATEGORY_LABEL: Record<FileCategory, string> = {
   plan: "Plan",
   bid: "Bid",
+  trade_bid: "Trade bid",
   checklist_photo: "Checklist photo",
   rendering: "Rendering",
   finish_scan: "Finish scan",
@@ -28,6 +29,7 @@ const CATEGORY_LABEL: Record<FileCategory, string> = {
 const CATEGORY_STYLE: Record<FileCategory, string> = {
   plan: "badge-sage",
   bid: "badge-amber",
+  trade_bid: "badge-amber",
   checklist_photo: "badge bg-blueprint/10 text-blueprint/60",
   rendering: "badge bg-blueprint text-white",
   finish_scan: "badge bg-blueprint/10 text-blueprint/60",

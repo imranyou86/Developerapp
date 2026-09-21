@@ -459,7 +459,7 @@ create table if not exists project_files (
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
+  category text not null check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
   source_table text,
   source_id uuid,
   notes text,
@@ -699,6 +699,43 @@ create table if not exists project_subcontractors (
 alter table warranty_item_requests
   add column if not exists subcontractor_id uuid references subcontractors (id) on delete set null;
 
+-- Construction Cost's "Trade Bid Review" section — separate from the Bids
+-- tab's whole-contract/GC bids (which track a payment draw schedule through
+-- to Payments once accepted). This is a lighter-weight record: one
+-- subcontractor's bid for one trade, evaluated for price fairness, scope
+-- completeness, and good clarifying questions to ask before signing — never
+-- flows into Payments itself. Placed here (not with `bids` above) since it
+-- references `subcontractors`, defined just above this point.
+create table if not exists trade_bid_reviews (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  trade text not null,
+  subcontractor_name text not null,
+  subcontractor_id uuid references subcontractors (id) on delete set null,
+  bid_amount numeric not null default 0,
+  -- What the sub says is included — pasted in or typed by whoever's
+  -- reviewing it, since a subcontractor bid's scope rarely comes as a
+  -- clean payment schedule the way extract-bid's GC bids do.
+  scope_notes text,
+  file_name text,
+  file_url text,
+  -- Cached result of "Evaluate" (web-search-grounded price/scope check) —
+  -- same "plain columns, latest evaluation wins, re-evaluating overwrites"
+  -- pattern as bids.evaluation_*.
+  evaluation_verdict text check (evaluation_verdict in ('good_price', 'fair_price', 'high_price')),
+  evaluation_confidence text check (evaluation_confidence in ('high', 'medium', 'low')),
+  evaluation_market_low numeric,
+  evaluation_market_high numeric,
+  evaluation_analysis text,
+  evaluation_questions jsonb not null default '[]'::jsonb,
+  evaluation_scope_complete boolean,
+  evaluation_missing_items jsonb not null default '[]'::jsonb,
+  evaluation_completeness_note text,
+  evaluated_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 -- One row per project, kept current rather than kept as history — the
 -- "Update information" button overwrites this row with a fresh lookup
 -- (see app/api/claude/lookup-certificate-of-occupancy) rather than
@@ -777,6 +814,7 @@ create index if not exists idx_warranty_item_requests_project on warranty_item_r
 create index if not exists idx_warranty_item_requests_group on warranty_item_requests (group_id);
 create index if not exists idx_bids_project on bids (project_id);
 create index if not exists idx_payment_schedule_items_bid on payment_schedule_items (bid_id);
+create index if not exists idx_trade_bid_reviews_project on trade_bid_reviews (project_id, created_at desc);
 create index if not exists idx_project_shares_project on project_shares (project_id);
 create index if not exists idx_project_shares_token on project_shares (token);
 create index if not exists idx_deals_user on deals (user_id, created_at desc);
@@ -911,6 +949,7 @@ alter table warranty_item_requests enable row level security;
 alter table warranty_item_request_comments enable row level security;
 alter table bids enable row level security;
 alter table payment_schedule_items enable row level security;
+alter table trade_bid_reviews enable row level security;
 alter table project_shares enable row level security;
 alter table deals enable row level security;
 alter table deal_analyses enable row level security;
@@ -1214,6 +1253,10 @@ create policy "bids_member" on bids
 create policy "payment_schedule_items_member" on payment_schedule_items
   for all using (exists (select 1 from bids b where b.id = payment_schedule_items.bid_id and has_project_access(b.project_id)))
   with check (exists (select 1 from bids b where b.id = payment_schedule_items.bid_id and has_project_access(b.project_id)));
+
+create policy "trade_bid_reviews_member" on trade_bid_reviews
+  for all using (has_project_access(trade_bid_reviews.project_id))
+  with check (has_project_access(trade_bid_reviews.project_id));
 
 create policy "bank_transactions_member" on bank_transactions
   for all using (has_project_access(bank_transactions.project_id))

@@ -5,7 +5,10 @@ import { BrandMark } from "@/components/BrandMark";
 import { CostSections } from "@/app/construction-cost/cost-sections";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
-import type { CostEstimate, PlanPage } from "@/lib/types";
+import type { CostEstimate, PlanPage, TradeBidReview } from "@/lib/types";
+
+const TRADE_BID_COLUMNS =
+  "id, project_id, trade, subcontractor_name, subcontractor_id, bid_amount, scope_notes, file_name, file_url, evaluation_verdict, evaluation_confidence, evaluation_market_low, evaluation_market_high, evaluation_analysis, evaluation_questions, evaluation_scope_complete, evaluation_missing_items, evaluation_completeness_note, evaluated_at, created_at";
 
 export const dynamic = "force-dynamic";
 
@@ -34,14 +37,23 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
   let roomsSqftHint: number | null = null;
   let estimates: CostEstimate[] = [];
   let loadError: string | null = null;
+  let tradeBidReviews: TradeBidReview[] = [];
+  let subcontractors: { id: string; company_name: string; trade: string | null }[] = [];
 
   if (selectedId) {
-    const [{ data: project }, { data: pages }, { data: rooms }, { data: estimateRows, error }] = await Promise.all([
-      supabase.from("projects").select("address").eq("id", selectedId).single(),
-      supabase.from("plan_pages").select(PLAN_PAGE_COLUMNS).eq("project_id", selectedId).eq("is_layout", true).order("sort_order"),
-      supabase.from("rooms").select("width, depth").eq("project_id", selectedId),
-      supabase.from("cost_estimates").select("*").eq("project_id", selectedId).order("created_at", { ascending: false }),
-    ]);
+    const [{ data: project }, { data: pages }, { data: rooms }, { data: estimateRows, error }, { data: tradeBidRows }, { data: subRows }] =
+      await Promise.all([
+        supabase.from("projects").select("address").eq("id", selectedId).single(),
+        supabase.from("plan_pages").select(PLAN_PAGE_COLUMNS).eq("project_id", selectedId).eq("is_layout", true).order("sort_order"),
+        supabase.from("rooms").select("width, depth").eq("project_id", selectedId),
+        supabase.from("cost_estimates").select("*").eq("project_id", selectedId).order("created_at", { ascending: false }),
+        supabase.from("trade_bid_reviews").select(TRADE_BID_COLUMNS).eq("project_id", selectedId).order("created_at", { ascending: false }),
+        // Shared directory, not scoped to this project's own linked subs —
+        // same reasoning as the warranty request's subcontractor picker:
+        // any sub in the directory can be picked, whether or not they've
+        // been formally linked to this construction yet.
+        supabase.from("subcontractors").select("id, company_name, trade").order("company_name"),
+      ]);
 
     projectAddress = project?.address ?? null;
     planPages = (await signRowsUrl((pages ?? []) as PlanPage[], "storage_url")) as PlanPage[];
@@ -49,6 +61,8 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
     roomsSqftHint = sqft > 0 ? sqft : null;
     estimates = (estimateRows ?? []) as CostEstimate[];
     loadError = error?.message ?? null;
+    tradeBidReviews = (tradeBidRows ?? []) as unknown as TradeBidReview[];
+    subcontractors = subRows ?? [];
   }
 
   // Standalone mode — a plan not tied to any tracked construction. Scoped
@@ -106,6 +120,8 @@ export default async function ConstructionCostPage({ searchParams }: { searchPar
           loadError={loadError}
           standalonePages={standalonePages}
           standaloneEstimates={standaloneEstimates}
+          tradeBidReviews={tradeBidReviews}
+          subcontractors={subcontractors}
         />
       </main>
     </div>

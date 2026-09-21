@@ -157,6 +157,33 @@ export interface PaymentScheduleItem {
   paid: boolean;
 }
 
+export type TradeBidVerdict = "good_price" | "fair_price" | "high_price";
+export type TradeBidConfidence = "high" | "medium" | "low";
+
+// Construction Cost's "Trade Bid Review" section — see supabase/migrations/059.
+export interface TradeBidReview {
+  id: string;
+  project_id: string;
+  trade: string;
+  subcontractor_name: string;
+  subcontractor_id: string | null;
+  bid_amount: number;
+  scope_notes: string | null;
+  file_name: string | null;
+  file_url: string | null;
+  evaluation_verdict: TradeBidVerdict | null;
+  evaluation_confidence: TradeBidConfidence | null;
+  evaluation_market_low: number | null;
+  evaluation_market_high: number | null;
+  evaluation_analysis: string | null;
+  evaluation_questions: string[];
+  evaluation_scope_complete: boolean | null;
+  evaluation_missing_items: string[];
+  evaluation_completeness_note: string | null;
+  evaluated_at: string | null;
+  created_at: string;
+}
+
 export interface BankTransaction {
   id: string;
   project_id: string;
@@ -182,6 +209,7 @@ export interface ProjectShare {
 export type FileCategory =
   | "plan"
   | "bid"
+  | "trade_bid"
   | "checklist_photo"
   | "rendering"
   | "finish_scan"

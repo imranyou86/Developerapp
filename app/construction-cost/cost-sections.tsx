@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { CostClient } from "@/app/construction-cost/cost-client";
-import type { CostEstimate, PlanPage } from "@/lib/types";
+import { TradeBidClient } from "@/app/construction-cost/trade-bid-client";
+import type { CostEstimate, PlanPage, TradeBidReview } from "@/lib/types";
 
 interface ProjectOption {
   id: string;
@@ -11,9 +12,16 @@ interface ProjectOption {
   address: string | null;
 }
 
+interface SubcontractorOption {
+  id: string;
+  company_name: string;
+  trade: string | null;
+}
+
 const TABS = [
   { id: "construction", label: "By Construction" },
   { id: "standalone", label: "Standalone Plan" },
+  { id: "trade-bids", label: "Trade Bid Review" },
 ] as const;
 
 // "By Construction" needs a project picked (its plan pages live on that
@@ -31,6 +39,8 @@ export function CostSections({
   loadError,
   standalonePages,
   standaloneEstimates,
+  tradeBidReviews,
+  subcontractors,
 }: {
   projectList: ProjectOption[];
   selectedId: string | null;
@@ -41,6 +51,8 @@ export function CostSections({
   loadError: string | null;
   standalonePages: PlanPage[];
   standaloneEstimates: CostEstimate[];
+  tradeBidReviews: TradeBidReview[];
+  subcontractors: SubcontractorOption[];
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("construction");
 
@@ -67,7 +79,7 @@ export function CostSections({
         </div>
       </div>
 
-      {tab === "construction" ? (
+      {tab === "construction" && (
         <>
           {projectList.length === 0 ? (
             <p className="text-sm text-blueprint/50">
@@ -97,7 +109,9 @@ export function CostSections({
             </>
           )}
         </>
-      ) : (
+      )}
+
+      {tab === "standalone" && (
         <>
           <p className="mb-3 text-sm text-blueprint/50">
             For a plan that isn&apos;t tied to any of your constructions. Private to you — upload the plan, add an
@@ -111,6 +125,27 @@ export function CostSections({
             roomsSqftHint={null}
             initialEstimates={standaloneEstimates}
           />
+        </>
+      )}
+
+      {tab === "trade-bids" && (
+        <>
+          {projectList.length === 0 ? (
+            <p className="text-sm text-blueprint/50">No constructions yet — create one under Constructions first.</p>
+          ) : (
+            <div className="mb-6">
+              <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/construction-cost" />
+            </div>
+          )}
+          {selectedId && (
+            <TradeBidClient
+              key={selectedId}
+              projectId={selectedId}
+              projectAddress={projectAddress}
+              initialReviews={tradeBidReviews}
+              subcontractors={subcontractors}
+            />
+          )}
         </>
       )}
     </div>

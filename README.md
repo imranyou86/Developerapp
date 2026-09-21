@@ -2777,3 +2777,41 @@ yet; each one only adds what a given feature needed.
   beyond what push/email alerts already needed.
 - No migration — reuses the existing `profiles`, `push_subscriptions`, and
   alert-dispatch infrastructure as-is.
+
+## Construction Cost: "Trade Bid Review" for subcontractor trade bids
+
+- **A third tab on Construction Cost, alongside "By Construction" and
+  "Standalone Plan"** — log one subcontractor's bid for one specific trade
+  (electrical, plumbing, framing, etc.), separate from the Bids tab's
+  whole-contract/GC bids (which track a payment draw schedule through to
+  Payments once accepted). A trade bid review never touches Payments — it's
+  purely a "should I sign this" check.
+- **Entry is manual, not extracted from a PDF** — trade, subcontractor name
+  (optionally linked to an existing entry in your Subcontractors directory,
+  which auto-fills the name and trade), bid amount, a scope-notes textarea
+  ("what does this bid say is included"), and an optional file attachment
+  for reference. A trade sub's bid rarely arrives as a clean payment
+  schedule the way extract-bid's GC-bid extraction expects, so this skips
+  that pipeline in favor of just describing the scope directly.
+- **"Evaluate" does three things**, via a new web-search-grounded route
+  (`app/api/claude/evaluate-trade-bid`): a price verdict (good/fair/high)
+  with a typical market range for that trade in the project's region, same
+  shape as the existing Bids-tab evaluation; a scope-completeness check
+  (does the stated scope look complete for a normal bid in this trade, or
+  does it look like it's missing standard items — permits, cleanup,
+  fixture install, etc.); and 4-6 specific questions to ask the
+  subcontractor before signing, grounded in this bid's actual trade, price,
+  and stated scope rather than generic boilerplate.
+- **New table `trade_bid_reviews`** (migration 059) — same "plain columns,
+  latest evaluation wins" caching pattern as `bids.evaluation_*`, plus
+  `evaluation_questions`/`evaluation_missing_items` (jsonb arrays) and
+  `evaluation_scope_complete`/`evaluation_completeness_note`. RLS mirrors
+  `bids_member` (`has_project_access`). Reuses the existing `bid-files`
+  storage bucket — no new bucket needed. `project_files.category` gained a
+  new `'trade_bid'` value (constraint dropped/recreated, same pattern
+  migration 025 used for adding `'landscape_design'`).
+- **Not live-tested** — this sandbox has no network access to the real
+  Supabase-backed deployment, so this was verified via `tsc`/`lint`/`build`
+  and careful reading only. Worth a real run once deployed: add a trade bid
+  with a deliberately thin scope description and confirm the completeness
+  check and questions actually read as useful, not generic.
