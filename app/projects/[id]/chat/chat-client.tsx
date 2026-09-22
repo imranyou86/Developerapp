@@ -6,7 +6,13 @@ import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { sendMessage, deleteMessage, clearChat, loadMessages, markChatRead } from "@/app/projects/[id]/chat/actions";
-import { createChatThread, deleteChatThread, type ThreadPickerMember } from "@/app/projects/[id]/chat/thread-actions";
+import {
+  createChatThread,
+  deleteChatThread,
+  addThreadParticipants,
+  listThreadParticipantIds,
+  type ThreadPickerMember,
+} from "@/app/projects/[id]/chat/thread-actions";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { ChatThread, ProjectMessage, UserRole } from "@/lib/types";
 
@@ -41,10 +47,12 @@ export function ChatClient({
   const [threads, setThreads] = useState<ChatThread[]>(initialThreads);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [addPeopleOpen, setAddPeopleOpen] = useState(false);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
 
   const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
+  const canManageActiveThread = !!activeThread && (activeThread.created_by === currentUserId || isDeveloper);
 
   // The general (thread_id null) chat's realtime channel also picks up new
   // threads (see chat_threads' own INSERT in the publication) so every
@@ -145,8 +153,21 @@ export function ChatClient({
           initialMessages={activeThreadId === null ? initialMessages : null}
           initialHasMore={activeThreadId === null ? initialHasMore : null}
           threadTitle={activeThread?.title ?? null}
+          canAddPeople={canManageActiveThread}
+          onOpenAddPeople={() => setAddPeopleOpen(true)}
         />
       </div>
+
+      {addPeopleOpen && activeThread && (
+        <AddPeopleModal
+          projectId={projectId}
+          thread={activeThread}
+          members={pickerMembers}
+          currentUserId={currentUserId}
+          onClose={() => setAddPeopleOpen(false)}
+          onAdded={() => setAddPeopleOpen(false)}
+        />
+      )}
 
       {createOpen && (
         <CreateThreadModal
@@ -189,6 +210,8 @@ function ThreadMessages({
   initialMessages,
   initialHasMore,
   threadTitle,
+  canAddPeople,
+  onOpenAddPeople,
 }: {
   projectId: string;
   threadId: string | null;
@@ -197,6 +220,8 @@ function ThreadMessages({
   initialMessages: ProjectMessage[] | null;
   initialHasMore: boolean | null;
   threadTitle: string | null;
+  canAddPeople: boolean;
+  onOpenAddPeople: () => void;
 }) {
   const { notify } = useToast();
   const [messages, setMessages] = useState<ProjectMessage[]>(initialMessages ?? []);
@@ -355,13 +380,20 @@ function ThreadMessages({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <h3 className="truncate text-sm font-semibold text-blueprint-dark">{threadTitle ?? "General"}</h3>
-        {isDeveloper && threadId === null && messages.length > 0 && (
-          <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmClear(true)}>
-            Clear chat
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-3">
+          {threadId !== null && canAddPeople && (
+            <button className="text-xs text-amber-dark hover:underline" onClick={onOpenAddPeople}>
+              + Add people
+            </button>
+          )}
+          {isDeveloper && threadId === null && messages.length > 0 && (
+            <button className="text-xs text-red-500 hover:underline" onClick={() => setConfirmClear(true)}>
+              Clear chat
+            </button>
+          )}
+        </div>
       </div>
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto rounded-lg border border-blueprint/10 bg-white p-4">
         {loadingInitial ? (
@@ -529,6 +561,95 @@ function CreateThreadModal({
           )}
         </div>
       </div>
+    </Modal>
+  );
+}
+
+function AddPeopleModal({
+  projectId,
+  thread,
+  members,
+  currentUserId,
+  onClose,
+  onAdded,
+}: {
+  projectId: string;
+  thread: ChatThread;
+  members: ThreadPickerMember[];
+  currentUserId: string;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const { notify } = useToast();
+  const [existingIds, setExistingIds] = useState<Set<string> | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listThreadParticipantIds(thread.id).then((ids) => {
+      if (!cancelled) setExistingIds(new Set(ids));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.id]);
+
+  const pickable = members.filter((m) => m.userId !== currentUserId && !existingIds?.has(m.userId));
+
+  function toggle(userId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (selected.size === 0) return;
+    setSaving(true);
+    const res = await addThreadParticipants(thread.id, projectId, Array.from(selected));
+    setSaving(false);
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not add people to this thread.");
+      return;
+    }
+    notify("success", selected.size === 1 ? "Added 1 person." : `Added ${selected.size} people.`);
+    onAdded();
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Add people to "${thread.title}"`}
+      footer={
+        <>
+          <button className="btn-outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button className="btn-primary" disabled={saving || selected.size === 0} onClick={handleSave}>
+            {saving ? "Adding…" : "Add"}
+          </button>
+        </>
+      }
+    >
+      {existingIds === null ? (
+        <p className="text-sm text-blueprint/50">Loading…</p>
+      ) : pickable.length === 0 ? (
+        <p className="text-sm text-blueprint/50">Everyone else on this construction is already in this thread.</p>
+      ) : (
+        <div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-blueprint/10 p-2">
+          {pickable.map((m) => (
+            <label key={m.userId} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-concrete">
+              <input type="checkbox" checked={selected.has(m.userId)} onChange={() => toggle(m.userId)} />
+              <span className="flex-1 truncate">{m.displayName || m.email || "Unknown"}</span>
+              <span className="badge bg-blueprint/10 text-blueprint/60">{ROLE_LABELS[m.role as UserRole] ?? m.role}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </Modal>
   );
 }

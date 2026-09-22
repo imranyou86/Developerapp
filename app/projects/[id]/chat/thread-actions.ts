@@ -135,6 +135,53 @@ export async function createChatThread(
   return { ok: true, id: thread.id, thread: thread as ChatThread };
 }
 
+// Who's already in a thread — read via the caller's own session, not the
+// admin client, since chat_thread_participants_select's RLS (any current
+// participant, or a Developer) already lets the "Add people" modal's
+// opener see this without needing a broader bypass.
+export async function listThreadParticipantIds(threadId: string): Promise<string[]> {
+  const supabase = createClient();
+  const { data } = await supabase.from("chat_thread_participants").select("user_id").eq("thread_id", threadId);
+  return (data ?? []).map((r) => r.user_id);
+}
+
+// Adding participants to an already-created thread — chat_thread_participants_manage's
+// RLS (thread creator or Developer) is the actual enforcement here; this
+// just turns a raw RLS rejection into a clearer message.
+export async function addThreadParticipants(threadId: string, projectId: string, userIds: string[]): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const ids = Array.from(new Set(userIds)).filter(Boolean);
+  if (ids.length === 0) return { ok: false, error: "Pick at least one person to add." };
+
+  const { error } = await supabase
+    .from("chat_thread_participants")
+    .upsert(
+      ids.map((userId) => ({ thread_id: threadId, user_id: userId })),
+      { onConflict: "thread_id,user_id", ignoreDuplicates: true }
+    );
+  if (error) {
+    const friendly = /row-level security/i.test(error.message) ? "Only this thread's creator or a Developer can add people to it." : error.message;
+    return { ok: false, error: friendly };
+  }
+
+  await logActivity(supabase, {
+    projectId,
+    userId: user.id,
+    action: "chat_thread.participants_added",
+    entityType: "chat_threads",
+    entityId: threadId,
+    detail: `Added ${ids.length} ${ids.length === 1 ? "person" : "people"} to a chat thread`,
+  });
+
+  revalidate(projectId);
+  return { ok: true };
+}
+
 export async function deleteChatThread(threadId: string, projectId: string, title?: string): Promise<ActionResult> {
   const supabase = createClient();
   const {

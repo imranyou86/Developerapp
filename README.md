@@ -2873,3 +2873,16 @@ yet; each one only adds what a given feature needed.
   confirm a Developer previewing as that subcontractor can see and post
   in it, and confirm an account NOT added to the thread can't see it even
   though they can see General.
+- **Narrow-screen layout**: the thread list is a horizontal scrollable
+  strip along the top below the `md` breakpoint (it used to be a
+  fixed-width sidebar that ate most of a phone screen's width), and the
+  original vertical sidebar from `md` up.
+- **Adding people to an already-created thread**: an "+ Add people" link
+  next to the thread's title (visible to its creator or a Developer —
+  same as who can delete it) opens a picker of every project member not
+  already in the thread. New server actions
+  `listThreadParticipantIds`/`addThreadParticipants` in `thread-actions.ts`
+  back it; `addThreadParticipants` upserts into `chat_thread_participants`
+  with `ignoreDuplicates`, relying on that table's existing
+  `chat_thread_participants_manage` RLS (creator or Developer) as the real
+  enforcement, with a friendlier error message on a rejection.
