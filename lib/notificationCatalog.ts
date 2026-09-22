@@ -100,4 +100,10 @@ export const NOTIFICATION_ACTIONS: NotificationActionDef[] = [
     description: "A subcontractor's visit date/time window is set or changed for a warranty request — always reaches whoever filed it.",
     defaultRoles: [],
   },
+  {
+    key: "rough_in_captured",
+    label: "Rough-in photos/video captured",
+    description: "A room's framing/rough plumbing/rough electrical is documented before drywall goes up.",
+    defaultRoles: [],
+  },
 ];

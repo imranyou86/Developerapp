@@ -14,7 +14,9 @@ export default async function RoomsPage({ params }: { params: { id: string } }) 
         `id, name, type, width, depth, floor, estimated,
        tasks ( id, title, due_date, done ),
        finishes ( id, name, category, brand, price ),
-       renderings ( id, style, colors, description, image_prompt, illustration_svg, uploaded_photo_url, created_at )`
+       renderings ( id, style, colors, description, image_prompt, illustration_svg, uploaded_photo_url, created_at ),
+       rough_in_captures ( id, room_label, trades, notes, created_at,
+         rough_in_media ( id, media_type, storage_url, file_name, created_at ) )`
       )
       .eq("project_id", params.id)
       .order("floor", { ascending: true, nullsFirst: true })
@@ -34,6 +36,12 @@ export default async function RoomsPage({ params }: { params: { id: string } }) 
     (rooms ?? []).map(async (room) => ({
       ...room,
       renderings: await signRowsUrl(room.renderings ?? [], "uploaded_photo_url"),
+      rough_in_captures: await Promise.all(
+        (room.rough_in_captures ?? []).map(async (capture) => ({
+          ...capture,
+          rough_in_media: await signRowsUrl(capture.rough_in_media ?? [], "storage_url"),
+        }))
+      ),
     }))
   );
   const signedPlanPages = await signRowsUrl(planPages ?? [], "storage_url");

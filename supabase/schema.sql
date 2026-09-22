@@ -224,6 +224,38 @@ create table if not exists checklist_photos (
   created_at timestamptz not null default now()
 );
 
+-- Rough-In Documentation (see migration 061) — before drywall goes up,
+-- photos/video of every room once framing, rough plumbing, and rough
+-- electrical are done, so what's behind the wall isn't lost once it's
+-- covered.
+create table if not exists rough_in_captures (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  -- Nullable + a denormalized label (rather than requiring a rooms row and
+  -- always joining) — same reasoning as project_messages.sender_name:
+  -- deleting the Rooms & Tasks entry later shouldn't blank out a rough-in
+  -- record's room name, and a walkthrough sometimes covers a space (a
+  -- hallway, an attic run) that was never added as its own room.
+  room_id uuid references rooms (id) on delete set null,
+  room_label text not null,
+  -- Which of framing/rough plumbing/rough electrical/etc. this walkthrough
+  -- covered — free-form enough to add trades later without a migration,
+  -- validated in the app rather than a check constraint.
+  trades text[] not null default '{}',
+  notes text,
+  created_by uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists rough_in_media (
+  id uuid primary key default gen_random_uuid(),
+  capture_id uuid not null references rough_in_captures (id) on delete cascade,
+  media_type text not null check (media_type in ('photo', 'video')),
+  storage_url text not null,
+  file_name text,
+  created_at timestamptz not null default now()
+);
+
 -- Inspection report uploads (Warranty Request tab) — any file type (PDF,
 -- photos, scans), stored in the same 'project-files' bucket the Files tab
 -- uses. checklist_item_id starts null (just uploaded, not yet tied to a
@@ -459,7 +491,7 @@ create table if not exists project_files (
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
+  category text not null check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'rough_in', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
   source_table text,
   source_id uuid,
   notes text,
@@ -841,6 +873,8 @@ create index if not exists idx_interior_designs_room on interior_designs (room_i
 create index if not exists idx_landscape_designs_project on landscape_designs (project_id, created_at desc);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
+create index if not exists idx_rough_in_captures_project on rough_in_captures (project_id, created_at desc);
+create index if not exists idx_rough_in_media_capture on rough_in_media (capture_id);
 create index if not exists idx_inspection_reports_project on inspection_reports (project_id, created_at desc);
 create index if not exists idx_inspection_reports_checklist_item on inspection_reports (checklist_item_id);
 create index if not exists idx_warranty_item_requests_project on warranty_item_requests (project_id, status, created_at);
@@ -913,7 +947,8 @@ insert into notification_settings (action, enabled, roles) values
   ('warranty_request_rejected', true, '{}'),
   ('warranty_request_status_changed', true, '{}'),
   ('warranty_request_comment', true, '{}'),
-  ('warranty_request_scheduled', true, '{}')
+  ('warranty_request_scheduled', true, '{}'),
+  ('rough_in_captured', true, '{}')
 on conflict (action) do nothing;
 
 -- Backfill a profile for any auth user that predates this table; new
@@ -980,6 +1015,8 @@ alter table interior_designs enable row level security;
 alter table landscape_designs enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
+alter table rough_in_captures enable row level security;
+alter table rough_in_media enable row level security;
 alter table inspection_reports enable row level security;
 alter table warranty_item_requests enable row level security;
 alter table warranty_item_request_comments enable row level security;
@@ -1233,6 +1270,14 @@ create policy "checklist_items_member" on checklist_items
 create policy "checklist_photos_member" on checklist_photos
   for all using (exists (select 1 from checklist_items c where c.id = checklist_photos.checklist_item_id and has_project_access(c.project_id)))
   with check (exists (select 1 from checklist_items c where c.id = checklist_photos.checklist_item_id and has_project_access(c.project_id)));
+
+create policy "rough_in_captures_member" on rough_in_captures
+  for all using (has_project_access(rough_in_captures.project_id))
+  with check (has_project_access(rough_in_captures.project_id));
+
+create policy "rough_in_media_member" on rough_in_media
+  for all using (exists (select 1 from rough_in_captures c where c.id = rough_in_media.capture_id and has_project_access(c.project_id)))
+  with check (exists (select 1 from rough_in_captures c where c.id = rough_in_media.capture_id and has_project_access(c.project_id)));
 
 create policy "inspection_reports_member" on inspection_reports
   for all using (has_project_access(inspection_reports.project_id))
@@ -1533,7 +1578,8 @@ values
   ('finish-scans', 'finish-scans', false),
   ('project-files', 'project-files', false),
   ('interior-design-photos', 'interior-design-photos', false),
-  ('landscape-photos', 'landscape-photos', false)
+  ('landscape-photos', 'landscape-photos', false),
+  ('rough-in-media', 'rough-in-media', false)
 on conflict (id) do update set public = excluded.public;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -1569,6 +1615,10 @@ create policy "interior_design_photos_storage_owner" on storage.objects
 create policy "landscape_photos_storage_owner" on storage.objects
   for all using (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'landscape-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "rough_in_media_storage_owner" on storage.objects
+  for all using (bucket_id = 'rough-in-media' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'rough-in-media' and (storage.foldername(name))[1] = auth.uid()::text);
 
 -- ---------------------------------------------------------------------------
 -- Realtime — Chat streams new messages via Supabase Realtime's

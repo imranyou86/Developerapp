@@ -2886,3 +2886,50 @@ yet; each one only adds what a given feature needed.
   with `ignoreDuplicates`, relying on that table's existing
   `chat_thread_participants_manage` RLS (creator or Developer) as the real
   enforcement, with a friendlier error message on a rejection.
+
+## Rooms & Tasks: "Rough-in documentation" panel
+
+- **What it's for**: once framing, rough plumbing, and rough electrical are
+  done on a room but before drywall goes up, take photos/video of what's
+  behind the wall — where the pipes and wires actually run — so that
+  information isn't lost the moment it's covered. Useful later for hanging
+  something on the wall, a renovation, or tracing a leak/short during a
+  warranty call.
+- **Lives as a new panel on each room's card** in Rooms & Tasks
+  (`app/projects/[id]/rooms/rough-in-panel.tsx`), the same pattern as the
+  existing rendering/finishes panels — not its own tab, so no new
+  `tab_permissions` row is needed; it's gated by the existing `rooms` tab
+  a role can already see. (Originally built as a standalone tab, then
+  moved here per feedback — it's inherently per-room, and Rooms & Tasks
+  is already the per-room hub.)
+- **"+ Document rough-in"** opens a modal: which trades this walkthrough
+  covers (Framing / Rough plumbing / Rough electrical / Rough HVAC / Low
+  voltage-data — toggleable pill checkboxes), an optional notes field
+  (e.g. "2 supply lines run along the east stud bay"), and a multi-file
+  picker accepting photos and video together. Saving creates one
+  `rough_in_captures` row, then uploads each file to a new `rough-in-media`
+  storage bucket and adds a `rough_in_media` child row per file
+  (`media_type` 'photo' or 'video', inferred from the file's MIME type).
+  Each past capture renders as a card: date, trade badges, notes, and a
+  photo/video grid — photos open full-size in a new tab, videos play
+  inline via a plain `<video controls>` element. Delete works at both
+  levels: remove one file, or delete the whole capture (and everything in
+  it).
+- **New tables** (migration 061): `rough_in_captures` (project_id,
+  room_id nullable + a denormalized `room_label` — same "survive the room
+  being deleted later" reasoning as `project_messages.sender_name` —
+  `trades text[]`, `notes`, `created_by`, `created_at`) and
+  `rough_in_media` (capture_id, media_type, storage_url, file_name,
+  created_at), RLS mirroring `checklist_photos`' join-through-parent
+  pattern. Each uploaded file is also recorded into `project_files` under
+  a new `'rough_in'` category, so it shows up in the project's Files
+  Library too.
+- **New notification**: `rough_in_captured` (Admin → Notifications,
+  opt-in like the rest), fired once per capture via the existing
+  `notifyForAction`.
+- **Not live-tested** — same sandbox network limitation as the rest of
+  this session's work; verified via `tsc`/`lint`/`build` and careful
+  reading. Worth a real run once deployed: upload a genuinely large video
+  and confirm it doesn't hit Supabase Storage's default per-file size
+  limit (raise it in the Supabase dashboard's Storage settings if it
+  does — nothing in this app's own config caps it).

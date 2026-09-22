@@ -119,6 +119,7 @@ export function RoomsClient({
               tasks: [],
               finishes: [],
               renderings: [],
+              rough_in_captures: [],
             },
           ]);
           notify("success", "Room added.");

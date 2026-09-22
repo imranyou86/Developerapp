@@ -26,6 +26,26 @@ export interface RoomRendering {
   created_at: string;
 }
 
+export interface RoughInMedia {
+  id: string;
+  media_type: "photo" | "video";
+  storage_url: string;
+  file_name: string | null;
+  created_at: string;
+}
+
+// One pre-drywall documentation pass on this room — a set of photos/video
+// plus which trades' rough-in it covers, taken once framing/rough
+// plumbing/rough electrical are done and before drywall closes it up.
+export interface RoughInCapture {
+  id: string;
+  room_label: string;
+  trades: string[];
+  notes: string | null;
+  created_at: string;
+  rough_in_media: RoughInMedia[];
+}
+
 export interface RoomWithRelations {
   id: string;
   name: string;
@@ -37,4 +57,5 @@ export interface RoomWithRelations {
   tasks: RoomTask[];
   finishes: RoomFinish[];
   renderings: RoomRendering[];
+  rough_in_captures: RoughInCapture[];
 }

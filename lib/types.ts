@@ -212,6 +212,7 @@ export type FileCategory =
   | "trade_bid"
   | "checklist_photo"
   | "rendering"
+  | "rough_in"
   | "finish_scan"
   | "document"
   | "photo"

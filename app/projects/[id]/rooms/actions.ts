@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/app/projects/actions";
 import type { FinishCategory, StyleName } from "@/lib/types";
 import { recordProjectFile, removeProjectFile } from "@/lib/projectFiles";
+import { notifyForAction } from "@/lib/alerts";
 
 function revalidate(projectId: string) {
   revalidatePath(`/projects/${projectId}/rooms`);
@@ -208,6 +209,95 @@ export async function deleteFinish(projectId: string, finishId: string): Promise
   const supabase = createClient();
   const { error } = await supabase.from("finishes").delete().eq("id", finishId);
   if (error) return { ok: false, error: error.message };
+  revalidate(projectId);
+  return { ok: true };
+}
+
+// One rough-in documentation pass on a room — created once, then media
+// (photos/video) is added to it one upload at a time via addRoughInMedia.
+export async function saveRoughInCapture(
+  projectId: string,
+  roomId: string,
+  input: { roomLabel: string; trades: string[]; notes: string | null }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!input.roomLabel.trim()) return { ok: false, error: "Room name is required." };
+
+  const { error, data } = await supabase
+    .from("rough_in_captures")
+    .insert({
+      project_id: projectId,
+      room_id: roomId,
+      room_label: input.roomLabel.trim(),
+      trades: input.trades,
+      notes: input.notes?.trim() || null,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await notifyForAction(projectId, "rough_in_captured", {
+    subject: "Rough-in documented",
+    body: `${input.roomLabel.trim()} was documented before drywall${
+      input.trades.length > 0 ? ` (${input.trades.join(", ")})` : ""
+    }.`,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: data.id };
+}
+
+export async function addRoughInMedia(
+  projectId: string,
+  captureId: string,
+  media: { mediaType: "photo" | "video"; storageUrl: string; fileName: string | null }
+): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error, data } = await supabase
+    .from("rough_in_media")
+    .insert({
+      capture_id: captureId,
+      media_type: media.mediaType,
+      storage_url: media.storageUrl,
+      file_name: media.fileName,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await recordProjectFile(supabase, {
+    projectId,
+    storageUrl: media.storageUrl,
+    fileName: media.fileName ?? (media.mediaType === "video" ? "Rough-in video" : "Rough-in photo"),
+    category: "rough_in",
+    sourceTable: "rough_in_media",
+    sourceId: data.id,
+  });
+
+  revalidate(projectId);
+  return { ok: true, id: data.id };
+}
+
+export async function deleteRoughInMedia(projectId: string, mediaId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { error } = await supabase.from("rough_in_media").delete().eq("id", mediaId);
+  if (error) return { ok: false, error: error.message };
+  await removeProjectFile(supabase, "rough_in_media", mediaId);
+  revalidate(projectId);
+  return { ok: true };
+}
+
+export async function deleteRoughInCapture(projectId: string, captureId: string): Promise<ActionResult> {
+  const supabase = createClient();
+  const { data: media } = await supabase.from("rough_in_media").select("id").eq("capture_id", captureId);
+  const { error } = await supabase.from("rough_in_captures").delete().eq("id", captureId);
+  if (error) return { ok: false, error: error.message };
+  await Promise.all((media ?? []).map((m) => removeProjectFile(supabase, "rough_in_media", m.id)));
   revalidate(projectId);
   return { ok: true };
 }
