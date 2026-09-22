@@ -152,7 +152,12 @@ export function ChatClient({
           currentUserId={currentUserId}
           onClose={() => setCreateOpen(false)}
           onCreated={(thread) => {
-            setThreads((prev) => [...prev, thread]);
+            // Dedupe against the chat_threads Realtime INSERT above — that
+            // event can (and often does) arrive before this callback runs,
+            // since it's a separate websocket push racing the server
+            // action's own HTTP response. Without this check the thread
+            // got added twice: once by Realtime, once here.
+            setThreads((prev) => (prev.some((t) => t.id === thread.id) ? prev : [...prev, thread]));
             setActiveThreadId(thread.id);
             setCreateOpen(false);
           }}
