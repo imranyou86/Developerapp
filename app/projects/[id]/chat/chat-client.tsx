@@ -94,10 +94,13 @@ export function ChatClient({
   }
 
   return (
-    <div className="flex h-[calc(100vh-220px)] min-h-[420px] gap-4">
-      <div className="flex w-52 shrink-0 flex-col gap-1 overflow-y-auto border-r border-blueprint/10 pr-3">
+    <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col gap-3 md:flex-row md:gap-4">
+      {/* Horizontal scrollable strip on narrow screens (the sidebar used to
+          eat most of the width on mobile, leaving the message pane a
+          sliver) — a vertical sidebar again from md up. */}
+      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-blueprint/10 pb-2 md:w-52 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-b-0 md:border-r md:pb-0 md:pr-3">
         <button
-          className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+          className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
             activeThreadId === null ? "bg-amber/15 text-amber-dark" : "text-blueprint/70 hover:bg-concrete"
           }`}
           onClick={() => setActiveThreadId(null)}
@@ -105,9 +108,9 @@ export function ChatClient({
           General
         </button>
         {threads.map((t) => (
-          <div key={t.id} className="group flex items-center gap-1">
+          <div key={t.id} className="group flex shrink-0 items-center gap-1">
             <button
-              className={`flex-1 truncate rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+              className={`max-w-[9rem] shrink-0 truncate whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors md:max-w-none md:flex-1 ${
                 activeThreadId === t.id ? "bg-amber/15 text-amber-dark" : "text-blueprint/70 hover:bg-concrete"
               }`}
               onClick={() => setActiveThreadId(t.id)}
@@ -126,13 +129,13 @@ export function ChatClient({
           </div>
         ))}
         {canCreateThread && (
-          <button className="btn-ghost mt-2 text-xs" onClick={() => setCreateOpen(true)}>
+          <button className="btn-ghost shrink-0 whitespace-nowrap text-xs md:mt-2" onClick={() => setCreateOpen(true)}>
             + New thread
           </button>
         )}
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1">
         <ThreadMessages
           key={activeThreadId ?? "general"}
           projectId={projectId}
