@@ -21,6 +21,7 @@ export interface RoomRendering {
   colors: string[];
   description: string | null;
   image_prompt: string | null;
+  midjourney_prompt: string | null;
   illustration_svg: string | null;
   uploaded_photo_url: string | null;
   created_at: string;

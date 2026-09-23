@@ -112,6 +112,7 @@ export async function saveRendering(
     colors: string[];
     description: string;
     image_prompt: string;
+    midjourney_prompt: string;
     illustration_svg: string;
   }
 ): Promise<ActionResult> {
@@ -122,6 +123,7 @@ export async function saveRendering(
     colors: input.colors,
     description: input.description,
     image_prompt: input.image_prompt,
+    midjourney_prompt: input.midjourney_prompt,
     illustration_svg: input.illustration_svg,
   });
   if (error) return { ok: false, error: error.message };

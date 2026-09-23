@@ -14,7 +14,7 @@ export default async function RoomsPage({ params }: { params: { id: string } }) 
         `id, name, type, width, depth, floor, estimated,
        tasks ( id, title, due_date, done ),
        finishes ( id, name, category, brand, price ),
-       renderings ( id, style, colors, description, image_prompt, illustration_svg, uploaded_photo_url, created_at ),
+       renderings ( id, style, colors, description, image_prompt, midjourney_prompt, illustration_svg, uploaded_photo_url, created_at ),
        rough_in_captures ( id, room_label, trades, notes, created_at,
          rough_in_media ( id, media_type, storage_url, file_name, created_at ) )`
       )

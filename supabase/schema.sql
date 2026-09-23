@@ -146,6 +146,11 @@ create table if not exists renderings (
   colors jsonb not null default '[]'::jsonb,
   description text,
   image_prompt text,
+  -- A Midjourney-syntax variant of image_prompt (comma-separated
+  -- descriptors + --ar/--style raw/--v/--stylize parameters) — Midjourney
+  -- has no official API (Discord bot/web app only), so this is copy-paste
+  -- only, not called from this app. See migration 062.
+  midjourney_prompt text,
   illustration_svg text,
   uploaded_photo_url text,
   created_at timestamptz not null default now()

@@ -9,6 +9,7 @@ export const maxDuration = 30;
 interface RoomConceptResult {
   description: string;
   image_prompt: string;
+  midjourney_prompt: string;
 }
 
 export async function POST(req: Request) {
@@ -58,13 +59,13 @@ export async function POST(req: Request) {
   const prompt = `Design concept for a "${body.roomName}" (${body.roomType ?? "room"}) in a
 "${body.style}" interior design style. ${dims}
 
-Write two things:
+Write three things:
 1. A short (2-3 sentence) design concept description a homeowner would enjoy reading —
    materials, colors, mood, a couple of signature details.
-2. A concise, ready-to-paste image-generation prompt for an external tool (ChatGPT image
-   generation, Midjourney, etc). Image models follow short, concrete, front-loaded prompts far
-   better than long descriptive paragraphs — pack in the specifics, cut the flowery language.
-   Keep it to 40-60 words, structured in this order: [shot type${
+2. A concise, ready-to-paste image-generation prompt for a general tool (this app's own
+   Gemini-based generator, ChatGPT image generation, etc). Image models follow short, concrete,
+   front-loaded prompts far better than long descriptive paragraphs — pack in the specifics, cut
+   the flowery language. Keep it to 40-60 words, structured in this order: [shot type${
      shape ? ` chosen to actually show this is ${shape}` : ""
    }] of a [style] [room type]${shape ? `, ${shape}` : ""}, [3-4 concrete materials/finishes],
    [2-3 furniture/fixture pieces], [lighting], [camera/angle], photorealistic, architectural
@@ -76,8 +77,16 @@ Write two things:
        : ""
    }No scene-setting prose, no adjectives that don't change what's rendered (skip "beautiful",
    "stunning", "inviting" — every word should be a visual instruction).
+3. A separate prompt in Midjourney's own syntax, for pasting straight into Midjourney (its
+   Discord bot or web app — it has no API, so this is never sent anywhere by this app). Midjourney
+   prompts are a comma-separated list of short descriptive fragments, not full sentences — cover
+   the same specifics as the image prompt above (materials, furniture, lighting, camera angle)${
+     shape ? `, and work in that it's ${shape}` : ""
+   } — then end with parameters on their own: "--ar 3:2 --style raw --v 7 --stylize 50" ("--style
+   raw" cuts Midjourney's default artistic styling for a more literal, photorealistic result;
+   low "--stylize" keeps it following the prompt closely rather than improvising).
 
-Respond with ONLY a JSON object: {"description": string, "image_prompt": string}`;
+Respond with ONLY a JSON object: {"description": string, "image_prompt": string, "midjourney_prompt": string}`;
 
   try {
     const anthropic = getAnthropicClient();

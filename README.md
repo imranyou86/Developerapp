@@ -3022,3 +3022,39 @@ yet; each one only adds what a given feature needed.
   a wrong/renamed model id first — the `GEMINI_IMAGE_MODEL` env var is
   the fix, no redeploy needed.
 - No SQL — env var + `lib/gemini.ts` change only.
+
+## Room rendering: also generate a Midjourney-syntax prompt
+
+- Followed up on wanting a better image generator with "I want to use
+  Midjourney." Midjourney still has no official API — confirmed via
+  search — only its Discord bot and web app, both subscription-gated;
+  the only programmatic routes are unofficial third-party relays that
+  automate the Discord bot in a way against Midjourney's terms (real
+  account-ban risk) and add a third AI vendor dependency on top of an
+  unofficial one. Not worth building against for this app; decided (with
+  the user) to keep generation on Gemini and instead give a
+  ready-to-paste Midjourney prompt for manual use alongside it.
+- **`app/api/claude/room-concept` now returns a third field**,
+  `midjourney_prompt`, alongside `description`/`image_prompt` — Claude
+  writes it in Midjourney's own syntax (comma-separated descriptive
+  fragments, not full sentences) covering the same specifics as the
+  plain `image_prompt`, ending with `--ar 3:2 --style raw --v 7
+  --stylize 50` (`--style raw` cuts Midjourney's default artistic
+  styling for a more literal/photorealistic result; a low `--stylize`
+  keeps it following the prompt rather than improvising — both chosen
+  for the same "accurate, follows the real room" goal as the rest of
+  this feature). Never called by this app — Midjourney has no API to
+  call — it's copy-paste only, same shape as the existing "Copy prompt"
+  button.
+- **New `renderings.midjourney_prompt` column** (migration 062) —
+  persisted alongside `image_prompt` so it's there next time you open
+  the room, not regenerated/lost. New "Midjourney prompt — paste into
+  Midjourney" collapsible section on each rendering, with its own "Copy
+  Midjourney prompt" button, right below the existing image-prompt one.
+- The `--v`/`--style raw` syntax is current as of this session's
+  research (Google/Midjourney docs weren't directly fetchable from this
+  sandbox, only searchable) — Midjourney's parameter names have changed
+  across versions before (e.g. `--style raw` becoming just `--raw` on
+  some later versions per some sources), so if Midjourney rejects the
+  parameters, that's the first thing to check — it's plain text in the
+  prompt, no code change needed to adjust it.

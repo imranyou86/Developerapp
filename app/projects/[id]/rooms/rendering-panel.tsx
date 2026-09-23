@@ -312,6 +312,7 @@ export function RenderingPanel({
           colors: palette.colors,
           description: json.description,
           image_prompt: json.image_prompt,
+          midjourney_prompt: json.midjourney_prompt,
           illustration_svg,
         });
         if (!saveRes.ok) throw new Error(saveRes.error ?? "Could not save rendering.");
@@ -325,6 +326,7 @@ export function RenderingPanel({
               colors: palette.colors,
               description: json.description,
               image_prompt: json.image_prompt,
+              midjourney_prompt: json.midjourney_prompt,
               illustration_svg,
               uploaded_photo_url: null,
               created_at: new Date().toISOString(),
@@ -478,6 +480,15 @@ export function RenderingPanel({
                     onClick={() => handleCopyPrompt(promptOverrides[r.id] ?? r.image_prompt!)}
                   >
                     Copy prompt
+                  </button>
+                </details>
+              )}
+              {r.midjourney_prompt && (
+                <details className="mt-1 text-xs">
+                  <summary className="cursor-pointer text-amber-dark">Midjourney prompt — paste into Midjourney</summary>
+                  <p className="mt-1 whitespace-pre-wrap rounded-lg bg-concrete/60 p-2 text-blueprint/70">{r.midjourney_prompt}</p>
+                  <button className="btn-ghost mt-1 text-xs" onClick={() => handleCopyPrompt(r.midjourney_prompt!)}>
+                    Copy Midjourney prompt
                   </button>
                 </details>
               )}
