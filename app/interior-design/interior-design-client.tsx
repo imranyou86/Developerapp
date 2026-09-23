@@ -228,6 +228,7 @@ export function InteriorDesignClient({
     const d = depth;
     const s = sqft ? Number(sqft) : null;
     const roomId = roomSource === "existing" && selectedRoomId ? selectedRoomId : null;
+    const selectedRoom = roomId ? (rooms.find((r) => r.id === roomId) ?? null) : null;
     const prompt = promptDraft.trim() || autoPrompt;
 
     setSubmitting(true);
@@ -237,6 +238,13 @@ export function InteriorDesignClient({
           ? await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original")
           : null;
 
+        // No uploaded photo to anchor on — the layout list above already
+        // tells the model where fixtures go, but not what the room's real
+        // walls/windows/doors look like. When this design is tied to an
+        // actual tracked room and its construction has Plan tab layout
+        // sheets, attach those directly instead of generating a
+        // disconnected room from text alone (same grounding as the Rooms
+        // tab's "Generate image (AI)" — see RenderingPanel).
         const res = originalUrl
           ? await fetchWithRetry("/api/gemini/edit-room-image", {
               method: "POST",
@@ -246,7 +254,11 @@ export function InteriorDesignClient({
           : await fetchWithRetry("/api/gemini/generate-room-image", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt }),
+              body: JSON.stringify(
+                selectedRoom && planPages.length > 0
+                  ? { prompt, planImageUrls: planPages.map((p) => p.storage_url), roomName: selectedRoom.name }
+                  : { prompt }
+              ),
             });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Design generation failed.");

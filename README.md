@@ -3035,6 +3035,35 @@ yet; each one only adds what a given feature needed.
   resemble that room, not a different one on the same sheet.
 - No SQL — reuses the existing `plan_pages` table as-is.
 
+## Interior Design: same plan-grounding, wired into its own generate call
+
+- The plan-grounding fix above only touched Rooms & Tasks's own
+  `RenderingPanel` — reported as "not working" for Interior Design, which
+  has an entirely separate `handleGenerate` in
+  `app/interior-design/interior-design-client.tsx` that was never
+  touched. Its no-photo `/api/gemini/generate-room-image` call was
+  sending just `{ prompt }`, even though this page already receives the
+  same `planPages` prop (already used elsewhere on this page).
+- Now, when a design is tied to an existing tracked room (`roomSource
+  === "existing"`) and that construction has Plan tab layout sheets,
+  the call also sends `planImageUrls` + that room's `roomName`, using
+  the exact same `generateRoomImageFromPlan` path added for Rooms &
+  Tasks — no `lib/gemini.ts`/API route changes needed, this was purely
+  a missing call site. A manually-described room (no tracked room
+  selected) still has no specific room to focus on within the plan
+  sheet, so that case is unchanged (falls back to text, now including
+  Interior Design's own fixture-placement description same as before —
+  that part was already working).
+- Interior Design already had a stronger layout signal than Rooms &
+  Tasks ever did — the Layout Editor's placed-fixture list gets turned
+  into an explicit placement description and threaded into the prompt
+  (`lib/interiorDesignPrompt.ts`) — this change adds the plan-sheet
+  grounding on top of that, it doesn't replace it.
+- Same caveat as the Rooms & Tasks version: not verified against a live
+  key from this sandbox. Worth testing the same way — pick an existing
+  room with a plan sheet uploaded, generate with no photo, and check
+  whether the result reads as that specific room.
+
 ## Room rendering: switched to Gemini's Pro-tier image model
 
 - Followed up on "not good, need the best one that follows our layout"
