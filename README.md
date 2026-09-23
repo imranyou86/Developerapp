@@ -2994,3 +2994,31 @@ yet; each one only adds what a given feature needed.
   first (via "Upload photo" on a rendering entry) and generate/regenerate
   from there.
 - No SQL for this one either.
+
+## Room rendering: switched to Gemini's Pro-tier image model
+
+- Followed up on "not good, need the best one that follows our layout"
+  with an explicit "I need a better image generator that is more accurate
+  and better quality." Researched current options (this sandbox has no
+  network access to call any image API directly, only to search) — the
+  concrete, low-risk upgrade is staying on the same provider/API
+  (`GEMINI_API_KEY`, no new key to configure) but moving from the Flash
+  tier to the Pro tier: **Gemini 3 Pro Image** ("Nano Banana Pro"),
+  Google's stated highest-detail/most-accurate image model, replacing
+  **Gemini 3.1 Flash Image** ("Nano Banana 2"). Resolution bumped from
+  1K to 2K accordingly (`lib/gemini.ts`'s `callGemini`).
+- **Real tradeoff, not a free upgrade**: Pro-tier image tokens price
+  meaningfully higher than Flash's, and likely run slower. New
+  `GEMINI_IMAGE_MODEL` env var overrides the model id without a code
+  change — set it to `gemini-3.1-flash-image` to go back to the cheaper/
+  faster tier if Pro isn't worth it for this app's volume.
+- **Not verified against a live key** — this sandbox's network access
+  covers web search but not fetching Google's own API docs or calling
+  the Gemini API itself, so the exact preview model id
+  (`gemini-3-pro-image-preview`) is inferred from search results
+  (Google Cloud docs, DeepMind's own blog post, AI Studio's model
+  listing, Together AI's model page) rather than confirmed directly.
+  If generation starts failing after this deploys, check the error for
+  a wrong/renamed model id first — the `GEMINI_IMAGE_MODEL` env var is
+  the fix, no redeploy needed.
+- No SQL — env var + `lib/gemini.ts` change only.

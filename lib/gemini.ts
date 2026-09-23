@@ -1,16 +1,23 @@
 import sharp from "sharp";
 
-// Server-only. Thin wrapper around Google's Gemini API image model (Gemini
-// 3.1 Flash Image, aka "Nano Banana 2") — never import this from a Client
-// Component. GEMINI_API_KEY is read here only; the browser never sees it.
-// This is a separate, optional integration from Claude — Claude has no
-// image-generation capability of its own, so an auto-generate feature has
-// to call out to a dedicated image model. Swapped in from OpenAI's
-// gpt-image-1: stronger photorealism and edit consistency (preserving a
-// real room photo's architecture while restyling it) at a lower per-image
-// cost. Same plain-fetch, no-SDK style as lib/anthropic.ts/lib/email.ts.
-
-const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image";
+// Server-only. Thin wrapper around Google's Gemini API image model — never
+// import this from a Client Component. GEMINI_API_KEY is read here only;
+// the browser never sees it. This is a separate, optional integration from
+// Claude — Claude has no image-generation capability of its own, so an
+// auto-generate feature has to call out to a dedicated image model. Same
+// plain-fetch, no-SDK style as lib/anthropic.ts/lib/email.ts.
+//
+// Model: Gemini 3 Pro Image ("Nano Banana Pro") — the Pro tier above the
+// Flash model this used previously ("Gemini 3.1 Flash Image"/"Nano Banana
+// 2"), chosen for noticeably higher detail/accuracy per Google's own
+// materials, at a real cost/latency tradeoff (Pro-tier image tokens price
+// meaningfully higher than Flash's). Overridable via GEMINI_IMAGE_MODEL
+// without a code change — e.g. to fall back to the Flash model
+// ("gemini-3.1-flash-image") if Pro's cost/latency isn't worth it for this
+// use, or to correct the id below if Google renames/GAs it. This sandbox
+// has no network access to verify the exact preview id or request shape
+// against a live key — confirm generation still works after deploying.
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-3-pro-image-preview";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 function getApiKey(): string {
@@ -44,10 +51,10 @@ function extractImage(json: GeminiGenerateContentResponse): GeneratedImage {
   return { base64: imagePart.inlineData.data, mimeType: "image/png" };
 }
 
-// 3:2 matches the room-photo framing this app has always used
-// (gpt-image-1's old 1536x1024 output); "1K" keeps cost/latency comparable
-// to that — bump to "2K"/"4K" in imageConfig below if higher fidelity is
-// ever worth the extra cost.
+// 3:2 matches the room-photo framing this app has always used. "2K" trades
+// some latency/cost for the sharper detail that's the actual point of
+// using the Pro-tier model above — drop to "1K" if that tradeoff isn't
+// worth it, or up to "4K" if Pro's ceiling is ever worth the extra cost.
 async function callGemini(parts: GeminiPart[]): Promise<GeneratedImage> {
   const res = await fetch(`${GEMINI_API_BASE}/${GEMINI_IMAGE_MODEL}:generateContent`, {
     method: "POST",
@@ -59,7 +66,7 @@ async function callGemini(parts: GeminiPart[]): Promise<GeneratedImage> {
       contents: [{ parts }],
       generationConfig: {
         responseModalities: ["TEXT", "IMAGE"],
-        imageConfig: { aspectRatio: "3:2", imageSize: "1K" },
+        imageConfig: { aspectRatio: "3:2", imageSize: "2K" },
       },
     }),
   });
