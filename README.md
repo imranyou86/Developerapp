@@ -2933,3 +2933,26 @@ yet; each one only adds what a given feature needed.
   and confirm it doesn't hit Supabase Storage's default per-file size
   limit (raise it in the Supabase dashboard's Storage settings if it
   does — nothing in this app's own config caps it).
+
+## Feet/inches inputs: unit toggle instead of a symbol-typed field
+
+- **`FeetInchesInput` reworked** (used for room/yard width & depth in
+  Rooms & Tasks, Interior Design, and Landscape) — it used to be a single
+  text field parsing a typed `12'6"` string, which meant typing `'`/`"`
+  symbols on a phone's numeric keypad. It's now a plain numeric input plus
+  a small **ft/in toggle** next to it: pick the unit, type a plain number.
+  Switching the toggle mid-edit converts whatever's currently typed (6
+  typed under "in", then switched to "ft", becomes 0.5) rather than just
+  relabeling it.
+- Storage is unchanged — `value`/`onChange` still carry decimal feet
+  exactly as before, so no migration and no changes to `rooms.width`/
+  `rooms.depth` or the analogous Interior Design/Landscape columns.
+  `lib/feetInches.ts`'s `formatFeetInches`/`parseFeetInches` (used for
+  read-only display like "12'6" × 10'0"" and CSV-ish text parsing
+  elsewhere) are untouched.
+- The component's `className` prop now sizes the outer wrapper (input +
+  toggle together) instead of just the `<input>`, and a new optional
+  `label` prop renders a small label above it for the two call sites
+  (Interior Design, Landscape) that relied on placeholder text as an
+  implicit label rather than a separate `<label>` element.
+- No SQL for this one — UI/component change only.

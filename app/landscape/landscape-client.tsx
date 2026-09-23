@@ -278,8 +278,8 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
           <div>
             <label className="label">Yard sizing (optional, for the layout editor)</label>
             <div className="grid grid-cols-2 gap-2">
-              <FeetInchesInput value={yardWidth} onChange={setYardWidth} placeholder={`Width, e.g. 40' 0"`} />
-              <FeetInchesInput value={yardDepth} onChange={setYardDepth} placeholder={`Depth, e.g. 30' 0"`} />
+              <FeetInchesInput value={yardWidth} onChange={setYardWidth} label="Width" />
+              <FeetInchesInput value={yardDepth} onChange={setYardDepth} label="Depth" />
             </div>
           </div>
 

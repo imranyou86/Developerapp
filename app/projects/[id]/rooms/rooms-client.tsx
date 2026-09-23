@@ -229,11 +229,11 @@ function AddRoomModal({
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="label">Width</label>
-            <FeetInchesInput value={width} onChange={setWidth} placeholder={`12' 6"`} />
+            <FeetInchesInput value={width} onChange={setWidth} />
           </div>
           <div>
             <label className="label">Depth</label>
-            <FeetInchesInput value={depth} onChange={setDepth} placeholder={`10' 0"`} />
+            <FeetInchesInput value={depth} onChange={setDepth} />
           </div>
           <div>
             <label className="label">Floor</label>

@@ -444,8 +444,8 @@ export function InteriorDesignClient({
               </select>
             ) : (
               <div className="grid grid-cols-3 gap-2">
-                <FeetInchesInput value={width} onChange={setWidth} placeholder={`Width, e.g. 12' 6"`} />
-                <FeetInchesInput value={depth} onChange={setDepth} placeholder={`Depth, e.g. 10' 0"`} />
+                <FeetInchesInput value={width} onChange={setWidth} label="Width" />
+                <FeetInchesInput value={depth} onChange={setDepth} label="Depth" />
                 <input
                   type="number"
                   min="0"

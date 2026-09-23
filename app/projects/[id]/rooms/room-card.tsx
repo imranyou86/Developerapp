@@ -177,11 +177,11 @@ export function RoomCard({
           <div className="flex items-end gap-3">
             <div>
               <label className="label">Width</label>
-              <FeetInchesInput value={width} onChange={setWidth} className="input w-28" />
+              <FeetInchesInput value={width} onChange={setWidth} className="w-36" />
             </div>
             <div>
               <label className="label">Depth</label>
-              <FeetInchesInput value={depth} onChange={setDepth} className="input w-28" />
+              <FeetInchesInput value={depth} onChange={setDepth} className="w-36" />
             </div>
             <button className="btn-outline" onClick={saveDims} disabled={savingDims}>
               {savingDims ? "Saving…" : "Save dimensions"}
