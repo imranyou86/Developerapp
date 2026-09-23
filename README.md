@@ -3182,3 +3182,37 @@ yet; each one only adds what a given feature needed.
   session, not confirmed end-to-end. Worth a real "Suggest layout" run
   against an actual plan after deploying to confirm the crop lands on
   the right region and the fixture read is now accurate.
+
+## Interior Design "Suggest layout": show the located plan crop for visual confirmation
+
+- Follow-up after the locate-then-zoom fix above still came back "way
+  off." An LLM guessing a precise pixel/fraction bounding box from a
+  single glance at a floor plan is an inherently imprecise task — even
+  with the crop now covering the right area most of the time, there's
+  no way to *fully* trust either the crop or the fixture read from it
+  without seeing what the AI actually looked at. Rather than keep
+  chasing pure automation, added a confirmation step: show the exact
+  plan region the AI used side-by-side with the layout it produced, so
+  it can be checked (and corrected by dragging, since the layout editor
+  is already fully manual-editable) instead of trusted blind.
+- **`app/api/claude/suggest-room-layout` now also returns
+  `located_crop`**: `{ dataUrl, label } | null` — the same cropped,
+  zoomed plan image (as a JPEG data URL) that pass 2 was actually shown,
+  plus which sheet it came from. `null` when the locate pass couldn't
+  confidently find the room (the existing full-sheet-fallback path).
+- **Interior Design client**: after "Example setup from plans" returns,
+  the cropped plan region now renders in a bordered panel right next to
+  the Room layout editor (side-by-side on wider screens, stacked on
+  mobile), labeled "Located on the plan" or "Closest match on the plan"
+  depending on `found_on_plan`, with a dismiss (✕) button. A caption
+  spells out the point: compare it against the placed fixtures and drag
+  anything that's wrong — the crop is a reference to check against, not
+  a promise the placement is exact. Cleared automatically when a new
+  suggestion is requested or a different room is selected, so a stale
+  crop from an earlier room is never left showing next to a new one.
+- No schema/migration changes.
+- **Not verified against a live key** — same sandbox constraint as
+  above; the crop display itself was smoke-tested with the build only
+  (no real Claude response to render). Worth confirming after deploy
+  that the returned data URL renders correctly and actually matches
+  what pass 2 was shown.

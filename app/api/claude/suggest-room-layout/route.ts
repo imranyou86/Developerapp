@@ -166,7 +166,7 @@ export async function POST(req: Request) {
     });
     locateContent.push({ type: "text", text: `${roomDescription}\nReturn the JSON object described in your instructions.` });
 
-    let crop: { block: Anthropic.Messages.ImageBlockParam; label: string } | null = null;
+    let crop: { block: Anthropic.Messages.ImageBlockParam; label: string; dataUrl: string } | null = null;
     try {
       const locateMessage = await anthropic.messages.create({
         model: CLAUDE_MODEL,
@@ -211,7 +211,16 @@ export async function POST(req: Request) {
             // instead of the whole sheet, so fixture symbols land at
             // several times the effective resolution they had before.
             const croppedBlock = await bufferToClaudeImageBlock(croppedBuffer);
-            crop = { block: croppedBlock, label: sheet.label };
+            // Same crop, sent back to the client too — so the person asking
+            // for a suggested layout can actually see what region of the
+            // plan it was read from and judge for themselves whether it's
+            // the right room and whether the result matches it, rather than
+            // trusting the placement blind.
+            crop = {
+              block: croppedBlock,
+              label: sheet.label,
+              dataUrl: `data:${croppedBlock.source.media_type};base64,${croppedBlock.source.data}`,
+            };
           }
         }
       }
@@ -275,7 +284,12 @@ Return the JSON object described in your instructions.`,
       return w <= body.roomWidth! + 0.01 && d <= body.roomDepth! + 0.01;
     });
 
-    return NextResponse.json({ items: validated, found_on_plan: result.found_on_plan, notes: result.notes });
+    return NextResponse.json({
+      items: validated,
+      found_on_plan: result.found_on_plan,
+      notes: result.notes,
+      located_crop: crop ? { dataUrl: crop.dataUrl, label: crop.label } : null,
+    });
   } catch (err) {
     console.error("suggest-room-layout failed", err);
     const message = err instanceof Error ? err.message : "Layout suggestion failed.";

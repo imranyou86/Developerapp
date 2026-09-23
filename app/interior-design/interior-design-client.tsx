@@ -69,6 +69,7 @@ export function InteriorDesignClient({
   const [layout, setLayout] = useState<PlacedFixture[]>([]);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptEdited, setPromptEdited] = useState(false);
+  const [planCrop, setPlanCrop] = useState<{ dataUrl: string; label: string; foundOnPlan: boolean } | null>(null);
 
   const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
   const [addToImageText, setAddToImageText] = useState("");
@@ -122,6 +123,7 @@ export function InteriorDesignClient({
 
   function handleRoomSelect(roomId: string) {
     setSelectedRoomId(roomId);
+    setPlanCrop(null);
     const room = rooms.find((r) => r.id === roomId);
     if (!room) return;
     setRoomType(matchRoomType(room.type));
@@ -141,6 +143,7 @@ export function InteriorDesignClient({
     const room = roomSource === "existing" ? rooms.find((r) => r.id === selectedRoomId) : null;
     const catalog = getFixturesForRoomType(roomType);
 
+    setPlanCrop(null);
     setSuggesting(true);
     try {
       await run(suggestTaskKey, `Reading plans for ${roomType.toLowerCase()} layout…`, async () => {
@@ -158,6 +161,12 @@ export function InteriorDesignClient({
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Layout suggestion failed.");
+
+        setPlanCrop(
+          json.located_crop
+            ? { dataUrl: json.located_crop.dataUrl, label: json.located_crop.label, foundOnPlan: !!json.found_on_plan }
+            : null
+        );
 
         const catalogById = new Map(catalog.map((f) => [f.id, f]));
         const suggested: PlacedFixture[] = (json.items ?? [])
@@ -488,13 +497,43 @@ export function InteriorDesignClient({
               )}
             </div>
             {hasRoomDims ? (
-              <LayoutEditor
-                catalog={getFixturesForRoomType(roomType)}
-                areaWidth={numWidth}
-                areaDepth={numDepth}
-                items={layout}
-                onChange={setLayout}
-              />
+              <div className={planCrop ? "grid gap-3 md:grid-cols-2" : undefined}>
+                {planCrop && (
+                  <div className="rounded-md border border-blueprint/10 bg-white/50 p-2">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-blueprint/60">
+                        {planCrop.foundOnPlan ? "Located on the plan — " : "Closest match on the plan — "}
+                        {planCrop.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="text-xs text-blueprint/40 hover:text-blueprint"
+                        onClick={() => setPlanCrop(null)}
+                        aria-label="Dismiss plan reference"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data: URL from the API response, not a next/image remote source */}
+                    <img
+                      src={planCrop.dataUrl}
+                      alt={`Zoomed plan region used for ${roomType.toLowerCase()} layout`}
+                      className="w-full rounded border border-blueprint/10"
+                    />
+                    <p className="mt-1 text-[11px] text-blueprint/40">
+                      This is the exact region of the plan the AI read to place fixtures. Compare it against the
+                      layout and drag fixtures to match anything it got wrong.
+                    </p>
+                  </div>
+                )}
+                <LayoutEditor
+                  catalog={getFixturesForRoomType(roomType)}
+                  areaWidth={numWidth}
+                  areaDepth={numDepth}
+                  items={layout}
+                  onChange={setLayout}
+                />
+              </div>
             ) : (
               <p className="text-xs text-blueprint/40">Enter room dimensions above to lay out fixtures and furniture.</p>
             )}
