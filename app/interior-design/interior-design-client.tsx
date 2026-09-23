@@ -11,6 +11,7 @@ import { ROOM_TYPES, matchRoomType, type RoomTypeOption } from "@/lib/roomTypes"
 import { buildInteriorDesignPrompt } from "@/lib/interiorDesignPrompt";
 import { describeLayout } from "@/lib/layoutDescription";
 import { LayoutEditor, clampItemsToArea } from "@/components/LayoutEditor";
+import { PlanAreaPicker, type PlanAreaSelection } from "@/components/PlanAreaPicker";
 import { FeetInchesInput } from "@/components/FeetInchesInput";
 import { formatFeetInches } from "@/lib/feetInches";
 import { stripLeadingZero } from "@/lib/numberInput";
@@ -70,6 +71,7 @@ export function InteriorDesignClient({
   const [promptDraft, setPromptDraft] = useState("");
   const [promptEdited, setPromptEdited] = useState(false);
   const [planCrop, setPlanCrop] = useState<{ dataUrl: string; label: string; foundOnPlan: boolean } | null>(null);
+  const [showAreaPicker, setShowAreaPicker] = useState(false);
 
   const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
   const [addToImageText, setAddToImageText] = useState("");
@@ -131,7 +133,7 @@ export function InteriorDesignClient({
     setDepth(room.depth);
   }
 
-  async function handleSuggestLayout() {
+  async function handleSuggestLayout(manualCrop?: PlanAreaSelection) {
     if (planPages.length === 0) {
       notify("error", "Upload plan pages on the Plan tab first (marked as layout pages).");
       return;
@@ -146,7 +148,10 @@ export function InteriorDesignClient({
     setPlanCrop(null);
     setSuggesting(true);
     try {
-      await run(suggestTaskKey, `Reading plans for ${roomType.toLowerCase()} layout…`, async () => {
+      const taskLabel = manualCrop
+        ? `Reading selected plan area for ${roomType.toLowerCase()} layout…`
+        : `Reading plans for ${roomType.toLowerCase()} layout…`;
+      await run(suggestTaskKey, taskLabel, async () => {
         const res = await fetchWithRetry("/api/claude/suggest-room-layout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -157,6 +162,7 @@ export function InteriorDesignClient({
             roomWidth: numWidth,
             roomDepth: numDepth,
             fixtures: catalog.map((f) => ({ id: f.id, label: f.label, width: f.width, depth: f.depth })),
+            manualCrop,
           }),
         });
         const json = await res.json();
@@ -485,15 +491,30 @@ export function InteriorDesignClient({
             <div className="mb-1 flex items-center justify-between">
               <label className="label mb-0">Room layout (optional)</label>
               {hasRoomDims && (
-                <button
-                  type="button"
-                  className="btn-ghost px-2 py-1 text-xs"
-                  disabled={suggestingLayout || planPages.length === 0}
-                  onClick={handleSuggestLayout}
-                  title={planPages.length === 0 ? "Upload plan pages on the Plan tab first" : undefined}
-                >
-                  {suggestingLayout ? "Reading plans…" : "Example setup from plans"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-xs"
+                    disabled={suggestingLayout || planPages.length === 0}
+                    onClick={() => handleSuggestLayout()}
+                    title={planPages.length === 0 ? "Upload plan pages on the Plan tab first" : undefined}
+                  >
+                    {suggestingLayout ? "Reading plans…" : "Example setup from plans"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-xs"
+                    disabled={suggestingLayout || planPages.length === 0}
+                    onClick={() => setShowAreaPicker(true)}
+                    title={
+                      planPages.length === 0
+                        ? "Upload plan pages on the Plan tab first"
+                        : "Draw a box around the room yourself if the AI keeps picking the wrong area"
+                    }
+                  >
+                    Select area on plan
+                  </button>
+                </div>
               )}
             </div>
             {hasRoomDims ? (
@@ -664,6 +685,17 @@ export function InteriorDesignClient({
           setDeleting(null);
         }}
       />
+
+      {showAreaPicker && (
+        <PlanAreaPicker
+          pages={planPages}
+          onClose={() => setShowAreaPicker(false)}
+          onConfirm={(selection: PlanAreaSelection) => {
+            setShowAreaPicker(false);
+            handleSuggestLayout(selection);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -48,6 +48,15 @@ interface LocateResult {
   y1?: number;
 }
 
+interface ManualCropInput {
+  url: string;
+  label: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 // Pass 1: just find where the room sits on the sheet set. A whole floor plan
 // sheet downscaled to Claude's ~1568px ceiling leaves any single room as only
 // a small fraction of that image — a fridge or toilet symbol at that scale
@@ -126,11 +135,13 @@ export async function POST(req: Request) {
     roomWidth?: number;
     roomDepth?: number;
     fixtures?: FixtureOption[];
+    manualCrop?: ManualCropInput;
   };
   const pages = body.pages ?? [];
   const fixtures = body.fixtures ?? [];
+  const manualCrop = body.manualCrop;
 
-  if (pages.length === 0) {
+  if (pages.length === 0 && !manualCrop) {
     return NextResponse.json({ error: "No plan pages to reference — upload plan pages on the Plan tab first." }, { status: 400 });
   }
   if (!body.roomType || !body.roomWidth || !body.roomDepth) {
@@ -143,91 +154,131 @@ export async function POST(req: Request) {
   try {
     const anthropic = getAnthropicClient();
 
-    // Fetch every sheet once, at full resolution — reused both for the
-    // locate pass (downscaled) and, if a room is found, for the crop.
-    const sheets = await Promise.all(
-      pages.map(async (page) => {
-        try {
-          return { label: page.label, ...(await fetchImageBufferForClaude(page.url)) };
-        } catch (err) {
-          throw new Error(`Failed to prepare plan page "${page.label}": ${err instanceof Error ? err.message : String(err)}`);
-        }
-      })
-    );
-
-    const roomDescription = `Room to find: ${body.roomName ? `"${body.roomName}" — ` : ""}${body.roomType}, approx ${body.roomWidth}ft x ${body.roomDepth}ft.`;
-
-    // Pass 1: locate the room on the sheet set.
-    const locateBlocks = await Promise.all(sheets.map((s) => bufferToClaudeImageBlock(s.buffer)));
-    const locateContent: Array<Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam> = [];
-    sheets.forEach((s, i) => {
-      locateContent.push({ type: "text", text: `Sheet ${i}: ${s.label}` });
-      locateContent.push(locateBlocks[i]);
-    });
-    locateContent.push({ type: "text", text: `${roomDescription}\nReturn the JSON object described in your instructions.` });
-
     let crop: { block: Anthropic.Messages.ImageBlockParam; label: string; dataUrl: string } | null = null;
-    try {
-      const locateMessage = await anthropic.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 1000,
-        system: LOCATE_SYSTEM_PROMPT,
-        thinking: { type: "adaptive" },
-        output_config: { effort: "low" },
-        messages: [{ role: "user", content: locateContent }],
+    // Only populated on the auto-locate path — referenced by the full-sheet
+    // fallback below, which is never reached when manualCrop is set (that
+    // path always produces a crop or returns early).
+    let sheets: { label: string; buffer: Buffer; width: number; height: number }[] = [];
+
+    if (manualCrop) {
+      // The person drew the crop box themselves on the Plan tab preview —
+      // skip the auto-locate pass entirely (it's the thing being worked
+      // around) and just crop exactly what they selected out of that one
+      // page's full-resolution image.
+      const { buffer, width: pageWidth, height: pageHeight } = await fetchImageBufferForClaude(manualCrop.url);
+      const x0 = Math.max(0, Math.min(manualCrop.x0, manualCrop.x1));
+      const x1 = Math.min(1, Math.max(manualCrop.x0, manualCrop.x1));
+      const y0 = Math.max(0, Math.min(manualCrop.y0, manualCrop.y1));
+      const y1 = Math.min(1, Math.max(manualCrop.y0, manualCrop.y1));
+      const left = Math.round(x0 * pageWidth);
+      const top = Math.round(y0 * pageHeight);
+      const width = Math.max(1, Math.round((x1 - x0) * pageWidth));
+      const height = Math.max(1, Math.round((y1 - y0) * pageHeight));
+      if (width < 20 || height < 20) {
+        return NextResponse.json({ error: "Selected area is too small — draw a larger box around the room." }, { status: 400 });
+      }
+      const croppedBuffer = await sharp(buffer)
+        .extract({ left, top, width, height })
+        .toBuffer();
+      const croppedBlock = await bufferToClaudeImageBlock(croppedBuffer);
+      crop = {
+        block: croppedBlock,
+        label: manualCrop.label,
+        dataUrl: `data:${croppedBlock.source.media_type};base64,${croppedBlock.source.data}`,
+      };
+    } else {
+      if (pages.length === 0) {
+        return NextResponse.json(
+          { error: "No plan pages to reference — upload plan pages on the Plan tab first." },
+          { status: 400 }
+        );
+      }
+
+      // Fetch every sheet once, at full resolution — reused both for the
+      // locate pass (downscaled) and, if a room is found, for the crop.
+      sheets = await Promise.all(
+        pages.map(async (page) => {
+          try {
+            return { label: page.label, ...(await fetchImageBufferForClaude(page.url)) };
+          } catch (err) {
+            throw new Error(`Failed to prepare plan page "${page.label}": ${err instanceof Error ? err.message : String(err)}`);
+          }
+        })
+      );
+
+      const roomDescription = `Room to find: ${body.roomName ? `"${body.roomName}" — ` : ""}${body.roomType}, approx ${body.roomWidth}ft x ${body.roomDepth}ft.`;
+
+      // Pass 1: locate the room on the sheet set.
+      const locateBlocks = await Promise.all(sheets.map((s) => bufferToClaudeImageBlock(s.buffer)));
+      const locateContent: Array<Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam> = [];
+      sheets.forEach((s, i) => {
+        locateContent.push({ type: "text", text: `Sheet ${i}: ${s.label}` });
+        locateContent.push(locateBlocks[i]);
       });
-      const locateText = locateMessage.content.find((b) => b.type === "text");
-      if (locateText && locateText.type === "text") {
-        const located = extractJson<LocateResult>(locateText.text);
-        if (
-          located.found &&
-          located.sheetIndex != null &&
-          sheets[located.sheetIndex] &&
-          located.x0 != null &&
-          located.y0 != null &&
-          located.x1 != null &&
-          located.y1 != null &&
-          located.x1 > located.x0 &&
-          located.y1 > located.y0
-        ) {
-          const sheet = sheets[located.sheetIndex];
-          const boxW = (located.x1 - located.x0) * sheet.width;
-          const boxH = (located.y1 - located.y0) * sheet.height;
-          // Pad another 15% of the box's own size on each side so fixtures
-          // right against a wall (the usual case) aren't clipped by a tight
-          // or slightly-off bounding box.
-          const padX = boxW * 0.15;
-          const padY = boxH * 0.15;
-          const left = Math.max(0, Math.round(located.x0 * sheet.width - padX));
-          const top = Math.max(0, Math.round(located.y0 * sheet.height - padY));
-          const right = Math.min(sheet.width, Math.round(located.x1 * sheet.width + padX));
-          const bottom = Math.min(sheet.height, Math.round(located.y1 * sheet.height + padY));
-          const width = right - left;
-          const height = bottom - top;
-          if (width > 20 && height > 20) {
-            const croppedBuffer = await sharp(sheet.buffer).extract({ left, top, width, height }).toBuffer();
-            // Re-encode the crop at the same resolution ceiling used
-            // elsewhere — but now that ceiling covers just this room
-            // instead of the whole sheet, so fixture symbols land at
-            // several times the effective resolution they had before.
-            const croppedBlock = await bufferToClaudeImageBlock(croppedBuffer);
-            // Same crop, sent back to the client too — so the person asking
-            // for a suggested layout can actually see what region of the
-            // plan it was read from and judge for themselves whether it's
-            // the right room and whether the result matches it, rather than
-            // trusting the placement blind.
-            crop = {
-              block: croppedBlock,
-              label: sheet.label,
-              dataUrl: `data:${croppedBlock.source.media_type};base64,${croppedBlock.source.data}`,
-            };
+      locateContent.push({ type: "text", text: `${roomDescription}\nReturn the JSON object described in your instructions.` });
+
+      try {
+        const locateMessage = await anthropic.messages.create({
+          model: CLAUDE_MODEL,
+          max_tokens: 1000,
+          system: LOCATE_SYSTEM_PROMPT,
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low" },
+          messages: [{ role: "user", content: locateContent }],
+        });
+        const locateText = locateMessage.content.find((b) => b.type === "text");
+        if (locateText && locateText.type === "text") {
+          const located = extractJson<LocateResult>(locateText.text);
+          if (
+            located.found &&
+            located.sheetIndex != null &&
+            sheets[located.sheetIndex] &&
+            located.x0 != null &&
+            located.y0 != null &&
+            located.x1 != null &&
+            located.y1 != null &&
+            located.x1 > located.x0 &&
+            located.y1 > located.y0
+          ) {
+            const sheet = sheets[located.sheetIndex];
+            const boxW = (located.x1 - located.x0) * sheet.width;
+            const boxH = (located.y1 - located.y0) * sheet.height;
+            // Pad another 15% of the box's own size on each side so fixtures
+            // right against a wall (the usual case) aren't clipped by a tight
+            // or slightly-off bounding box.
+            const padX = boxW * 0.15;
+            const padY = boxH * 0.15;
+            const left = Math.max(0, Math.round(located.x0 * sheet.width - padX));
+            const top = Math.max(0, Math.round(located.y0 * sheet.height - padY));
+            const right = Math.min(sheet.width, Math.round(located.x1 * sheet.width + padX));
+            const bottom = Math.min(sheet.height, Math.round(located.y1 * sheet.height + padY));
+            const width = right - left;
+            const height = bottom - top;
+            if (width > 20 && height > 20) {
+              const croppedBuffer = await sharp(sheet.buffer).extract({ left, top, width, height }).toBuffer();
+              // Re-encode the crop at the same resolution ceiling used
+              // elsewhere — but now that ceiling covers just this room
+              // instead of the whole sheet, so fixture symbols land at
+              // several times the effective resolution they had before.
+              const croppedBlock = await bufferToClaudeImageBlock(croppedBuffer);
+              // Same crop, sent back to the client too — so the person asking
+              // for a suggested layout can actually see what region of the
+              // plan it was read from and judge for themselves whether it's
+              // the right room and whether the result matches it, rather than
+              // trusting the placement blind.
+              crop = {
+                block: croppedBlock,
+                label: sheet.label,
+                dataUrl: `data:${croppedBlock.source.media_type};base64,${croppedBlock.source.data}`,
+              };
+            }
           }
         }
+      } catch (err) {
+        // Locate pass failing (bad JSON, transient error) shouldn't sink the
+        // whole request — fall through to the full-sheet pass below.
+        console.error("suggest-room-layout locate pass failed", err);
       }
-    } catch (err) {
-      // Locate pass failing (bad JSON, transient error) shouldn't sink the
-      // whole request — fall through to the full-sheet pass below.
-      console.error("suggest-room-layout locate pass failed", err);
     }
 
     const content: Array<Anthropic.Messages.TextBlockParam | Anthropic.Messages.ImageBlockParam> = [];

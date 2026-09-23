@@ -3216,3 +3216,45 @@ yet; each one only adds what a given feature needed.
   (no real Claude response to render). Worth confirming after deploy
   that the returned data URL renders correctly and actually matches
   what pass 2 was shown.
+
+## Interior Design "Suggest layout": manual crop selection
+
+- Even with the locate-then-zoom fix and the visual confirmation crop,
+  reported as "sometimes recognizes the wrong area or room" — the
+  auto-locate pass is Claude guessing a bounding box from one glance at
+  a whole sheet, and that guess is sometimes just wrong. Added a manual
+  override: select exactly which region of which plan page to read,
+  instead of relying on the AI to find it.
+- **New `components/PlanAreaPicker.tsx`** — a full-bleed picker modal
+  (same "separate overlay, not the padded Modal card" pattern as
+  `FileViewerModal`) that shows a chosen plan page at near-full size
+  with a draggable, resizable selection rectangle drawn over it (drag
+  to draw a new box, drag its interior to move it, drag a corner handle
+  to resize — implemented with Pointer Events so it works with mouse or
+  touch). A `<select>` switches between plan pages when there's more
+  than one. Returns the selection as `{ url, label, x0, y0, x1, y1 }`
+  — the same page-fraction bounding-box shape the server already uses
+  internally for the auto-locate crop.
+- **Interior Design**: a new "Select area on plan" button sits next to
+  "Example setup from plans." Confirming a selection there calls the
+  same `handleSuggestLayout`, now accepting an optional manual crop,
+  which is sent to the API instead of leaving it to auto-locate.
+- **`app/api/claude/suggest-room-layout`**: accepts an optional
+  `manualCrop: { url, label, x0, y0, x1, y1 }` in the request body.
+  When present, the whole auto-locate pass (and the "fetch every plan
+  page" step it needed) is skipped entirely — the route fetches just
+  that one page at full resolution, crops exactly the selected
+  fraction-box out of it (no automatic padding this time, since the
+  person already chose the exact bounds), and goes straight to the
+  fixture-reading pass on that crop at `effort: "medium"`. This is
+  also strictly faster than the auto path for the same reason: one
+  fewer Claude call and only one page fetched instead of every page.
+- The existing plan-crop confirmation panel (from the previous fix)
+  works unchanged here — after a manual-crop suggestion, it shows
+  exactly the region that was selected, so what's compared against the
+  resulting layout is the same crop that was chosen, not a guess.
+- No schema/migration changes.
+- **Not verified against a live key** — same sandbox constraint as the
+  fixes above; the picker's drag/resize interactions were exercised by
+  code review and the build only, not against a running browser with
+  real touch/mouse input or a live Claude response.
