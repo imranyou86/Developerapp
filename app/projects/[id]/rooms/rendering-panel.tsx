@@ -190,13 +190,31 @@ export function RenderingPanel({
     if (!prompt || !prompt.trim()) return;
     setGeneratingImageFor(rendering.id);
     const taskKey = `room-image:${rendering.id}`;
+    // A from-scratch text-to-image call has no idea what this room actually
+    // looks like — it can only follow the room's real layout once there's a
+    // real photo of it to anchor on. Once one exists (uploaded, or from an
+    // earlier generation here), re-running this keeps that same photo's
+    // architecture/walls/camera framing and only restyles it, via the same
+    // image-editing path "Add to this image" uses, instead of discarding
+    // the room's real shape and inventing a new one from text alone.
+    const hasReferencePhoto = !!rendering.uploaded_photo_url;
     try {
       await run(taskKey, `Generating "${room.name}" — ${rendering.style} image…`, async () => {
-        const res = await fetchWithRetry("/api/gemini/generate-room-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
+        const res = await fetchWithRetry(
+          hasReferencePhoto ? "/api/gemini/edit-room-image" : "/api/gemini/generate-room-image",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              hasReferencePhoto
+                ? {
+                    imageUrl: rendering.uploaded_photo_url,
+                    prompt: `Keep this exact room's architecture, walls, windows, and camera framing unchanged — only restyle the finishes, furniture, and decor to match: ${prompt}`,
+                  }
+                : { prompt }
+            ),
+          }
+        );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? "Image generation failed.");
 
@@ -470,7 +488,11 @@ export function RenderingPanel({
                     onClick={() => handleGenerateImage(r)}
                     disabled={generatingImageFor === r.id || isRunning(`room-image:${r.id}`)}
                   >
-                    {generatingImageFor === r.id || isRunning(`room-image:${r.id}`) ? "Generating…" : "Generate image (AI)"}
+                    {generatingImageFor === r.id || isRunning(`room-image:${r.id}`)
+                      ? "Generating…"
+                      : r.uploaded_photo_url
+                        ? "Regenerate (keep this room's layout)"
+                        : "Generate image (AI)"}
                   </button>
                 )}
                 <input

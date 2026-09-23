@@ -2956,3 +2956,41 @@ yet; each one only adds what a given feature needed.
   (Interior Design, Landscape) that relied on placeholder text as an
   implicit label rather than a separate `<label>` element.
 - No SQL for this one — UI/component change only.
+
+## Room rendering: make AI images actually follow the real room
+
+- **The problem**: "Generate image (AI)" always generated a brand-new
+  photo from text alone (room name/type/style + dimensions as a plain
+  sentence) — it had no visual information about the room at all, so it
+  couldn't "follow the layout" regardless of which image model ran it.
+  Worse, clicking it again after a photo already existed for that
+  rendering silently discarded that photo and invented an unrelated one.
+- **Researched swapping the underlying image model** (currently Gemini
+  3.1 Flash Image, "Nano Banana 2") against current alternatives (GPT
+  Image, Flux) — found nothing that changes the actual bottleneck here,
+  which is that a from-scratch text-to-image call has no way to know a
+  specific room's real layout no matter which model runs it; kept the
+  existing model rather than adding a second AI provider/API key for no
+  concrete gain.
+- **The fix that actually helps**: once a real photo of the room exists
+  for a rendering (uploaded, or from an earlier "Generate image (AI)"
+  call), clicking it again now calls the existing image-*editing* path
+  (`/api/gemini/edit-room-image`, the same one "Add to this image" uses)
+  instead of generating from scratch — the prompt explicitly says "keep
+  this exact room's architecture, walls, windows, and camera framing
+  unchanged, only restyle the finishes/furniture/decor." This is the only
+  way an image model can genuinely follow a specific room's real
+  shape — by editing an actual photo of it, not inventing one from a
+  paragraph. The button relabels to "Regenerate (keep this room's
+  layout)" once that's the case.
+- For the very first generation (no photo yet to anchor on), the
+  underlying prompt (`app/api/claude/room-concept/route.ts`) now computes
+  the room's shape from its real width/depth ratio (long-narrow /
+  rectangular / roughly square) and front-loads that into the
+  image-generation prompt's required shot description, so composition at
+  least has a chance of reading as the room's true proportions instead of
+  a generic square room. This is a real but partial improvement — for a
+  room's real layout to actually come through, upload a real photo of it
+  first (via "Upload photo" on a rendering entry) and generate/regenerate
+  from there.
+- No SQL for this one either.

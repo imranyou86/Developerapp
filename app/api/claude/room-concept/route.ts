@@ -35,8 +35,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "roomName and style are required." }, { status: 400 });
   }
 
-  const dims =
-    body.width && body.depth ? `The room is approximately ${body.width}ft x ${body.depth}ft.` : "";
+  // A from-scratch image model has no idea what this room actually looks
+  // like — the only real signal it can act on is the room's own
+  // proportions, so this is computed here (not left for Claude to eyeball
+  // from raw numbers) and front-loaded into the image prompt's required
+  // shot description. Once a photo of this room exists (uploaded, or from
+  // an earlier generation), regenerating switches to an image-edit call
+  // that preserves that photo's actual walls/camera framing instead —
+  // see handleGenerateImage in rendering-panel.tsx — which is the
+  // stronger "follows the real room" path; this only helps the very
+  // first, textual generation.
+  let shape = "";
+  if (body.width && body.depth) {
+    const ratio = Math.max(body.width, body.depth) / Math.min(body.width, body.depth);
+    const longAxis = body.width >= body.depth ? "width" : "depth";
+    if (ratio >= 1.8) shape = `a long, narrow room (elongated along its ${longAxis})`;
+    else if (ratio >= 1.3) shape = "a rectangular room";
+    else shape = "a roughly square room";
+  }
+  const dims = body.width && body.depth ? `It is ${shape}, approximately ${body.width}ft x ${body.depth}ft.` : "";
 
   const prompt = `Design concept for a "${body.roomName}" (${body.roomType ?? "room"}) in a
 "${body.style}" interior design style. ${dims}
@@ -47,11 +64,18 @@ Write two things:
 2. A concise, ready-to-paste image-generation prompt for an external tool (ChatGPT image
    generation, Midjourney, etc). Image models follow short, concrete, front-loaded prompts far
    better than long descriptive paragraphs — pack in the specifics, cut the flowery language.
-   Keep it to 40-60 words, structured in this order: [shot type] of a [style] [room type],
-   [3-4 concrete materials/finishes], [2-3 furniture/fixture pieces], [lighting], [camera/angle],
-   photorealistic, architectural photography. No scene-setting prose, no adjectives that don't
-   change what's rendered (skip "beautiful", "stunning", "inviting" — every word should be a
-   visual instruction).
+   Keep it to 40-60 words, structured in this order: [shot type${
+     shape ? ` chosen to actually show this is ${shape}` : ""
+   }] of a [style] [room type]${shape ? `, ${shape}` : ""}, [3-4 concrete materials/finishes],
+   [2-3 furniture/fixture pieces], [lighting], [camera/angle], photorealistic, architectural
+   photography. ${
+     shape
+       ? `The room's real shape is ${shape} — the composition and furniture placement must read as
+   that shape (e.g. a long narrow room should be framed/furnished to show its length, not
+   cropped into a generic square room). `
+       : ""
+   }No scene-setting prose, no adjectives that don't change what's rendered (skip "beautiful",
+   "stunning", "inviting" — every word should be a visual instruction).
 
 Respond with ONLY a JSON object: {"description": string, "image_prompt": string}`;
 
