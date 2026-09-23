@@ -27,16 +27,31 @@ export interface ClaudeImageBlock {
 // past the Messages API's request-size limit (a 413). Claude also only
 // processes images up to ~1568px on the long edge internally, so sending
 // anything larger wastes bandwidth without improving accuracy.
-const MAX_DIMENSION = 1568;
+export const MAX_DIMENSION = 1568;
 
-export async function fetchImageForClaude(url: string): Promise<ClaudeImageBlock> {
+// Fetches a source image and returns it orientation-corrected but otherwise
+// at full resolution — no resizing. Callers that need to crop a small region
+// out of a large sheet (e.g. one room out of a whole floor plan) should use
+// this instead of fetchImageForClaude, since a fraction of a 1568px-capped
+// image loses far more detail than the same fraction of the original.
+export async function fetchImageBufferForClaude(url: string): Promise<{ buffer: Buffer; width: number; height: number }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const sourceBuffer = Buffer.from(await res.arrayBuffer());
+  const rotated = await sharp(sourceBuffer).rotate().toBuffer();
+  const metadata = await sharp(rotated).metadata();
+  if (!metadata.width || !metadata.height) {
+    throw new Error("Could not read image dimensions.");
+  }
+  return { buffer: rotated, width: metadata.width, height: metadata.height };
+}
 
+// Downscales an already-fetched (and already orientation-corrected) image
+// buffer to Claude's effective resolution ceiling and wraps it as a message
+// image block.
+export async function bufferToClaudeImageBlock(buffer: Buffer, maxDimension = MAX_DIMENSION): Promise<ClaudeImageBlock> {
   const resized = await sharp(buffer)
-    .rotate()
-    .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+    .resize({ width: maxDimension, height: maxDimension, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 85 })
     .toBuffer();
 
@@ -44,6 +59,11 @@ export async function fetchImageForClaude(url: string): Promise<ClaudeImageBlock
     type: "image",
     source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") },
   };
+}
+
+export async function fetchImageForClaude(url: string): Promise<ClaudeImageBlock> {
+  const { buffer } = await fetchImageBufferForClaude(url);
+  return bufferToClaudeImageBlock(buffer);
 }
 
 // Claude sometimes writes literal newlines/tabs inside a JSON string value

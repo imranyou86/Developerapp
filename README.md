@@ -3127,3 +3127,58 @@ yet; each one only adds what a given feature needed.
   some later versions per some sources), so if Midjourney rejects the
   parameters, that's the first thing to check — it's plain text in the
   prompt, no code change needed to adjust it.
+
+## Interior Design "Suggest layout": locate-then-zoom so it actually reads the plan
+
+- Reported as "unable to read the plan layout and present the plan's
+  layout" — specifically not picking up real fixture positions (fridge,
+  island, toilet) even though example plan sheets do show them drawn to
+  scale (a refrigerator boxed and labeled "REF.", a cooktop labeled
+  "RH" on the island, a toilet/vanity sketched into a powder room,
+  etc). Root cause: Claude's vision input is effectively capped at
+  ~1568px on the long edge — sending a whole floor-plan sheet at that
+  resolution left any single room as a small fraction of the image, so
+  fine fixture symbols were often just a handful of pixels and not
+  reliably legible, no matter how detailed the text instructions were.
+- **Fixed with a two-pass locate-then-zoom pipeline** in
+  `app/api/claude/suggest-room-layout/route.ts`:
+  1. **Locate pass** (new, cheap, `effort: "low"`): sends the full
+     sheet set (as before) and asks Claude only to find which sheet the
+     named room is on and its bounding box as fractions of that sheet's
+     width/height — a much easier read (a room label in normal-size
+     text) than picking out small fixture symbols.
+  2. **Crop**: using `sharp`, crops that bounding box (padded 15% on
+     each side so nothing flush against a wall gets clipped) out of the
+     **original full-resolution** sheet image — not the downscaled copy
+     — then re-encodes just that crop at the same ~1568px ceiling. The
+     room now fills most of the frame instead of a corner of it, so the
+     effective resolution on its fixtures is several times higher.
+  3. **Layout pass**: sends only this zoomed crop (not the whole sheet)
+     to Claude with the original detailed system prompt, now at
+     `effort: "medium"` instead of `"low"` — affordable because the
+     model is reasoning over one small, focused image instead of a
+     whole multi-room sheet set. Falls back to the old whole-sheet
+     behavior (and `effort: "low"`) if the locate pass fails or can't
+     confidently find the room, so a plan that genuinely doesn't label
+     the room still degrades to the existing generic-layout path
+     instead of erroring.
+- **`lib/anthropic.ts`**: `fetchImageForClaude` split into two pieces —
+  `fetchImageBufferForClaude(url)` (fetch + orientation-correct, no
+  resize, returns the buffer plus its real width/height) and
+  `bufferToClaudeImageBlock(buffer)` (the existing resize-to-1568px +
+  JPEG-encode step). `fetchImageForClaude` itself is now just those two
+  composed, so its behavior — and every other route that already calls
+  it (`detect-rooms`, `extract-bid`, `identify-finishes`, etc.) — is
+  unchanged; only `suggest-room-layout` uses the buffer directly, to
+  crop before the resize happens.
+- `maxDuration` raised from 60s to 90s on this route — it now makes two
+  sequential Claude calls (locate, then layout) instead of one.
+- No schema/migration changes — this is a server-route-only fix to how
+  the existing plan images are read, not a new feature.
+- **Not verified against a live key** — this sandbox has no network
+  access to call the real Claude vision API, so the locate pass's JSON
+  shape, the crop math, and the accuracy improvement itself are
+  reasoned from the code and the plan-sheet example shared in this
+  session, not confirmed end-to-end. Worth a real "Suggest layout" run
+  against an actual plan after deploying to confirm the crop lands on
+  the right region and the fixture read is now accurate.
