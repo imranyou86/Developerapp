@@ -14,7 +14,7 @@ import { deleteRendering, saveRendering, saveRenderingPhoto } from "@/app/projec
 import { saveFinishScan } from "@/app/interior-design/finish-id-actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { FINISH_CATEGORIES } from "@/lib/finishes-db";
-import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
+import type { PlanPageOption, RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 import type { IdentifiedFinish, StyleName } from "@/lib/types";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
@@ -31,10 +31,12 @@ interface QueuedStyle {
 export function RenderingPanel({
   projectId,
   room,
+  planPages,
   onRoomUpdated,
 }: {
   projectId: string;
   room: RoomWithRelations;
+  planPages: PlanPageOption[];
   onRoomUpdated: (room: RoomWithRelations) => void;
 }) {
   const { notify } = useToast();
@@ -196,7 +198,11 @@ export function RenderingPanel({
     // earlier generation here), re-running this keeps that same photo's
     // architecture/walls/camera framing and only restyles it, via the same
     // image-editing path "Add to this image" uses, instead of discarding
-    // the room's real shape and inventing a new one from text alone.
+    // the room's real shape and inventing a new one from text alone. Short
+    // of a real photo, the next best layout signal is the construction's
+    // own floor plan sheet(s) — when those exist, Gemini is asked to find
+    // this room on the plan and use its real wall/window/door layout,
+    // rather than falling all the way back to a generic room description.
     const hasReferencePhoto = !!rendering.uploaded_photo_url;
     try {
       await run(taskKey, `Generating "${room.name}" — ${rendering.style} image…`, async () => {
@@ -211,7 +217,12 @@ export function RenderingPanel({
                     imageUrl: rendering.uploaded_photo_url,
                     prompt: `Keep this exact room's architecture, walls, windows, and camera framing unchanged — only restyle the finishes, furniture, and decor to match: ${prompt}`,
                   }
-                : { prompt }
+                : {
+                    prompt,
+                    planImageUrls: planPages.length > 0 ? planPages.map((p) => p.storage_url) : undefined,
+                    roomName: room.name,
+                    floor: room.floor,
+                  }
             ),
           }
         );

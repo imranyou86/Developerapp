@@ -17,12 +17,13 @@ import { usePersistedSelection } from "@/lib/usePersistedSelection";
 import { RenderingPanel } from "@/app/projects/[id]/rooms/rendering-panel";
 import { FinishesPanel } from "@/app/projects/[id]/rooms/finishes-panel";
 import { RoughInPanel } from "@/app/projects/[id]/rooms/rough-in-panel";
-import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
+import type { PlanPageOption, RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 
 export function RoomCard({
   projectId,
   room,
   hasPlanPages,
+  planPages,
   onViewPlans,
   onDeleteRequested,
   onRoomUpdated,
@@ -30,6 +31,7 @@ export function RoomCard({
   projectId: string;
   room: RoomWithRelations;
   hasPlanPages: boolean;
+  planPages: PlanPageOption[];
   onViewPlans: () => void;
   onDeleteRequested: () => void;
   onRoomUpdated: (room: RoomWithRelations) => void;
@@ -296,7 +298,7 @@ export function RoomCard({
 
           <RoughInPanel projectId={projectId} room={room} onRoomUpdated={onRoomUpdated} />
 
-          <RenderingPanel projectId={projectId} room={room} onRoomUpdated={onRoomUpdated} />
+          <RenderingPanel projectId={projectId} room={room} planPages={planPages} onRoomUpdated={onRoomUpdated} />
 
           <FinishesPanel projectId={projectId} room={room} onRoomUpdated={onRoomUpdated} />
         </div>

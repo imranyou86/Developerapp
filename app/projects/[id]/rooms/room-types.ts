@@ -47,6 +47,14 @@ export interface RoughInCapture {
   rough_in_media: RoughInMedia[];
 }
 
+// A construction's Plan tab layout page — used to ground AI room-image
+// generation in the room's real wall/window/door layout instead of
+// inventing one from a text description alone. See RenderingPanel.
+export interface PlanPageOption {
+  label: string;
+  storage_url: string;
+}
+
 export interface RoomWithRelations {
   id: string;
   name: string;

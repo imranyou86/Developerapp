@@ -2995,6 +2995,46 @@ yet; each one only adds what a given feature needed.
   from there.
 - No SQL for this one either.
 
+## Room rendering: ground first-time generation in the actual floor plan
+
+- Follow-up on "it's not accurately picking out the layout from the
+  plans — be able to look at the plans and really focus on the [room]."
+  The previous fix only covered two cases: a real photo already exists
+  (strongest — edit-preserve), or no photo and no plan (weakest —
+  shape-in-text). This adds the real middle case: no photo yet, but the
+  construction's own floor plan sheets already exist on the Plan tab —
+  those get attached directly to the Gemini call instead of falling back
+  to text-only.
+- **`generateRoomImageFromPlan`** (`lib/gemini.ts`) sends the
+  construction's layout plan page(s) as image inputs alongside an
+  instruction telling Gemini to find the room by name (and floor, when
+  set) on the attached sheet(s) and use its real wall/window/door layout
+  and proportions as the basis for the photo — "ignore every other room
+  on the sheet." Capped at 4 plan sheets per call (`PLAN_IMAGE_LIMIT`)
+  to keep the request size reasonable; most constructions have one
+  layout sheet per floor. `/api/gemini/generate-room-image` now takes
+  `planImageUrls`/`roomName`/`floor` and dispatches to this instead of
+  the plain text-only path whenever plan pages are available — wired
+  from `RenderingPanel`, which now receives the same layout-only
+  `planPages` list "View plans" already used (threaded down through
+  `RoomsClient` → `RoomCard` → `RenderingPanel`; moved the
+  `PlanPageOption` type from `rooms-client.tsx` to `room-types.ts` so
+  both files could share it without a circular import).
+- Priority order for "Generate image (AI)" is now: (1) a real photo of
+  this room already exists → edit-preserve it (strongest); (2) no photo
+  yet, but plan sheets exist → ground on the actual floor plan (this
+  change); (3) neither → fall back to the shape-aware text prompt
+  (weakest, previous fix). Once any image exists, regenerating always
+  uses (1) from then on.
+- Depends entirely on the underlying model's ability to read a labeled
+  floor plan and reason about which room is which spatially — not
+  independently verified against a live key in this sandbox (same
+  network limitation as the rest of this session's AI work). Worth a
+  real test: generate a room that has a plan sheet uploaded and check
+  whether the result's proportions/window-door placement actually
+  resemble that room, not a different one on the same sheet.
+- No SQL — reuses the existing `plan_pages` table as-is.
+
 ## Room rendering: switched to Gemini's Pro-tier image model
 
 - Followed up on "not good, need the best one that follows our layout"

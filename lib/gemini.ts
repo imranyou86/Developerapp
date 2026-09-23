@@ -92,15 +92,14 @@ export async function generateRoomImage(prompt: string): Promise<GeneratedImage>
 
 const EDIT_MAX_DIMENSION = 1536;
 
-// Interior Design/Landscape tabs: takes a real photo (an empty/framed
-// room, or a house exterior) and asks Gemini to redesign it in place —
-// image-to-image via an inlineData part alongside the text instruction,
-// rather than generating from scratch, so the actual architecture/
-// structure comes through in the result. Downscales and normalizes to PNG
-// first — phone photos can be large enough to be slow otherwise.
-export async function editRoomImage(imageUrl: string, prompt: string): Promise<GeneratedImage> {
-  const sourceRes = await fetch(imageUrl);
-  if (!sourceRes.ok) throw new Error(`Failed to fetch the room photo: ${sourceRes.status}`);
+// Shared by editRoomImage and generateRoomImageFromPlan below — fetches a
+// source image and normalizes it to a size-capped PNG inlineData part.
+// Downscaling first matters for both: a phone photo can be large enough to
+// be slow, and a scanned plan sheet can be large enough to blow past
+// request-size limits once several are attached to one call.
+async function fetchAndNormalizeImage(url: string): Promise<GeminiPart> {
+  const sourceRes = await fetch(url);
+  if (!sourceRes.ok) throw new Error(`Failed to fetch image: ${sourceRes.status}`);
   const sourceBuffer = Buffer.from(await sourceRes.arrayBuffer());
 
   const pngBuffer = await sharp(sourceBuffer)
@@ -109,5 +108,45 @@ export async function editRoomImage(imageUrl: string, prompt: string): Promise<G
     .png()
     .toBuffer();
 
-  return callGemini([{ inlineData: { mimeType: "image/png", data: pngBuffer.toString("base64") } }, { text: prompt }]);
+  return { inlineData: { mimeType: "image/png", data: pngBuffer.toString("base64") } };
+}
+
+// Interior Design/Landscape tabs: takes a real photo (an empty/framed
+// room, or a house exterior) and asks Gemini to redesign it in place —
+// image-to-image via an inlineData part alongside the text instruction,
+// rather than generating from scratch, so the actual architecture/
+// structure comes through in the result.
+export async function editRoomImage(imageUrl: string, prompt: string): Promise<GeneratedImage> {
+  const imagePart = await fetchAndNormalizeImage(imageUrl);
+  return callGemini([imagePart, { text: prompt }]);
+}
+
+// Caps how many plan sheets get attached to one call — most constructions
+// have one layout sheet per floor, and this keeps the request a
+// reasonable size regardless.
+const PLAN_IMAGE_LIMIT = 4;
+
+// Rooms tab: grounds a from-scratch room render in the construction's own
+// floor plan sheet(s) instead of inventing a generic room from a text
+// description alone — the only real layout signal available before any
+// actual photo of the room exists (once one does, editRoomImage above is
+// the stronger path). Gemini is asked to find the named room on the
+// attached plan sheet(s) and use its real wall/window/door layout as the
+// basis for the photo.
+export async function generateRoomImageFromPlan(
+  planImageUrls: string[],
+  roomName: string,
+  floor: number | null,
+  prompt: string
+): Promise<GeneratedImage> {
+  const urls = planImageUrls.slice(0, PLAN_IMAGE_LIMIT);
+  const planParts = await Promise.all(urls.map((url) => fetchAndNormalizeImage(url)));
+
+  const focusInstruction = `The attached image(s) are this construction's architectural floor plan sheet(s). Find the room
+labeled "${roomName}"${floor != null ? ` (floor ${floor})` : ""} on the plan and use its exact wall
+outline, window and door positions, and proportions as the basis for the photograph described
+next — the result needs to be recognizable as that specific room's real layout, not a generic
+room of the same type. Ignore every other room on the sheet.`;
+
+  return callGemini([...planParts, { text: focusInstruction }, { text: prompt }]);
 }

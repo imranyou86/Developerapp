@@ -9,12 +9,9 @@ import { FileViewerModal } from "@/components/FileViewer";
 import { stripLeadingZero } from "@/lib/numberInput";
 import { addRoom, deleteRoom } from "@/app/projects/[id]/rooms/actions";
 import { RoomCard } from "@/app/projects/[id]/rooms/room-card";
-import type { RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
+import type { PlanPageOption, RoomWithRelations } from "@/app/projects/[id]/rooms/room-types";
 
-export interface PlanPageOption {
-  label: string;
-  storage_url: string;
-}
+export type { PlanPageOption };
 
 const ROOM_TYPES = [
   "Bedroom",
@@ -78,6 +75,7 @@ export function RoomsClient({
                 projectId={projectId}
                 room={room}
                 hasPlanPages={planPages.length > 0}
+                planPages={planPages}
                 onViewPlans={() => setViewingPlans(true)}
                 onDeleteRequested={() => setDeleting(room)}
                 onRoomUpdated={(updated) =>
