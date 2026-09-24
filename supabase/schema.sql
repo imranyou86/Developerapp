@@ -174,8 +174,16 @@ create table if not exists interior_designs (
   sqft numeric,
   layout jsonb not null default '[]'::jsonb,
   original_photo_url text,
-  generated_image_url text not null,
-  prompt text not null,
+  -- Nullable — a design can be a Midjourney-prompt-only entry with no
+  -- generated image at all (see migration 063 and midjourney_prompt
+  -- below).
+  generated_image_url text,
+  prompt text,
+  -- A Midjourney-syntax variant, for a design generated without ever
+  -- calling Gemini — same shape as renderings.midjourney_prompt (see
+  -- migration 062). Midjourney has no official API, so this is copy-paste
+  -- only, not called from this app.
+  midjourney_prompt text,
   created_at timestamptz not null default now()
 );
 

@@ -3327,3 +3327,64 @@ yet; each one only adds what a given feature needed.
 - **Not verified against a live key** — same sandbox constraint as
   above; the updated Midjourney instruction text and the target-based
   branching were checked by code review and the build only.
+
+## Interior Design: same Gemini-or-Midjourney choice, plus quick-copy everywhere
+
+- The Gemini/Midjourney target selector only existed in Rooms & Tasks —
+  Interior Design still always generated a Gemini image with no
+  alternative. Added the same "Generate" dropdown (Image via Gemini /
+  Midjourney prompt only) to the Interior Design form. Picking Midjourney
+  skips the Gemini call, the photo upload, and the generated image
+  entirely — it calls `/api/claude/room-concept` with `target:
+  "midjourney"` and saves just the returned prompt.
+- Interior Design's Midjourney prompt is actually grounded better than
+  Rooms & Tasks' — the LayoutEditor already computes an exact,
+  wall-relative fixture placement (`describeLayout()`), so
+  `room-concept` now accepts an optional `layoutDescription` and, when
+  given, translates that real placement into Midjourney fragments
+  instead of inventing a plausible one (which is all it can do for
+  Rooms & Tasks, since that route has no real fixture data).
+- `room-concept`'s room-naming validation relaxed from requiring
+  `roomName` to requiring `roomName` OR `roomType` — Interior Design's
+  manual mode (no tracked room selected) only ever has `roomType`.
+- Also fixed: "I don't see the quick copy on that page" — Interior
+  Design's (and Landscape's) "Copy prompt" was still nested inside a
+  collapsed details block, the same gap just fixed for Rooms & Tasks in
+  the change above. Both now have a one-click "Copy prompt" button in
+  the card header, next to "Delete" — the nested duplicate inside the
+  details block was removed from both.
+- A design's card now handles having no generated image at all: the
+  image area shows "Midjourney prompt only — no image generated in
+  this app" instead, and "Save image"/"Add to this image" don't render
+  (there's no image to act on).
+
+### Migration 063 — required before this deploys
+
+`interior_designs.generated_image_url` and `.prompt` were both
+`not null`, which a Midjourney-prompt-only row (no image, no Gemini
+prompt) can't satisfy — both are relaxed to nullable, and a new
+`midjourney_prompt` column holds the copy-paste prompt for that path
+(mirrors `renderings.midjourney_prompt` from migration 062).
+
+```sql
+-- Interior Design gets the same Gemini-or-Midjourney-only choice Rooms &
+-- Tasks already has (migration 062): previously every design always
+-- generated (and required) a Gemini image; now a design can instead be a
+-- Midjourney-prompt-only entry with no generated image at all, so
+-- generated_image_url and prompt (which always held the Gemini prompt)
+-- both need to become optional, and a new midjourney_prompt column holds
+-- the copy-paste prompt for that path. Midjourney has no official API, so
+-- this is never called from this app.
+--
+-- Run this once in the Supabase SQL editor against an EXISTING project
+-- that already has migrations 001-062 applied.
+
+alter table interior_designs add column if not exists midjourney_prompt text;
+alter table interior_designs alter column generated_image_url drop not null;
+alter table interior_designs alter column prompt drop not null;
+```
+
+- **Not verified against a live key** — same sandbox constraint as
+  above; the migration was reasoned from the schema and existing
+  `renderings.midjourney_prompt` precedent, not run against a live
+  Supabase instance.

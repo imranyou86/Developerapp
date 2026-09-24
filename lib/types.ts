@@ -255,8 +255,10 @@ export interface InteriorDesign {
   sqft: number | null;
   layout: PlacedFixture[];
   original_photo_url: string | null;
-  generated_image_url: string;
-  prompt: string;
+  // Both null for a Midjourney-prompt-only design — see midjourney_prompt.
+  generated_image_url: string | null;
+  prompt: string | null;
+  midjourney_prompt: string | null;
   created_at: string;
 }
 

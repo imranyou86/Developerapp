@@ -33,10 +33,15 @@ export async function POST(req: Request) {
     width?: number | null;
     depth?: number | null;
     target?: ConceptTarget;
+    // Interior Design's LayoutEditor already knows exactly where every
+    // fixture sits (from describeLayout()) — when present, this is real
+    // ground truth, not a guess, so the Midjourney instruction below
+    // translates it directly instead of inventing a plausible layout.
+    layoutDescription?: string;
   };
 
-  if (!body.roomName || !body.style) {
-    return NextResponse.json({ error: "roomName and style are required." }, { status: 400 });
+  if (!body.style || (!body.roomName && !body.roomType)) {
+    return NextResponse.json({ error: "style and roomName or roomType are required." }, { status: 400 });
   }
 
   // Which prompt to write is picked up front (not always both) — asking
@@ -97,11 +102,15 @@ Respond with ONLY a JSON object: {"description": string, "image_prompt": string}
    }
    - an explicit wall-by-wall layout fragment naming which wall or corner each major piece of
      furniture/fixture sits against (e.g. "sofa against the long back wall, armchair in the near
-     left corner, window centered on the right wall, doorway on the left") — invent one
-     plausible, internally consistent arrangement for a ${
-       body.roomType ?? "room"
-     }${shape ? ` of this shape and size` : ""} and keep every other fragment in the prompt consistent with it (don't
-     mention a piece of furniture in fragment 3 that contradicts where fragment 2 placed it)
+     left corner, window centered on the right wall, doorway on the left")${
+       body.layoutDescription
+         ? ` — the room's REAL fixture layout is already known, translate it directly into this
+     fragment rather than inventing one: "${body.layoutDescription}"`
+         : ` — invent one plausible, internally consistent arrangement for a ${
+             body.roomType ?? "room"
+           }${shape ? ` of this shape and size` : ""} and keep every other fragment in the prompt consistent with it (don't
+     mention a piece of furniture in fragment 3 that contradicts where fragment 2 placed it)`
+     }
    - materials, furniture, lighting (same specifics an image-generation prompt would need)
    then end with parameters on their own: "--ar 3:2 --style raw --v 7 --stylize 50" ("--style
    raw" cuts Midjourney's default artistic styling for a more literal, photorealistic result;
@@ -109,7 +118,8 @@ Respond with ONLY a JSON object: {"description": string, "image_prompt": string}
 
 Respond with ONLY a JSON object: {"description": string, "midjourney_prompt": string}`;
 
-  const prompt = `Design concept for a "${body.roomName}" (${body.roomType ?? "room"}) in a
+  const roomLabel = body.roomName ? `"${body.roomName}" (${body.roomType ?? "room"})` : (body.roomType ?? "room");
+  const prompt = `Design concept for a ${roomLabel} in a
 "${body.style}" interior design style. ${dims}
 
 Write two things:

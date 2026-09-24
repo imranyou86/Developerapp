@@ -72,6 +72,10 @@ export function InteriorDesignClient({
   const [promptEdited, setPromptEdited] = useState(false);
   const [planCrop, setPlanCrop] = useState<{ dataUrl: string; label: string; foundOnPlan: boolean } | null>(null);
   const [showAreaPicker, setShowAreaPicker] = useState(false);
+  // "Midjourney prompt only" skips the Gemini image call entirely — text
+  // only, no photo upload, no generated image — so picking it up front
+  // avoids generating (and paying for) an image nobody asked for.
+  const [generateTarget, setGenerateTarget] = useState<"gemini" | "midjourney">("gemini");
 
   const [addToImagePromptFor, setAddToImagePromptFor] = useState<string | null>(null);
   const [addToImageText, setAddToImageText] = useState("");
@@ -248,6 +252,69 @@ export function InteriorDesignClient({
 
     setSubmitting(true);
     try {
+      if (generateTarget === "midjourney") {
+        // Text only — no Gemini call, no photo upload, no generated image.
+        // Midjourney has no API, so all this produces is a copy-paste
+        // prompt; the LayoutEditor's exact fixture placement (already
+        // computed above as layoutDescription) is real ground truth here,
+        // not a guess, so it's passed straight through instead of asking
+        // Claude to invent a plausible arrangement.
+        await run(taskKey, `Writing Midjourney prompt — ${roomType.toLowerCase()} — ${style}…`, async () => {
+          const res = await fetchWithRetry("/api/claude/room-concept", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomName: selectedRoom?.name ?? null,
+              roomType,
+              style: style.trim(),
+              width: w,
+              depth: d,
+              target: "midjourney",
+              layoutDescription: layoutDescription || undefined,
+            }),
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error ?? "Midjourney prompt generation failed.");
+
+          const saveRes = await saveInteriorDesign(projectId, {
+            roomId,
+            roomType,
+            style: style.trim(),
+            width: w,
+            depth: d,
+            sqft: s,
+            layout,
+            originalPhotoUrl: null,
+            generatedImageUrl: null,
+            prompt: null,
+            midjourneyPrompt: json.midjourney_prompt,
+          });
+          if (!saveRes.ok || !saveRes.id) throw new Error(saveRes.error ?? "Could not save design.");
+
+          setDesigns((prev) => [
+            {
+              id: saveRes.id!,
+              project_id: projectId,
+              room_id: roomId,
+              room_type: roomType,
+              style: style.trim(),
+              width: w,
+              depth: d,
+              sqft: s,
+              layout,
+              original_photo_url: null,
+              generated_image_url: null,
+              prompt: null,
+              midjourney_prompt: json.midjourney_prompt,
+              created_at: new Date().toISOString(),
+            },
+            ...prev,
+          ]);
+          notify("success", "Midjourney prompt ready — copy it below.");
+        });
+        return;
+      }
+
       await run(taskKey, `Designing ${roomType.toLowerCase()} — ${style}…`, async () => {
         const originalUrl = photoFile
           ? await uploadToStorage(photoFile, photoFile.name.split(".").pop() || "jpg", "original")
@@ -312,6 +379,7 @@ export function InteriorDesignClient({
             original_photo_url: originalUrl,
             generated_image_url: generatedUrl,
             prompt,
+            midjourney_prompt: null,
             created_at: new Date().toISOString(),
           },
           ...prev,
@@ -329,7 +397,7 @@ export function InteriorDesignClient({
   }
 
   async function handleAddToImage(design: InteriorDesign) {
-    if (!addToImageText.trim()) return;
+    if (!addToImageText.trim() || !design.generated_image_url) return;
     setAddingToImage(design.id);
     const taskKey2 = `interior-design-add:${design.id}`;
     try {
@@ -352,7 +420,9 @@ export function InteriorDesignClient({
         // describing everything actually in the image, not just the most
         // recent edit, so "Copy prompt" and any future regeneration still
         // reflect the full picture.
-        const updatedPrompt = `${design.prompt}\n\nUpdate: ${addToImageText.trim()}`;
+        const updatedPrompt = design.prompt
+          ? `${design.prompt}\n\nUpdate: ${addToImageText.trim()}`
+          : addToImageText.trim();
 
         const updateRes = await updateInteriorDesignImage(projectId, design.id, {
           roomType: design.room_type,
@@ -566,32 +636,52 @@ export function InteriorDesignClient({
             )}
           </div>
 
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="label mb-0">Image prompt — edit before generating, or write your own</label>
-              {promptEdited && (
-                <button
-                  type="button"
-                  className="btn-ghost px-2 py-1 text-xs"
-                  onClick={() => setPromptEdited(false)}
-                >
-                  Reset to auto-generated
-                </button>
-              )}
+          {generateTarget === "gemini" && (
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="label mb-0">Image prompt — edit before generating, or write your own</label>
+                {promptEdited && (
+                  <button
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-xs"
+                    onClick={() => setPromptEdited(false)}
+                  >
+                    Reset to auto-generated
+                  </button>
+                )}
+              </div>
+              <textarea
+                className="input font-mono text-xs"
+                rows={5}
+                value={promptDraft}
+                onChange={(e) => {
+                  setPromptDraft(e.target.value);
+                  setPromptEdited(true);
+                }}
+              />
             </div>
-            <textarea
-              className="input font-mono text-xs"
-              rows={5}
-              value={promptDraft}
-              onChange={(e) => {
-                setPromptDraft(e.target.value);
-                setPromptEdited(true);
-              }}
-            />
+          )}
+
+          <div>
+            <label className="label">Generate</label>
+            <select
+              className="input"
+              value={generateTarget}
+              onChange={(e) => setGenerateTarget(e.target.value as "gemini" | "midjourney")}
+            >
+              <option value="gemini">Image (this app, via Gemini)</option>
+              <option value="midjourney">Midjourney prompt only</option>
+            </select>
           </div>
 
           <button type="submit" className="btn-amber w-full" disabled={generating}>
-            {generating ? "Designing…" : "Design this room"}
+            {generating
+              ? generateTarget === "midjourney"
+                ? "Writing prompt…"
+                : "Designing…"
+              : generateTarget === "midjourney"
+                ? "Write Midjourney prompt"
+                : "Design this room"}
           </button>
         </form>
       </div>
@@ -606,16 +696,34 @@ export function InteriorDesignClient({
               className="card-hover animate-fade-in-up rounded-lg border border-blueprint/10 p-3"
               style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}
             >
-              <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
-                <Image src={d.generated_image_url} alt={`${d.room_type} — ${d.style}`} fill className="object-cover" unoptimized />
-              </div>
+              {d.generated_image_url ? (
+                <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
+                  <Image src={d.generated_image_url} alt={`${d.room_type} — ${d.style}`} fill className="object-cover" unoptimized />
+                </div>
+              ) : (
+                <div className="mb-2 flex aspect-[4/3] items-center justify-center rounded-md bg-concrete text-center text-xs text-blueprint/40">
+                  Midjourney prompt only — no image generated in this app
+                </div>
+              )}
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-xs font-semibold text-blueprint-dark">
                   {d.room_type} — {d.style}
                 </span>
-                <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(d.id)}>
-                  Delete
-                </button>
+                <div className="flex items-center gap-2">
+                  {(d.prompt || d.midjourney_prompt) && (
+                    <button
+                      type="button"
+                      className="text-xs text-amber-dark hover:underline"
+                      onClick={() => handleCopyPrompt((d.prompt || d.midjourney_prompt)!)}
+                      title="Copy the prompt without opening the details below"
+                    >
+                      {d.prompt ? "Copy prompt" : "Copy MJ prompt"}
+                    </button>
+                  )}
+                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(d.id)}>
+                    Delete
+                  </button>
+                </div>
               </div>
               {(d.width || d.sqft) && (
                 <p className="mb-2 text-xs text-blueprint/50">
@@ -624,32 +732,39 @@ export function InteriorDesignClient({
                   {d.layout.length > 0 ? ` — ${d.layout.length} fixture${d.layout.length === 1 ? "" : "s"} laid out` : ""}
                 </p>
               )}
-              <details className="text-xs">
-                <summary className="cursor-pointer text-amber-dark">{d.original_photo_url ? "Before photo & prompt" : "Prompt"}</summary>
-                {d.original_photo_url && (
-                  <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
-                    <Image src={d.original_photo_url} alt="Before" fill className="object-cover" unoptimized />
-                  </div>
-                )}
-                <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{d.prompt}</p>
-                <button className="btn-ghost mt-1 text-xs" onClick={() => handleCopyPrompt(d.prompt)}>
-                  Copy prompt
-                </button>
-              </details>
-              <div className="mt-2 flex gap-2">
-                <button
-                  className="btn-ghost flex-1 text-xs"
-                  onClick={() => handleSaveImage(d.generated_image_url, `${d.room_type}-${d.style}`)}
-                >
-                  Save image
-                </button>
-                <button
-                  className="btn-outline flex-1 text-xs"
-                  onClick={() => setAddToImagePromptFor(addToImagePromptFor === d.id ? null : d.id)}
-                >
-                  Add to this image
-                </button>
-              </div>
+              {d.prompt && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-amber-dark">{d.original_photo_url ? "Before photo & prompt" : "Prompt"}</summary>
+                  {d.original_photo_url && (
+                    <div className="relative mt-1 aspect-[4/3] overflow-hidden rounded-md bg-concrete">
+                      <Image src={d.original_photo_url} alt="Before" fill className="object-cover" unoptimized />
+                    </div>
+                  )}
+                  <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{d.prompt}</p>
+                </details>
+              )}
+              {d.midjourney_prompt && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-amber-dark">Midjourney prompt — paste into Midjourney</summary>
+                  <p className="mt-1 whitespace-pre-wrap rounded-lg bg-concrete/60 p-2 text-blueprint/70">{d.midjourney_prompt}</p>
+                </details>
+              )}
+              {d.generated_image_url && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="btn-ghost flex-1 text-xs"
+                    onClick={() => handleSaveImage(d.generated_image_url!, `${d.room_type}-${d.style}`)}
+                  >
+                    Save image
+                  </button>
+                  <button
+                    className="btn-outline flex-1 text-xs"
+                    onClick={() => setAddToImagePromptFor(addToImagePromptFor === d.id ? null : d.id)}
+                  >
+                    Add to this image
+                  </button>
+                </div>
+              )}
               {addToImagePromptFor === d.id && (
                 <div className="mt-2 space-y-1.5">
                   <textarea

@@ -20,8 +20,12 @@ export interface SaveInteriorDesignInput {
   sqft: number | null;
   layout: PlacedFixture[];
   originalPhotoUrl: string | null;
-  generatedImageUrl: string;
-  prompt: string;
+  // Only one of these two is ever populated per save — a Midjourney-prompt-
+  // only design never calls Gemini, so it has no generated image and no
+  // Gemini prompt, just a copy-paste midjourneyPrompt instead.
+  generatedImageUrl: string | null;
+  prompt: string | null;
+  midjourneyPrompt?: string | null;
 }
 
 export async function saveInteriorDesign(projectId: string, input: SaveInteriorDesignInput): Promise<ActionResult> {
@@ -40,6 +44,7 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
       original_photo_url: input.originalPhotoUrl,
       generated_image_url: input.generatedImageUrl,
       prompt: input.prompt,
+      midjourney_prompt: input.midjourneyPrompt ?? null,
     })
     .select("id")
     .single();
@@ -48,7 +53,8 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
   const label = `${input.roomType} — ${input.style}`;
   // Two files per design row (the "before" photo, if any, and the AI
   // "after" render), so each gets its own source_id — the unique index on
-  // (source_table, source_id) is per-row, not per-design.
+  // (source_table, source_id) is per-row, not per-design. Neither is
+  // recorded for a Midjourney-prompt-only save, since there's no file.
   if (input.originalPhotoUrl) {
     await recordProjectFile(supabase, {
       projectId,
@@ -59,14 +65,16 @@ export async function saveInteriorDesign(projectId: string, input: SaveInteriorD
       sourceId: `${data.id}:original`,
     });
   }
-  await recordProjectFile(supabase, {
-    projectId,
-    storageUrl: input.generatedImageUrl,
-    fileName: `${label} (design)`,
-    category: "interior_design",
-    sourceTable: "interior_designs",
-    sourceId: data.id,
-  });
+  if (input.generatedImageUrl) {
+    await recordProjectFile(supabase, {
+      projectId,
+      storageUrl: input.generatedImageUrl,
+      fileName: `${label} (design)`,
+      category: "interior_design",
+      sourceTable: "interior_designs",
+      sourceId: data.id,
+    });
+  }
 
   revalidate(projectId);
   return { ok: true, id: data.id };

@@ -357,9 +357,19 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
               </div>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-xs font-semibold text-blueprint-dark">{d.style}</span>
-                <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(d.id)}>
-                  Delete
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="text-xs text-amber-dark hover:underline"
+                    onClick={() => handleCopyPrompt(d.prompt)}
+                    title="Copy the prompt without opening the details below"
+                  >
+                    Copy prompt
+                  </button>
+                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(d.id)}>
+                    Delete
+                  </button>
+                </div>
               </div>
               {(d.yard_width || d.layout.length > 0) && (
                 <p className="mb-2 text-xs text-blueprint/50">
@@ -373,9 +383,6 @@ export function LandscapeClient({ projectId, initialDesigns }: { projectId: stri
                   <Image src={d.original_photo_url} alt="Before" fill className="object-cover" unoptimized />
                 </div>
                 <p className="mt-1 whitespace-pre-wrap rounded bg-concrete p-2 text-blueprint/70">{d.prompt}</p>
-                <button className="btn-ghost mt-1 text-xs" onClick={() => handleCopyPrompt(d.prompt)}>
-                  Copy prompt
-                </button>
               </details>
               <div className="mt-2 flex gap-2">
                 <button className="btn-ghost flex-1 text-xs" onClick={() => handleSaveImage(d.generated_image_url, `landscape-${d.style}`)}>
