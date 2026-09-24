@@ -20,12 +20,15 @@ import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 
 const FINISH_CATEGORY_SET = new Set<string>(FINISH_CATEGORIES);
 
+type ConceptTarget = "gemini" | "midjourney";
+
 interface QueuedStyle {
   id: string;
   name: string;
   wall: string;
   floor: string;
   accent: string;
+  target: ConceptTarget;
 }
 
 export function RenderingPanel({
@@ -56,6 +59,11 @@ export function RenderingPanel({
   const [wallColor, setWallColor] = useState(DEFAULT_PALETTE_COLORS.wall);
   const [floorColor, setFloorColor] = useState(DEFAULT_PALETTE_COLORS.floor);
   const [accentColor, setAccentColor] = useState(DEFAULT_PALETTE_COLORS.accent);
+  // Picked once per style before queuing, not asked for both every time —
+  // Gemini auto-generates an image in this app; Midjourney is copy-paste
+  // only, so generating its prompt when nobody's going to use it (or vice
+  // versa) is wasted Claude output.
+  const [targetInput, setTargetInput] = useState<ConceptTarget>("gemini");
   const [queue, setQueue] = useState<QueuedStyle[]>([]);
   const [building, setBuilding] = useState(false);
   // Local overrides of a rendering's Claude-written image_prompt, keyed by
@@ -70,7 +78,10 @@ export function RenderingPanel({
   function addToQueue() {
     const name = styleInput.trim();
     if (!name) return;
-    setQueue((prev) => [...prev, { id: crypto.randomUUID(), name, wall: wallColor, floor: floorColor, accent: accentColor }]);
+    setQueue((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name, wall: wallColor, floor: floorColor, accent: accentColor, target: targetInput },
+    ]);
     setStyleInput("");
   }
 
@@ -163,7 +174,7 @@ export function RenderingPanel({
     }
   }
 
-  async function uploadPhotoBlob(renderingId: string, blob: Blob, fileExt: string) {
+  async function uploadPhotoBlob(renderingId: string, blob: Blob, fileExt: string, imagePrompt?: string) {
     const supabase = createClient();
     const {
       data: { user },
@@ -182,7 +193,7 @@ export function RenderingPanel({
     if (pubSignError || !pub) throw new Error(pubSignError?.message ?? "Could not get a URL for the uploaded file.");
     const style = room.renderings.find((r) => r.id === renderingId)?.style;
     const label = style ? `${room.name} — ${style}` : room.name;
-    const res = await saveRenderingPhoto(projectId, renderingId, pub.signedUrl, label);
+    const res = await saveRenderingPhoto(projectId, renderingId, pub.signedUrl, label, imagePrompt);
     if (!res.ok) throw new Error(res.error ?? "Could not save photo.");
     return pub.signedUrl;
   }
@@ -234,10 +245,22 @@ export function RenderingPanel({
         for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
         const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
 
-        const url = await uploadPhotoBlob(rendering.id, blob, "png");
+        // Persist whatever prompt was actually used (the textarea override,
+        // if the person edited it before generating) as the rendering's own
+        // image_prompt — otherwise the stored prompt silently falls out of
+        // sync with the image it supposedly describes the moment someone
+        // edits it and regenerates.
+        const url = await uploadPhotoBlob(rendering.id, blob, "png", prompt);
         onRoomUpdated({
           ...room,
-          renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+          renderings: room.renderings.map((r) =>
+            r.id === rendering.id ? { ...r, uploaded_photo_url: url, image_prompt: prompt } : r
+          ),
+        });
+        setPromptOverrides((prev) => {
+          const next = { ...prev };
+          delete next[rendering.id];
+          return next;
         });
         notify("success", "AI image generated.");
       });
@@ -271,10 +294,24 @@ export function RenderingPanel({
         for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
         const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
 
-        const url = await uploadPhotoBlob(rendering.id, blob, "png");
+        // Append rather than overwrite — image_prompt should keep
+        // describing everything actually in the photo, not just the most
+        // recent edit, so "Copy prompt" still reflects the full picture.
+        const updatedPrompt = rendering.image_prompt
+          ? `${rendering.image_prompt}\n\nUpdate: ${addToImageText.trim()}`
+          : addToImageText.trim();
+
+        const url = await uploadPhotoBlob(rendering.id, blob, "png", updatedPrompt);
         onRoomUpdated({
           ...room,
-          renderings: room.renderings.map((r) => (r.id === rendering.id ? { ...r, uploaded_photo_url: url } : r)),
+          renderings: room.renderings.map((r) =>
+            r.id === rendering.id ? { ...r, uploaded_photo_url: url, image_prompt: updatedPrompt } : r
+          ),
+        });
+        setPromptOverrides((prev) => {
+          const next = { ...prev };
+          delete next[rendering.id];
+          return next;
         });
         notify("success", "Image updated.");
         setAddToImagePromptFor(null);
@@ -313,6 +350,7 @@ export function RenderingPanel({
             style,
             width: room.width,
             depth: room.depth,
+            target: entry.target,
           }),
         });
         const json = await res.json();
@@ -415,6 +453,17 @@ export function RenderingPanel({
               className="h-9 w-11 cursor-pointer rounded-lg border border-blueprint/20 bg-white p-0.5"
             />
           </div>
+          <div className="min-w-[150px]">
+            <label className="label">Generate</label>
+            <select
+              className="input py-1.5 text-xs"
+              value={targetInput}
+              onChange={(e) => setTargetInput(e.target.value as ConceptTarget)}
+            >
+              <option value="gemini">Image (this app, via Gemini)</option>
+              <option value="midjourney">Midjourney prompt only</option>
+            </select>
+          </div>
           <button className="btn-outline text-xs" disabled={!styleInput.trim() || building} onClick={addToQueue}>
             + Add to list
           </button>
@@ -437,6 +486,9 @@ export function RenderingPanel({
                   ))}
                 </span>
                 {q.name}
+                {q.target === "midjourney" && (
+                  <span className="rounded bg-amber/10 px-1 text-[10px] font-medium text-amber-dark">MJ</span>
+                )}
                 <button
                   className="ml-0.5 text-blueprint/40 hover:text-red-500"
                   onClick={() => removeFromQueue(q.id)}
@@ -472,26 +524,32 @@ export function RenderingPanel({
               </div>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-xs font-semibold text-blueprint-dark">{r.style}</span>
-                <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(r.id)}>
-                  Delete
-                </button>
+                <div className="flex items-center gap-2">
+                  {r.image_prompt && (
+                    <button
+                      type="button"
+                      className="text-xs text-amber-dark hover:underline"
+                      onClick={() => handleCopyPrompt(promptOverrides[r.id] ?? r.image_prompt!)}
+                      title="Copy the current image prompt without opening the editor below"
+                    >
+                      Copy prompt
+                    </button>
+                  )}
+                  <button className="text-xs text-red-500 hover:underline" onClick={() => setDeleting(r.id)}>
+                    Delete
+                  </button>
+                </div>
               </div>
               {r.description && <p className="mb-2 text-xs text-blueprint/70">{r.description}</p>}
               {r.image_prompt && (
                 <details className="text-xs">
-                  <summary className="cursor-pointer text-amber-dark">Image prompt — edit before generating, or copy elsewhere</summary>
+                  <summary className="cursor-pointer text-amber-dark">Image prompt — edit before generating</summary>
                   <textarea
                     className="input mt-1 text-xs"
                     rows={4}
                     value={promptOverrides[r.id] ?? r.image_prompt}
                     onChange={(e) => setPromptOverrides((prev) => ({ ...prev, [r.id]: e.target.value }))}
                   />
-                  <button
-                    className="btn-ghost mt-1 text-xs"
-                    onClick={() => handleCopyPrompt(promptOverrides[r.id] ?? r.image_prompt!)}
-                  >
-                    Copy prompt
-                  </button>
                 </details>
               )}
               {r.midjourney_prompt && (

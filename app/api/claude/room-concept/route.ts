@@ -6,10 +6,12 @@ import { getAnthropicClient, CLAUDE_MODEL, extractJson } from "@/lib/anthropic";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+type ConceptTarget = "gemini" | "midjourney";
+
 interface RoomConceptResult {
   description: string;
-  image_prompt: string;
-  midjourney_prompt: string;
+  image_prompt?: string;
+  midjourney_prompt?: string;
 }
 
 export async function POST(req: Request) {
@@ -30,11 +32,18 @@ export async function POST(req: Request) {
     style?: string;
     width?: number | null;
     depth?: number | null;
+    target?: ConceptTarget;
   };
 
   if (!body.roomName || !body.style) {
     return NextResponse.json({ error: "roomName and style are required." }, { status: 400 });
   }
+
+  // Which prompt to write is picked up front (not always both) — asking
+  // Claude for the Midjourney prompt's now-fairly-elaborate spatial
+  // description costs real output tokens/latency, and most generations
+  // only ever use one of the two, so writing the other is wasted work.
+  const target: ConceptTarget = body.target === "midjourney" ? "midjourney" : "gemini";
 
   // A from-scratch image model has no idea what this room actually looks
   // like — the only real signal it can act on is the room's own
@@ -56,13 +65,7 @@ export async function POST(req: Request) {
   }
   const dims = body.width && body.depth ? `It is ${shape}, approximately ${body.width}ft x ${body.depth}ft.` : "";
 
-  const prompt = `Design concept for a "${body.roomName}" (${body.roomType ?? "room"}) in a
-"${body.style}" interior design style. ${dims}
-
-Write three things:
-1. A short (2-3 sentence) design concept description a homeowner would enjoy reading —
-   materials, colors, mood, a couple of signature details.
-2. A concise, ready-to-paste image-generation prompt for a general tool (this app's own
+  const geminiInstruction = `2. A concise, ready-to-paste image-generation prompt for a general tool (this app's own
    Gemini-based generator, ChatGPT image generation, etc). Image models follow short, concrete,
    front-loaded prompts far better than long descriptive paragraphs — pack in the specifics, cut
    the flowery language. Keep it to 40-60 words, structured in this order: [shot type${
@@ -77,16 +80,42 @@ Write three things:
        : ""
    }No scene-setting prose, no adjectives that don't change what's rendered (skip "beautiful",
    "stunning", "inviting" — every word should be a visual instruction).
-3. A separate prompt in Midjourney's own syntax, for pasting straight into Midjourney (its
-   Discord bot or web app — it has no API, so this is never sent anywhere by this app). Midjourney
-   prompts are a comma-separated list of short descriptive fragments, not full sentences — cover
-   the same specifics as the image prompt above (materials, furniture, lighting, camera angle)${
-     shape ? `, and work in that it's ${shape}` : ""
-   } — then end with parameters on their own: "--ar 3:2 --style raw --v 7 --stylize 50" ("--style
+
+Respond with ONLY a JSON object: {"description": string, "image_prompt": string}`;
+
+  const midjourneyInstruction = `2. A prompt in Midjourney's own syntax, for pasting straight into Midjourney (its Discord bot
+   or web app — it has no API, so this is never sent anywhere by this app). Midjourney only ever
+   sees this text — unlike this app's own built-in generator, it is never shown a floor plan or
+   reference photo to check its work against — so this prompt has to spell out the room's real
+   layout in words, precisely enough that the result can't come out as a generic boxy room.
+   Midjourney prompts are a comma-separated list of short descriptive fragments, not full
+   sentences. Include, in this order:
+   - a camera/framing fragment chosen specifically to reveal the room's true proportions${
+     shape
+       ? ` — this room is ${shape}${body.width && body.depth ? `, about ${body.width}ft x ${body.depth}ft` : ""}, so for a long narrow room use a wide-angle shot down its length from one end (never a square-on shot that hides the elongation); for a square room a centered shot that shows all four walls`
+       : ""
+   }
+   - an explicit wall-by-wall layout fragment naming which wall or corner each major piece of
+     furniture/fixture sits against (e.g. "sofa against the long back wall, armchair in the near
+     left corner, window centered on the right wall, doorway on the left") — invent one
+     plausible, internally consistent arrangement for a ${
+       body.roomType ?? "room"
+     }${shape ? ` of this shape and size` : ""} and keep every other fragment in the prompt consistent with it (don't
+     mention a piece of furniture in fragment 3 that contradicts where fragment 2 placed it)
+   - materials, furniture, lighting (same specifics an image-generation prompt would need)
+   then end with parameters on their own: "--ar 3:2 --style raw --v 7 --stylize 50" ("--style
    raw" cuts Midjourney's default artistic styling for a more literal, photorealistic result;
    low "--stylize" keeps it following the prompt closely rather than improvising).
 
-Respond with ONLY a JSON object: {"description": string, "image_prompt": string, "midjourney_prompt": string}`;
+Respond with ONLY a JSON object: {"description": string, "midjourney_prompt": string}`;
+
+  const prompt = `Design concept for a "${body.roomName}" (${body.roomType ?? "room"}) in a
+"${body.style}" interior design style. ${dims}
+
+Write two things:
+1. A short (2-3 sentence) design concept description a homeowner would enjoy reading —
+   materials, colors, mood, a couple of signature details.
+${target === "gemini" ? geminiInstruction : midjourneyInstruction}`;
 
   try {
     const anthropic = getAnthropicClient();
@@ -102,7 +131,11 @@ Respond with ONLY a JSON object: {"description": string, "image_prompt": string,
     }
 
     const result = extractJson<RoomConceptResult>(textBlock.text);
-    return NextResponse.json(result);
+    return NextResponse.json({
+      description: result.description,
+      image_prompt: target === "gemini" ? (result.image_prompt ?? null) : null,
+      midjourney_prompt: target === "midjourney" ? (result.midjourney_prompt ?? null) : null,
+    });
   } catch (err) {
     console.error("room-concept failed", err);
     const message = err instanceof Error ? err.message : "Concept generation failed.";

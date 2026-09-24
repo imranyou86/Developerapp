@@ -348,16 +348,22 @@ export function InteriorDesignClient({
         const blob = new Blob([bytes], { type: json.mimeType ?? "image/png" });
         const newUrl = await uploadToStorage(blob, "png", "design");
 
+        // Append rather than overwrite — the stored prompt should keep
+        // describing everything actually in the image, not just the most
+        // recent edit, so "Copy prompt" and any future regeneration still
+        // reflect the full picture.
+        const updatedPrompt = `${design.prompt}\n\nUpdate: ${addToImageText.trim()}`;
+
         const updateRes = await updateInteriorDesignImage(projectId, design.id, {
           roomType: design.room_type,
           style: design.style,
           generatedImageUrl: newUrl,
-          prompt: addToImageText.trim(),
+          prompt: updatedPrompt,
         });
         if (!updateRes.ok) throw new Error(updateRes.error ?? "Could not save the updated image.");
 
         setDesigns((prev) =>
-          prev.map((d) => (d.id === design.id ? { ...d, generated_image_url: newUrl, prompt: addToImageText.trim() } : d))
+          prev.map((d) => (d.id === design.id ? { ...d, generated_image_url: newUrl, prompt: updatedPrompt } : d))
         );
         notify("success", "Image updated.");
         setAddToImagePromptFor(null);

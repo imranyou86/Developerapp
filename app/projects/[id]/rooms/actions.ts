@@ -111,8 +111,11 @@ export async function saveRendering(
     style: StyleName;
     colors: string[];
     description: string;
-    image_prompt: string;
-    midjourney_prompt: string;
+    // Only one of these is ever populated per rendering now — the concept
+    // route is asked for whichever one the person picked (Gemini or
+    // Midjourney) when queuing the style, not both every time.
+    image_prompt: string | null;
+    midjourney_prompt: string | null;
     illustration_svg: string;
   }
 ): Promise<ActionResult> {
@@ -135,13 +138,18 @@ export async function saveRenderingPhoto(
   projectId: string,
   renderingId: string,
   photoUrl: string,
-  label?: string
+  label?: string,
+  imagePrompt?: string
 ): Promise<ActionResult> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from("renderings")
-    .update({ uploaded_photo_url: photoUrl })
-    .eq("id", renderingId);
+  // imagePrompt is passed whenever the photo being saved is the direct
+  // result of a prompt (a fresh AI generation, or an "Add to this image"
+  // edit) — keeping image_prompt in sync so it always describes what's
+  // actually in the photo, not what generated an earlier version of it.
+  // A plain manual photo upload omits it, leaving image_prompt untouched.
+  const update: { uploaded_photo_url: string; image_prompt?: string } = { uploaded_photo_url: photoUrl };
+  if (imagePrompt != null) update.image_prompt = imagePrompt;
+  const { error } = await supabase.from("renderings").update(update).eq("id", renderingId);
   if (error) return { ok: false, error: error.message };
 
   await recordProjectFile(supabase, {

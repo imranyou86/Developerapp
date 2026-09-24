@@ -3258,3 +3258,72 @@ yet; each one only adds what a given feature needed.
   fixes above; the picker's drag/resize interactions were exercised by
   code review and the build only, not against a running browser with
   real touch/mouse input or a live Claude response.
+
+## Rooms & Tasks: quick-copy the image prompt, keep it in sync with the image
+
+- Two follow-ups on the rendering workflow:
+  1. "Copy prompt" for a rendering's image prompt was only reachable by
+     first expanding the "Image prompt — edit before generating" details
+     block — not actually quick. Added a one-click "Copy prompt" button
+     directly in the rendering's header row (next to "Delete"), so
+     copying doesn't require opening the editor first. The nested Copy
+     button inside the details block was removed as redundant.
+  2. "Add to this image" (the follow-up-edit flow) updated the photo but
+     never touched the stored `image_prompt` — after using it, "Copy
+     prompt" would still hand back the pre-edit text, no longer
+     describing what was actually in the image. Same bug existed in
+     Interior Design and Landscape's "Update image", except there it
+     *did* update the prompt, just by overwriting it with only the new
+     instruction and discarding the original design description.
+  Fixed both surfaces to keep the prompt genuinely in sync: Rooms &
+  Tasks now persists whichever prompt was actually used on both a fresh
+  "Generate image (AI)" (including a hand-edited override, not just the
+  original Claude-written text) and on "Add to this image" (appended as
+  `"<original>\n\nUpdate: <new instruction>"`, not overwritten).
+  Interior Design and Landscape's "Update image" now append the same
+  way instead of overwriting.
+- `saveRenderingPhoto` (rooms/actions.ts) takes a new optional
+  `imagePrompt` param and updates the `image_prompt` column alongside
+  `uploaded_photo_url` when it's passed — a plain manual "Upload photo"
+  still omits it, leaving image_prompt untouched, since that path isn't
+  the result of any prompt.
+- No schema/migration changes (`image_prompt` was already nullable).
+
+## Rooms & Tasks: Midjourney prompt made explicit about layout, and picked per-style (not both every time)
+
+- Two related follow-ups from testing the Midjourney prompt:
+  1. "Midjourney cannot see the layout" — true: this app's own Gemini
+     path now grounds `image_prompt` in a real plan image or photo at
+     generation time (see the plan-grounding and locate-then-zoom work
+     above), but the Midjourney prompt is copy-paste only — Midjourney
+     is never shown any image, so the text itself is the only thing
+     that can convey the room's real layout. Rewrote the Midjourney
+     instruction in `app/api/claude/room-concept/route.ts` to require:
+     a camera/framing fragment chosen specifically to reveal the room's
+     true proportions (e.g. a wide-angle shot down the length of an
+     elongated room, never a square-on shot that hides it), and an
+     explicit wall-by-wall fragment naming which wall or corner each
+     major piece of furniture sits against — inventing one plausible,
+     internally consistent arrangement (this route has no real fixture
+     position data to work from, only the room's width/depth-derived
+     shape) and keeping every other fragment consistent with it.
+  2. "Make it able to select generate with Gemini or generate a
+     Midjourney prompt only, so it doesn't double work" — previously
+     every generation asked Claude to write BOTH the Gemini image
+     prompt and the (now much longer) Midjourney prompt regardless of
+     which one would ever actually get used. `room-concept` now takes a
+     `target: "gemini" | "midjourney"` and only asks for — and only
+     returns — the relevant one (the other comes back `null`). Rooms &
+     Tasks' style queue gets a new "Generate" dropdown (Image via
+     Gemini / Midjourney prompt only) picked per style before adding it
+     to the queue, shown as an "MJ" chip on Midjourney-only queue
+     entries. A midjourney-only rendering naturally has no "Generate
+     image (AI)" button (it needs `image_prompt`, which is null) — it
+     just shows the description and the Midjourney prompt to copy.
+- `saveRendering`'s `image_prompt`/`midjourney_prompt` params are now
+  `string | null` (one is always null per rendering) instead of
+  required strings.
+- No schema/migration changes.
+- **Not verified against a live key** — same sandbox constraint as
+  above; the updated Midjourney instruction text and the target-based
+  branching were checked by code review and the build only.
