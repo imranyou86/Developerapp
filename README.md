@@ -3388,3 +3388,115 @@ alter table interior_designs alter column prompt drop not null;
   above; the migration was reasoned from the schema and existing
   `renderings.midjourney_prompt` precedent, not run against a live
   Supabase instance.
+
+## Interior Design: Mood Boards
+
+- New third section on the Interior Design top-level tab (alongside
+  "Design a room" and "Finish ID"): pick one of the construction's
+  tracked rooms, add inspiration photos and material swatch photos
+  (each with an optional label — "Pinterest living room", "White oak
+  flooring"), jot freeform notes on the intended palette/theme, and
+  generate a single collage image combining everything. One board per
+  room (re-adding items and regenerating updates that same board,
+  never creates a second one for the same room).
+- **Deliberately not AI-generated** — asked and confirmed with the
+  user up front (three scoping questions before writing any code,
+  since this had real architectural forks): the "mood board" is a
+  plain grid composition of the actual uploaded photos via `sharp`
+  (already a dependency, used throughout this app for image resizing),
+  not a Gemini/Midjourney reinterpretation. No AI cost per board, and
+  the result always matches exactly what was uploaded — a blue border
+  marks inspiration photos, amber marks materials, each with its label
+  captioned underneath, under a title header with the room's name.
+  Verified locally with a standalone smoke test of the composition
+  logic (screenshot matched the design exactly) before wiring it into
+  the API route.
+- **`lib/moodBoard.ts`** — `composeMoodBoardCollage(title, items)`:
+  fetches each item's image, normalizes orientation and crops it to a
+  square tile, and composites everything onto one canvas via two SVG
+  layers (background+header text first, then photo tiles, then a
+  transparent overlay with borders/captions on top — text has to
+  render above the photos, not under them). Caps at 24 items per
+  generated image (a board can still hold more; only the collage
+  itself truncates) to keep compute/output size bounded.
+- **`app/api/mood-board/generate`** (new route, rate-limited like
+  every other generation route) — takes `roomName` + the current
+  `items` array and returns `{ base64, mimeType }`, same contract as
+  the Gemini image routes, so the client uploads the result to storage
+  itself exactly like it already does for those.
+- **`app/interior-design/mood-board-client.tsx`** (new) — room picker,
+  an "Add as Inspiration/Material" toggle + label field + file picker
+  that uploads immediately on selection, a live item grid with
+  per-item remove, a notes textarea, and "Generate mood board" /
+  "Download" / "Delete board" actions. Items and notes auto-save to
+  the board on every change (upsert, not a separate explicit "Save"
+  step) so nothing is lost switching rooms or tabs mid-edit.
+- **`app/interior-design/mood-board-actions.ts`** (new) —
+  `saveMoodBoard` (upsert-by-room, `items`/`notes`/`collage_image_url`
+  all written together) and `deleteMoodBoard`.
+- The generated collage is registered in the File Library under a new
+  `mood_board` category (badge + label added to the Files tab's
+  category maps); individual inspiration/material photos are not —
+  same reasoning as why a design's placed-fixture icons aren't filed
+  individually, only the final generated artifact is.
+
+### Migration 064 — required before this deploys
+
+```sql
+-- Interior Design: mood boards. Add inspiration photos and material swatch
+-- photos for a tracked room, write optional notes on the room's intended
+-- look/palette, and compose them into a single collage image — a grid
+-- layout generated server-side with sharp (no AI call; see
+-- app/api/mood-board/generate), not an AI-reinterpreted image. One board
+-- per room (unique on room_id) — adding more items and regenerating
+-- updates that same board rather than creating new ones. Lives as a third
+-- section on the existing Interior Design top-level tab (same as Finish
+-- ID already does), so no new tab_permissions row is needed.
+--
+-- Run this once in the Supabase SQL editor against an EXISTING project
+-- that already has migrations 001-063 applied.
+
+create table if not exists mood_boards (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  room_id uuid not null references rooms (id) on delete cascade,
+  notes text,
+  -- Freeform inspiration photos and material swatches, in board order.
+  -- Each item: {id, type: 'inspiration' | 'material', storage_url, label}.
+  -- Edited and saved as a whole from the client (same jsonb-array pattern
+  -- as interior_designs.layout) rather than a separate per-item table.
+  items jsonb not null default '[]'::jsonb,
+  -- The generated grid collage combining every item above. Nullable — a
+  -- board can have items added before it's ever been generated.
+  collage_image_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (room_id)
+);
+
+create index if not exists idx_mood_boards_project on mood_boards (project_id);
+
+alter table mood_boards enable row level security;
+
+create policy "mood_boards_member" on mood_boards
+  for all using (has_project_access(mood_boards.project_id))
+  with check (has_project_access(mood_boards.project_id));
+
+insert into storage.buckets (id, name, public)
+values ('mood-board-photos', 'mood-board-photos', false)
+on conflict (id) do update set public = excluded.public;
+
+create policy "mood_board_photos_storage_owner" on storage.objects
+  for all using (bucket_id = 'mood-board-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'mood-board-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+alter table project_files drop constraint if exists project_files_category_check;
+alter table project_files add constraint project_files_category_check
+  check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'rough_in', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design', 'mood_board'));
+```
+
+- **Not verified against a live key/database** — the sharp/SVG
+  composition itself WAS verified (a standalone local run, screenshot
+  confirmed), but the Supabase upsert-by-room flow, storage upload/
+  signing round trip, and the full UI interaction were only checked by
+  `tsc`/lint/build, not against a live Supabase project.

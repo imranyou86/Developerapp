@@ -217,7 +217,8 @@ export type FileCategory =
   | "document"
   | "photo"
   | "interior_design"
-  | "landscape_design";
+  | "landscape_design"
+  | "mood_board";
 
 export interface ProjectFile {
   id: string;
@@ -281,6 +282,24 @@ export interface LandscapeDesign {
   yard_width: number | null;
   yard_depth: number | null;
   created_at: string;
+}
+
+export interface MoodBoardItem {
+  id: string;
+  type: "inspiration" | "material";
+  storage_url: string;
+  label: string | null;
+}
+
+export interface MoodBoard {
+  id: string;
+  project_id: string;
+  room_id: string;
+  notes: string | null;
+  items: MoodBoardItem[];
+  collage_image_url: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // Warranty Request tab uploads (app/projects/[id]/warranty-request/) — any

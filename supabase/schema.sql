@@ -212,6 +212,23 @@ create table if not exists landscape_designs (
   created_at timestamptz not null default now()
 );
 
+-- Interior Design: mood boards — inspiration photos and material swatches
+-- for a tracked room, plus optional notes, composed into a single grid
+-- collage image generated server-side with sharp (no AI call). One board
+-- per room (unique on room_id); items is edited and saved as a whole from
+-- the client, same jsonb-array pattern as interior_designs.layout.
+create table if not exists mood_boards (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects (id) on delete cascade,
+  room_id uuid not null references rooms (id) on delete cascade,
+  notes text,
+  items jsonb not null default '[]'::jsonb,
+  collage_image_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (room_id)
+);
+
 create table if not exists checklist_items (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
@@ -504,7 +521,7 @@ create table if not exists project_files (
   project_id uuid not null references projects (id) on delete cascade,
   storage_url text not null,
   file_name text not null,
-  category text not null check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'rough_in', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design')),
+  category text not null check (category in ('plan', 'bid', 'trade_bid', 'checklist_photo', 'rendering', 'rough_in', 'finish_scan', 'document', 'photo', 'interior_design', 'landscape_design', 'mood_board')),
   source_table text,
   source_id uuid,
   notes text,
@@ -884,6 +901,7 @@ create index if not exists idx_renderings_room on renderings (room_id);
 create index if not exists idx_interior_designs_project on interior_designs (project_id, created_at desc);
 create index if not exists idx_interior_designs_room on interior_designs (room_id);
 create index if not exists idx_landscape_designs_project on landscape_designs (project_id, created_at desc);
+create index if not exists idx_mood_boards_project on mood_boards (project_id);
 create index if not exists idx_checklist_items_project on checklist_items (project_id, phase, sort_order);
 create index if not exists idx_checklist_photos_item on checklist_photos (checklist_item_id);
 create index if not exists idx_rough_in_captures_project on rough_in_captures (project_id, created_at desc);
@@ -1026,6 +1044,7 @@ alter table cost_estimates enable row level security;
 alter table renderings enable row level security;
 alter table interior_designs enable row level security;
 alter table landscape_designs enable row level security;
+alter table mood_boards enable row level security;
 alter table checklist_items enable row level security;
 alter table checklist_photos enable row level security;
 alter table rough_in_captures enable row level security;
@@ -1246,6 +1265,10 @@ create policy "renderings_member" on renderings
 create policy "interior_designs_member" on interior_designs
   for all using (has_project_access(interior_designs.project_id))
   with check (has_project_access(interior_designs.project_id));
+
+create policy "mood_boards_member" on mood_boards
+  for all using (has_project_access(mood_boards.project_id))
+  with check (has_project_access(mood_boards.project_id));
 
 -- Project-tied rows stay gated by project membership; a "Standalone
 -- Photos" row (project_id null) is a shared-directory row instead — any
@@ -1592,7 +1615,8 @@ values
   ('project-files', 'project-files', false),
   ('interior-design-photos', 'interior-design-photos', false),
   ('landscape-photos', 'landscape-photos', false),
-  ('rough-in-media', 'rough-in-media', false)
+  ('rough-in-media', 'rough-in-media', false),
+  ('mood-board-photos', 'mood-board-photos', false)
 on conflict (id) do update set public = excluded.public;
 
 -- Storage objects are keyed as "<user_id>/<project_id>/<file>" by the app, so a
@@ -1632,6 +1656,10 @@ create policy "landscape_photos_storage_owner" on storage.objects
 create policy "rough_in_media_storage_owner" on storage.objects
   for all using (bucket_id = 'rough-in-media' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'rough-in-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "mood_board_photos_storage_owner" on storage.objects
+  for all using (bucket_id = 'mood-board-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'mood-board-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 
 -- ---------------------------------------------------------------------------
 -- Realtime — Chat streams new messages via Supabase Realtime's

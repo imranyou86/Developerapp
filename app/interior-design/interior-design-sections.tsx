@@ -4,7 +4,8 @@ import { useState } from "react";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { InteriorDesignClient } from "@/app/interior-design/interior-design-client";
 import { FinishIdClient } from "@/app/interior-design/finish-id-client";
-import type { InteriorDesign, IdentifiedFinish } from "@/lib/types";
+import { MoodBoardClient } from "@/app/interior-design/mood-board-client";
+import type { InteriorDesign, IdentifiedFinish, MoodBoard } from "@/lib/types";
 
 interface ProjectOption {
   id: string;
@@ -35,12 +36,14 @@ interface FinishScanRow {
 
 const TABS = [
   { id: "design", label: "Design a room" },
+  { id: "mood-boards", label: "Mood Boards" },
   { id: "finish-id", label: "Finish ID" },
 ] as const;
 
-// A "Design" tab (needs a selected construction, so keeps the project
-// picker) and a "Finish ID" tab (universal — works regardless of which, if
-// any, construction is picked above) living on the same top-level page.
+// A "Design" tab and a "Mood Boards" tab (both need a selected construction,
+// so both keep the project picker) and a "Finish ID" tab (universal — works
+// regardless of which, if any, construction is picked above) living on the
+// same top-level page.
 export function InteriorDesignSections({
   projectList,
   selectedId,
@@ -48,6 +51,7 @@ export function InteriorDesignSections({
   designs,
   planPages,
   scans,
+  moodBoards,
   roomsByProject,
 }: {
   projectList: ProjectOption[];
@@ -56,9 +60,12 @@ export function InteriorDesignSections({
   designs: InteriorDesign[];
   planPages: PlanPageOption[];
   scans: FinishScanRow[];
+  moodBoards: MoodBoard[];
   roomsByProject: Record<string, { id: string; name: string }[]>;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("design");
+
+  const needsProjectPicker = tab === "design" || tab === "mood-boards";
 
   return (
     <div>
@@ -76,10 +83,12 @@ export function InteriorDesignSections({
         ))}
       </div>
 
-      {tab === "design" ? (
+      {needsProjectPicker && (
         <>
           <p className="mb-3 text-sm text-blueprint/50">
-            Pick which construction this design is for — sizing can come from that project&apos;s pre-added rooms.
+            {tab === "design"
+              ? "Pick which construction this design is for — sizing can come from that project's pre-added rooms."
+              : "Pick which construction this mood board is for — one board per room, built from that room's pre-added list."}
           </p>
           {projectList.length === 0 ? (
             <p className="text-sm text-blueprint/50">
@@ -90,10 +99,15 @@ export function InteriorDesignSections({
               <ProjectPicker projects={projectList} selectedId={selectedId} basePath="/interior-design" />
             </div>
           )}
-          {selectedId && (
-            <InteriorDesignClient key={selectedId} projectId={selectedId} initialDesigns={designs} rooms={rooms} planPages={planPages} />
-          )}
         </>
+      )}
+
+      {tab === "design" ? (
+        selectedId && (
+          <InteriorDesignClient key={selectedId} projectId={selectedId} initialDesigns={designs} rooms={rooms} planPages={planPages} />
+        )
+      ) : tab === "mood-boards" ? (
+        selectedId && <MoodBoardClient key={selectedId} projectId={selectedId} rooms={rooms} initialBoards={moodBoards} />
       ) : (
         <FinishIdClient projects={projectList} roomsByProject={roomsByProject} initialScans={scans} />
       )}

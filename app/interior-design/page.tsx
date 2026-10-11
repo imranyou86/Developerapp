@@ -1,11 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
-import { signRowsUrl } from "@/lib/storage";
+import { signRowsUrl, signStorageUrls } from "@/lib/storage";
 import { TopNav } from "@/components/TopNav";
 import { BrandMark } from "@/components/BrandMark";
 import { InteriorDesignSections } from "@/app/interior-design/interior-design-sections";
 import { getCurrentUser, getAllowedTabSlugs } from "@/lib/permissions-server";
 import { TOP_LEVEL_TABS } from "@/lib/permissions";
-import type { IdentifiedFinish } from "@/lib/types";
+import type { IdentifiedFinish, MoodBoard, MoodBoardItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +31,14 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
   let rooms: { id: string; name: string; type: string | null; width: number | null; depth: number | null }[] = [];
   let designs: Awaited<ReturnType<typeof loadDesigns>> = [];
   let planPages: { label: string; storage_url: string }[] = [];
+  let moodBoards: MoodBoard[] = [];
   if (selectedId) {
-    [rooms, designs, planPages] = await Promise.all([loadRooms(selectedId), loadDesigns(selectedId), loadPlanPages(selectedId)]);
+    [rooms, designs, planPages, moodBoards] = await Promise.all([
+      loadRooms(selectedId),
+      loadDesigns(selectedId),
+      loadPlanPages(selectedId),
+      loadMoodBoards(selectedId),
+    ]);
   }
 
   const [scans, allRooms] = await Promise.all([loadFinishScans(), loadAllRooms()]);
@@ -78,6 +84,7 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
           designs={designs}
           planPages={planPages}
           scans={scans}
+          moodBoards={moodBoards}
           roomsByProject={roomsByProject}
         />
       </main>
@@ -119,6 +126,33 @@ async function loadDesigns(projectId: string) {
     .order("created_at", { ascending: false });
   const withPhotos = await signRowsUrl(data ?? [], "original_photo_url");
   return signRowsUrl(withPhotos, "generated_image_url");
+}
+
+async function loadMoodBoards(projectId: string): Promise<MoodBoard[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("mood_boards")
+    .select("id, project_id, room_id, notes, items, collage_image_url, created_at, updated_at")
+    .eq("project_id", projectId);
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  // `items` is a jsonb array of objects each carrying their own
+  // storage_url, and collage_image_url is a separate flat column —
+  // signRowsUrl only signs one flat column at a time, so both need their
+  // own signing pass here instead.
+  const itemUrls = rows.flatMap((r) => (r.items as MoodBoardItem[]).map((it) => it.storage_url));
+  const collageUrls = rows.map((r) => r.collage_image_url as string | null);
+  const [signedItemUrls, signedCollageUrls] = await Promise.all([signStorageUrls(itemUrls), signStorageUrls(collageUrls)]);
+
+  let cursor = 0;
+  return rows.map((r, i) => {
+    const items = (r.items as MoodBoardItem[]).map((it) => ({
+      ...it,
+      storage_url: signedItemUrls[cursor++] ?? it.storage_url,
+    }));
+    return { ...r, items, collage_image_url: signedCollageUrls[i] } as MoodBoard;
+  });
 }
 
 async function loadFinishScans(): Promise<{ id: string; storage_url: string; label: string | null; results: IdentifiedFinish[]; created_at: string }[]> {
