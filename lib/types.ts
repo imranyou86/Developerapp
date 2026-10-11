@@ -289,6 +289,15 @@ export interface MoodBoardItem {
   type: "inspiration" | "material";
   storage_url: string;
   label: string | null;
+  // Freeform arrangement position, as fractions (0-1) of the mood board's
+  // fixed-aspect canvas (see lib/moodBoardLayout.ts) — set once the board's
+  // been opened in components/MoodBoardCanvas.tsx and dragged/resized at
+  // least once. Missing until then, in which case the collage generator
+  // auto-places it (lib/moodBoardLayout.ts's assignDefaultPositions).
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface MoodBoard {

@@ -355,7 +355,7 @@ export function HouseBookDocument({ input }: { input: HouseBookInput }) {
 // fetch and sniff on its own.
 const MAX_EMBED_DIMENSION = 2000;
 
-async function toEmbeddablePhoto(url: string): Promise<string | null> {
+export async function toEmbeddablePhoto(url: string): Promise<string | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`fetch failed: ${res.status}`);

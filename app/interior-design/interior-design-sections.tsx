@@ -47,6 +47,7 @@ const TABS = [
 export function InteriorDesignSections({
   projectList,
   selectedId,
+  selectedProject,
   rooms,
   designs,
   planPages,
@@ -56,6 +57,7 @@ export function InteriorDesignSections({
 }: {
   projectList: ProjectOption[];
   selectedId: string | null;
+  selectedProject: ProjectOption | null;
   rooms: RoomOption[];
   designs: InteriorDesign[];
   planPages: PlanPageOption[];
@@ -107,7 +109,17 @@ export function InteriorDesignSections({
           <InteriorDesignClient key={selectedId} projectId={selectedId} initialDesigns={designs} rooms={rooms} planPages={planPages} />
         )
       ) : tab === "mood-boards" ? (
-        selectedId && <MoodBoardClient key={selectedId} projectId={selectedId} rooms={rooms} initialBoards={moodBoards} />
+        selectedId &&
+        selectedProject && (
+          <MoodBoardClient
+            key={selectedId}
+            projectId={selectedId}
+            projectName={selectedProject.name}
+            projectAddress={selectedProject.address}
+            rooms={rooms}
+            initialBoards={moodBoards}
+          />
+        )
       ) : (
         <FinishIdClient projects={projectList} roomsByProject={roomsByProject} initialScans={scans} />
       )}

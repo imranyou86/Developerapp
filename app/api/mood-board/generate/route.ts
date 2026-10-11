@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   const limited = await enforceRateLimit(user.id, "mood-board-generate");
   if (limited) return limited;
 
-  const body = (await req.json()) as { roomName?: string; items?: MoodBoardCollageItem[] };
+  const body = (await req.json()) as { roomName?: string; projectName?: string; items?: MoodBoardCollageItem[] };
   if (!body.roomName) {
     return NextResponse.json({ error: "Missing room name." }, { status: 400 });
   }
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const png = await composeMoodBoardCollage(body.roomName, body.items);
+    const png = await composeMoodBoardCollage({ roomName: body.roomName, projectName: body.projectName }, body.items);
     return NextResponse.json({ base64: png.toString("base64"), mimeType: "image/png" });
   } catch (err) {
     console.error("mood-board generate failed", err);

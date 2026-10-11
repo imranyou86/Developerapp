@@ -27,6 +27,7 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
   // doesn't need a selected construction to work.
   const requested = searchParams.project;
   const selectedId = requested && projectList.some((p) => p.id === requested) ? requested : projectList.length === 1 ? projectList[0].id : null;
+  const selectedProject = selectedId ? (projectList.find((p) => p.id === selectedId) ?? null) : null;
 
   let rooms: { id: string; name: string; type: string | null; width: number | null; depth: number | null }[] = [];
   let designs: Awaited<ReturnType<typeof loadDesigns>> = [];
@@ -80,6 +81,7 @@ export default async function InteriorDesignPage({ searchParams }: { searchParam
         <InteriorDesignSections
           projectList={projectList}
           selectedId={selectedId}
+          selectedProject={selectedProject}
           rooms={rooms}
           designs={designs}
           planPages={planPages}

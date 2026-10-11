@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { MoodBoardCanvas } from "@/components/MoodBoardCanvas";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
 import { saveMoodBoard, deleteMoodBoard } from "@/app/interior-design/mood-board-actions";
@@ -22,10 +23,14 @@ type ItemType = MoodBoardItem["type"];
 
 export function MoodBoardClient({
   projectId,
+  projectName,
+  projectAddress,
   rooms,
   initialBoards,
 }: {
   projectId: string;
+  projectName: string;
+  projectAddress: string | null;
   rooms: RoomOption[];
   initialBoards: MoodBoard[];
 }) {
@@ -37,6 +42,8 @@ export function MoodBoardClient({
   const [addType, setAddType] = useState<ItemType>("inspiration");
   const [addLabel, setAddLabel] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId) ?? null;
@@ -48,9 +55,11 @@ export function MoodBoardClient({
   const addTaskKey = `mood-board-add:${selectedRoomId}`;
   const generateTaskKey = `mood-board-generate:${selectedRoomId}`;
   const notesTaskKey = `mood-board-notes:${selectedRoomId}`;
+  const exportTaskKey = `mood-board-export:${projectId}`;
   const adding = isRunning(addTaskKey);
   const generating = isRunning(generateTaskKey);
   const savingNotes = isRunning(notesTaskKey);
+  const exportingBoards = exporting || isRunning(exportTaskKey);
 
   function handleRoomSelect(roomId: string) {
     setSelectedRoomId(roomId);
@@ -168,6 +177,23 @@ export function MoodBoardClient({
     upsertLocalBoard(selectedRoomId, { items: nextItems });
   }
 
+  // Persists a freeform arrangement from the canvas — called once at drag
+  // end (see components/MoodBoardCanvas.tsx), not per pixel of movement.
+  async function handleArrangeChange(nextItems: MoodBoardItem[]) {
+    if (!selectedRoom) return;
+    const res = await saveMoodBoard(projectId, selectedRoomId, {
+      roomName: selectedRoom.name,
+      notes: board?.notes ?? null,
+      items: nextItems,
+      collageImageUrl: board?.collage_image_url ?? null,
+    });
+    if (!res.ok) {
+      notify("error", res.error ?? "Could not save the arrangement.");
+      return;
+    }
+    upsertLocalBoard(selectedRoomId, { id: res.id, items: nextItems });
+  }
+
   async function handleSaveNotes() {
     if (!selectedRoom) return;
     try {
@@ -199,7 +225,16 @@ export function MoodBoardClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             roomName: selectedRoom.name,
-            items: items.map((it) => ({ url: it.storage_url, type: it.type, label: it.label })),
+            projectName,
+            items: items.map((it) => ({
+              url: it.storage_url,
+              type: it.type,
+              label: it.label,
+              x: it.x,
+              y: it.y,
+              width: it.width,
+              height: it.height,
+            })),
           }),
         });
         const json = await res.json();
@@ -226,22 +261,53 @@ export function MoodBoardClient({
     }
   }
 
-  async function handleDownload() {
-    if (!board?.collage_image_url || !selectedRoom) return;
+  async function downloadUrl(url: string, filename: string) {
     try {
-      const res = await fetchWithRetry(board.collage_image_url);
-      if (!res.ok) throw new Error("Could not fetch the image.");
+      const res = await fetchWithRetry(url);
+      if (!res.ok) throw new Error("Could not fetch the file.");
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objectUrl;
-      a.download = `${selectedRoom.name.replace(/[^a-z0-9]+/gi, "-")}-mood-board.png`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(objectUrl);
     } catch {
-      notify("error", "Could not download the image.");
+      notify("error", "Could not download the file.");
+    }
+  }
+
+  async function handleDownload() {
+    if (!board?.collage_image_url || !selectedRoom) return;
+    await downloadUrl(board.collage_image_url, `${selectedRoom.name.replace(/[^a-z0-9]+/gi, "-")}-mood-board.png`);
+  }
+
+  async function handleExportProject() {
+    setExporting(true);
+    try {
+      await run(exportTaskKey, `Exporting all mood boards — ${projectName}…`, async () => {
+        const res = await fetchWithRetry(`/api/projects/${projectId}/mood-boards/export`, { method: "POST" });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error ?? "Could not export mood boards.");
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${projectName.replace(/[^a-z0-9]+/gi, "-")}-mood-boards.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        notify("success", "Mood boards exported.");
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not export mood boards.");
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -251,19 +317,32 @@ export function MoodBoardClient({
 
   return (
     <div>
-      <div className="mb-4 max-w-xs">
-        <label className="label">Room</label>
-        <select className="input" value={selectedRoomId} onChange={(e) => handleRoomSelect(e.target.value)}>
-          {rooms.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="max-w-xs">
+          <label className="label">Room</label>
+          <select className="input" value={selectedRoomId} onChange={(e) => handleRoomSelect(e.target.value)}>
+            {rooms.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="btn-outline text-xs" disabled={exportingBoards} onClick={handleExportProject}>
+          {exportingBoards ? "Exporting…" : "Export all mood boards (PDF)"}
+        </button>
       </div>
 
       {selectedRoom && (
         <div className="space-y-4">
+          <div>
+            <p className="text-xs font-medium text-blueprint/50">
+              {projectName}
+              {projectAddress ? ` — ${projectAddress}` : ""}
+            </p>
+            <h3 className="text-base font-semibold text-blueprint-dark">{selectedRoom.name}</h3>
+          </div>
+
           <div className="rounded-lg border border-blueprint/10 bg-concrete/50 p-3">
             <div className="mb-2 flex flex-wrap items-end gap-2">
               <div>
@@ -322,7 +401,12 @@ export function MoodBoardClient({
 
           {items.length > 0 && (
             <div>
-              <label className="label">{items.length} item{items.length === 1 ? "" : "s"}</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="label mb-0">{items.length} item{items.length === 1 ? "" : "s"}</label>
+                <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setCanvasOpen(true)}>
+                  Open board — arrange items
+                </button>
+              </div>
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
                 {items.map((it) => (
                   <div key={it.id} className="group relative aspect-square overflow-hidden rounded-md bg-concrete">
@@ -376,6 +460,19 @@ export function MoodBoardClient({
             </div>
           )}
         </div>
+      )}
+
+      {canvasOpen && selectedRoom && (
+        <MoodBoardCanvas
+          roomName={selectedRoom.name}
+          items={items}
+          onChange={handleArrangeChange}
+          onClose={() => setCanvasOpen(false)}
+          onGenerate={handleGenerate}
+          generating={generating}
+          collageImageUrl={board?.collage_image_url ?? null}
+          onDownload={handleDownload}
+        />
       )}
 
       <ConfirmDialog

@@ -3500,3 +3500,65 @@ alter table project_files add constraint project_files_category_check
   confirmed), but the Supabase upsert-by-room flow, storage upload/
   signing round trip, and the full UI interaction were only checked by
   `tsc`/lint/build, not against a live Supabase project.
+
+## Mood Boards: freeform arrangement, project/room labeling, full-project PDF export
+
+- Three follow-ups on the mood board feature above:
+  1. **"Open it up and move around the items"** — new "Open board —
+     arrange items" button opens a full-bleed canvas
+     (`components/MoodBoardCanvas.tsx`) where every inspiration photo
+     and material can be dragged to any position and resized via a
+     corner handle (Pointer Events, same technique as
+     `PlanAreaPicker`'s drag/resize box). A never-arranged board is
+     seeded with a sensible grid starting position the moment the
+     canvas opens, so dragging starts from something sane. The
+     arrangement is persisted once per drag/resize (at release, not
+     per pixel of movement) via the same `saveMoodBoard` upsert.
+  2. **"Export the mood board"** — already existed as "Download" for
+     a single room's collage; now export is arrangement-aware too, and
+     a **new "Export all mood boards (PDF)"** button compiles every
+     room's mood board for the whole construction into one PDF
+     (cover page + one page per room, reusing `@react-pdf/renderer`
+     exactly as House Book does — same base-14-font bundling trick,
+     same JPEG/PNG-data-URI image embedding for the PDF's `<Image>`).
+     A room whose board has items but was never individually
+     generated still gets a page — the export route composes its
+     collage on the fly rather than skipping it.
+  3. **"Show which project and room"** — the collage image itself now
+     has a two-line header (room name, then project name/address
+     below it in smaller text), and the on-screen panel shows the
+     same above the room content. Previously the header was just the
+     room name with no project context at all.
+- **Freeform layout is stored directly in the existing `items` jsonb
+  column** — each item gained optional `x`/`y`/`width`/`height` as
+  fractions (0-1) of a shared fixed-aspect canvas
+  (`lib/moodBoardLayout.ts`'s `BOARD_WIDTH`/`BOARD_HEIGHT`, 4:3). **No
+  migration needed this round** — `jsonb` doesn't enforce a shape, so
+  existing boards with no positions simply fall back to
+  `assignDefaultPositions()`'s grid math, used identically by both the
+  canvas (to seed a first-time layout) and the collage generator (as
+  its own fallback) — a generated collage and an unopened canvas's
+  starting layout always agree.
+- **`lib/moodBoard.ts` rewritten** around this shared layout module:
+  every item is now positioned individually (freeform box, not a
+  uniform grid cell), captions moved to an in-tile bottom strip
+  (rather than text below the tile) specifically so two
+  arbitrarily-sized, arbitrarily-placed tiles can never have
+  overlapping captions, and long labels are truncated to fit each
+  tile's actual width. Verified with three standalone local runs
+  (screenshots): the original grid case, a mixed explicit-position +
+  auto-fallback case, and the new two-line header with label
+  truncation — all three matched the intended design exactly.
+- **`lib/houseBookPdf.tsx`**: `toEmbeddablePhoto` exported (was
+  module-private) so the new mood board PDF route can reuse the exact
+  same "fetch → sniff-safe re-encode to a JPEG data URI" treatment
+  `@react-pdf/renderer`'s `<Image>` needs, instead of duplicating it.
+- **`lib/moodBoardPdf.tsx`** (new) + **`app/api/projects/[id]/mood-
+  boards/export`** (new route, rate-limited at 10/hour given it can
+  compose several collages server-side in one request) — same cover-
+  page/header/footer chrome as House Book, scoped to just this
+  construction's mood boards.
+- **Not verified against a live key/database** — same constraint as
+  above; the collage/PDF logic itself was checked with standalone
+  local runs (screenshots), but the full upload → arrange → export
+  round trip through Supabase was only checked by `tsc`/lint/build.
