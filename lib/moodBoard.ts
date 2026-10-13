@@ -87,6 +87,8 @@ interface RenderedTile {
   type: "inspiration" | "material";
   shape: TileShape;
   avgColor: { r: number; g: number; b: number } | null;
+  label: string | null;
+  hasPhoto: boolean;
 }
 
 function escapeXml(s: string): string {
@@ -233,6 +235,31 @@ function buildShadowFragment(shape: TileShape, left: number, top: number, width:
     .join("");
 }
 
+// Rough char-width estimate for a small sans-serif tag — good enough to
+// keep a long label from overflowing its little sticker.
+function truncateLabel(label: string, maxChars: number): string {
+  if (label.length <= maxChars) return label;
+  return `${label.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+// A small "swing tag" sticker clipped onto a photo tile's bottom-right
+// corner — anchored to the tile's rectangular bounding box rather than
+// its masked silhouette, so it sits in the same place regardless of
+// whether the tile is an arch, an oval, or a plain rounded rect.
+function buildTagFragment(left: number, top: number, width: number, height: number, label: string): string {
+  const text = truncateLabel(label, 20);
+  const fontSize = 10;
+  const tagWidth = Math.min(132, Math.max(40, text.length * 6 + 18));
+  const tagHeight = 20;
+  const px = left + width - tagWidth - 6;
+  const py = top + height - tagHeight - 6;
+  return `<g>
+    <rect x="${px + 1}" y="${py + 2}" width="${tagWidth}" height="${tagHeight}" rx="${tagHeight / 2}" fill="${COLORS.shadow}" opacity="0.12"/>
+    <rect x="${px}" y="${py}" width="${tagWidth}" height="${tagHeight}" rx="${tagHeight / 2}" fill="rgba(255,255,255,0.95)"/>
+    <text x="${px + tagWidth / 2}" y="${py + tagHeight / 2 + 3.5}" font-family="sans-serif" font-size="${fontSize}" fill="${COLORS.headerText}" text-anchor="middle">${escapeXml(text)}</text>
+  </g>`;
+}
+
 function buildCircleShadowFragment(cx: number, cy: number, radius: number): string {
   const steps = [
     { pad: 8, opacity: 0.05 },
@@ -321,11 +348,22 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
           averageColor(raw),
         ]);
         const buffer = await maskPhotoTile(resized, width, height, shape);
-        return { buffer, left, top, width, height, type: item.type, shape, avgColor };
+        return { buffer, left, top, width, height, type: item.type, shape, avgColor, label: item.label, hasPhoto: true };
       }
 
       const buffer = buildSwatchTileSvg(item.label, width, height);
-      return { buffer, left, top, width, height, type: item.type, shape: "rounded" as TileShape, avgColor: null };
+      return {
+        buffer,
+        left,
+        top,
+        width,
+        height,
+        type: item.type,
+        shape: "rounded" as TileShape,
+        avgColor: null,
+        label: item.label,
+        hasPhoto: false,
+      };
     })
   );
 
@@ -402,10 +440,27 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
     ${annotationSvg}
   </svg>`;
 
+  // A small "swing tag" on each labeled photo tile — composited ON TOP of
+  // the photos, in its own layer, since it needs to sit above whichever
+  // tile it's tagging regardless of paint order. Anchored to the tile's
+  // rectangular bounding box (see buildTagFragment), so it works the same
+  // way for an arch, an oval, or a plain rounded tile. Swatch cards already
+  // show their label as their whole content, so they don't get a tag.
+  const overlaySvg = `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
+    ${tiles
+      .filter((t) => t.hasPhoto && t.label)
+      .map((t) => buildTagFragment(t.left, t.top, t.width, t.height, t.label as string))
+      .join("")}
+  </svg>`;
+
   return sharp({
     create: { width: canvasWidth, height: canvasHeight, channels: 3, background: COLORS.background },
   })
-    .composite([{ input: Buffer.from(backgroundSvg), top: 0, left: 0 }, ...tiles.map((t) => ({ input: t.buffer, top: t.top, left: t.left }))])
+    .composite([
+      { input: Buffer.from(backgroundSvg), top: 0, left: 0 },
+      ...tiles.map((t) => ({ input: t.buffer, top: t.top, left: t.left })),
+      { input: Buffer.from(overlaySvg), top: 0, left: 0 },
+    ])
     .png()
     .toBuffer();
 }

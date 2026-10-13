@@ -3819,3 +3819,44 @@ that are achievable without a fundamentally different capability:
   assumed. Not deployed anywhere live, so the `outputFileTracingIncludes`
   fix is reasoned from this app's own pdfkit precedent, not re-verified
   against an actual Vercel deploy.
+
+## Mood Boards: a per-photo label back, as a small corner tag
+
+The previous round dropped every per-photo caption to match the clean
+reference look, and the person reported that as "labels are not
+working" — fair; dropping all visible labels was too far for a feature
+whose whole point is remembering which material/inspiration is which.
+Restored, but not as the old bottom caption strip (which doesn't suit
+an arch or oval tile — it would run outside the tile's visible
+silhouette near the corners):
+
+- **New `buildTagFragment` in `lib/moodBoard.ts`**: a small white
+  "swing tag" pill clipped onto a labeled photo tile's bottom-right
+  corner, with its own soft shadow. It's anchored to the tile's
+  rectangular bounding box, not its masked shape, so it sits in the
+  same sensible place whether the tile is an arch, an oval, or a plain
+  rounded rect — no shape-specific geometry needed. Composited in a
+  new overlay layer on top of the photos (the previous round had
+  dropped the overlay layer entirely along with the pills/captions).
+  Swatch (text-only) material cards still skip it — their label is
+  already their whole content.
+- Also double-checked the room name specifically, since it was
+  reported missing at the same time: re-ran the smoke-test harness
+  with an explicit room name and no project name, confirmed the bold
+  serif room-name title still renders correctly in both cases. I
+  couldn't reproduce a case where it's actually missing from a freshly
+  generated collage — my best guess is this was the same stale-image
+  cause as the labels report (an already-downloaded or previously
+  -generated image from before this session's "show room name" feature
+  even existed, rather than a fresh "Generate & export"). Flagging
+  this explicitly rather than claiming it's fixed: if a freshly
+  generated board is still missing the room name, that's a real,
+  distinct bug I haven't found yet and need more detail to chase
+  (ideally the actual room name string being used, and whether it's
+  the single-room generate button or the full-project PDF export).
+- No schema/migration changes.
+- **Verified locally**: smoke-tested with the same mocked-`fetch`
+  harness as the previous two rounds — tags visible on labeled photo
+  tiles, no tag on the unlabeled mirror tile or the text-only swatch
+  cards, room name confirmed present with and without a project name
+  set — reviewed as PNGs.
