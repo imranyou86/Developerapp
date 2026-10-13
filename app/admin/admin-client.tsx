@@ -40,7 +40,7 @@ const PREVIEWABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "warranty"];
 // section above without going through an invite at all. "Warranty" is
 // typically set this way (change an existing member's role) once their
 // construction is complete, rather than through a fresh invite.
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty", "interior_designer"];
 
 export type AccountStatus = "pending" | "approved" | "rejected";
 

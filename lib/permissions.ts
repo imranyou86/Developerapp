@@ -5,7 +5,7 @@ import type { UserRole } from "@/lib/types";
 // lib/permissions-server.ts so client components can still import the
 // shared constants below without pulling in next/headers.
 
-export const ROLE_VALUES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
+export const ROLE_VALUES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty", "interior_designer"];
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   owner: "Owner",
@@ -13,6 +13,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   contractor: "Contractor",
   developer: "Developer",
   warranty: "Warranty",
+  interior_designer: "Interior Designer",
 };
 
 export interface ProjectTabDef {

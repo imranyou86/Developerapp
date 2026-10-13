@@ -20,7 +20,7 @@ import type { UserRole } from "@/lib/types";
 // developer (full admin access everywhere), not just membership on this
 // one project. "Warranty" is for the homeowner once this construction is
 // done — their account then only ever sees the Warranty Request tab.
-const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty"];
+const INVITABLE_ROLES: UserRole[] = ["owner", "pm", "contractor", "developer", "warranty", "interior_designer"];
 
 export function InviteButton({ projectId }: { projectId: string }) {
   const { notify } = useToast();

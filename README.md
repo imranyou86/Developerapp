@@ -3562,3 +3562,118 @@ alter table project_files add constraint project_files_category_check
   above; the collage/PDF logic itself was checked with standalone
   local runs (screenshots), but the full upload → arrange → export
   round trip through Supabase was only checked by `tsc`/lint/build.
+
+## Mood Boards: auto-detect components from an inspiration photo
+
+- Asked and confirmed up front (two quick scoping questions, since
+  there were real alternatives): component detection runs **on-demand**
+  (a "Find materials" button on each inspiration-type item, not an
+  automatic AI call on every upload) and produces a **cropped
+  close-up per component**, not the same full photo relabeled several
+  times.
+- **New `app/api/claude/detect-mood-board-components`** — sends the
+  inspiration photo to Claude vision with a prompt asking it to
+  identify distinct, separately-shoppable design components (furniture
+  pieces, fixtures, materials/finishes) and a bounding box for each,
+  same "ask for fractions of the image, not pixels" approach used
+  elsewhere in this app (e.g. the Rooms & Tasks plan-area picker).
+  Crops are cut from the photo's ORIGINAL resolution via `sharp`
+  (fetched once, reused for both the downscaled vision call and the
+  crops) with a small 6% padding per box, and returned as JPEG data
+  URIs — nothing is uploaded to storage or added to the board until
+  the person actually picks which ones they want.
+- **Mood board client**: an inspiration item's hover controls gained a
+  "Find materials" button alongside "Remove". Results open in a
+  checklist modal (every component pre-checked) — "Add selected"
+  uploads just the chosen crops to `mood-board-photos` and appends
+  them as new `type: "material"` items, auto-labeled from what Claude
+  called each one (still editable like any other item).
+- No schema/migration changes.
+- **Not verified against a live key** — this sandbox has no network
+  access to call the real Claude vision API, so the bounding-box
+  accuracy on a real inspiration photo (as opposed to the crop *math*
+  itself, which follows the same already-smoke-tested pattern as the
+  plan-area picker) isn't confirmed end-to-end.
+
+## New role: Interior Designer — access to only the Interior Design tab
+
+- A new account role, restricted the same way the existing "warranty"
+  role is restricted to just `warranty-request`/`chat` — here, every
+  tab is disallowed except `interior-design` (Design a room, Mood
+  Boards, Finish ID all live under that one top-level section, so an
+  Interior Designer account gets all three once they're on a
+  construction). No special-casing needed anywhere else: project
+  access, RLS, and tab gating in this app are already role-agnostic —
+  `has_project_access()` only checks membership, not role, and
+  `getAllowedTabSlugs()` is driven entirely by the `tab_permissions`
+  table — so this is purely a new allowed role value plus one seed
+  row, not new logic.
+- Like Contractor/PM, an Interior Designer account has to be **added
+  to a specific construction** (via a Developer's project invite, or
+  Admin's "assign to construction") before it can see that
+  construction in the Interior Design project picker — it doesn't get
+  blanket visibility into every construction in the app.
+- `lib/types.ts`'s `UserRole` union, `lib/permissions.ts`'s
+  `ROLE_VALUES`/`ROLE_LABELS`, and the two hardcoded
+  `INVITABLE_ROLES` arrays (`app/admin/admin-client.tsx`,
+  `app/projects/[id]/invite-button.tsx`) all extended — everywhere
+  else that offers a role picker already derives it from `ROLE_VALUES`
+  rather than its own list, so those picked the new role up
+  automatically.
+
+### Migration 065 — required before this deploys
+
+```sql
+-- New "interior_designer" role — an outside designer account restricted to
+-- seeing only the Interior Design top-level tab (Design a room, Mood
+-- Boards, Finish ID) on every construction it's added to, same mechanism
+-- as the existing "warranty" role being restricted to just
+-- warranty-request/chat (see migration 029). No new tab, no new table —
+-- just a new allowed value for the existing role columns, plus a
+-- tab_permissions seed row set so every tab EXCEPT 'interior-design' is
+-- false for this role. Project access itself still works exactly like
+-- Contractor/PM — the account needs to be invited to (or added to) a
+-- specific construction via project_members/project_invites before it can
+-- see it in the Interior Design project picker.
+--
+-- Run this once in the Supabase SQL editor against an EXISTING project
+-- that already has migrations 001-064 applied.
+
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check
+  check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer'));
+
+alter table project_members drop constraint if exists project_members_role_check;
+alter table project_members add constraint project_members_role_check
+  check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer'));
+
+alter table project_invites drop constraint if exists project_invites_role_check;
+alter table project_invites add constraint project_invites_role_check
+  check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer'));
+
+alter table tab_permissions drop constraint if exists tab_permissions_role_check;
+alter table tab_permissions add constraint tab_permissions_role_check
+  check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer'));
+
+-- Give the new role a row for every existing tab (both per-project tabs
+-- and top-level sections share this one table — see lib/permissions.ts),
+-- then immediately restrict it to just 'interior-design'.
+insert into tab_permissions (role, tab, allowed)
+select 'interior_designer', t.tab, true
+from (
+  values
+    ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'),
+    ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'),
+    ('house-book'), ('chat'), ('warranty-request'), ('activity')
+) as t(tab)
+on conflict (role, tab) do nothing;
+
+update tab_permissions set allowed = false where role = 'interior_designer' and tab <> 'interior-design';
+```
+
+- **Not verified against a live database** — reasoned from the
+  existing `has_project_access`/`getAllowedTabSlugs`/RLS code (all
+  confirmed role-agnostic by reading them directly) and the
+  `warranty`-role migration's exact precedent, but not run against a
+  live Supabase project or exercised by actually signing in as the new
+  role.

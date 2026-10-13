@@ -536,8 +536,10 @@ create table if not exists profiles (
   -- 'warranty' is a homeowner given access once their construction is
   -- complete — account-wide (like every other role here), tab_permissions
   -- restricts it to seeing only the 'warranty-request' and 'chat' tabs (see
-  -- the seed insert below).
-  role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
+  -- the seed insert below). 'interior_designer' is narrower still — an
+  -- outside designer who only ever needs the Interior Design section,
+  -- restricted to just the 'interior-design' tab the same way.
+  role text not null default 'owner' check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer')),
   -- Gates access to the whole app (enforced in middleware.ts): new signups
   -- land here as 'pending' until a Developer approves them from Admin's
   -- "Access requests" section, so creating an account alone never grants
@@ -560,7 +562,7 @@ create table if not exists profiles (
 -- page; Developer itself always has full access regardless of these rows
 -- (enforced in the app layer, not just here).
 create table if not exists tab_permissions (
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer')),
   tab text not null check (tab in ('plan', 'rooms', 'interior-design', 'checklist', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'files', 'deals', 'subcontractors', 'certificate-of-occupancy', 'landscape', 'house-book', 'chat', 'warranty-request', 'activity')),
   allowed boolean not null default true,
   primary key (role, tab)
@@ -588,7 +590,7 @@ create table if not exists project_members (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer')),
   invited_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
   unique (project_id, user_id)
@@ -601,7 +603,7 @@ create table if not exists project_invites (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects (id) on delete cascade,
   email text not null,
-  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty')),
+  role text not null check (role in ('owner', 'pm', 'contractor', 'developer', 'warranty', 'interior_designer')),
   invited_by uuid not null references auth.users (id) on delete cascade,
   token text not null unique,
   status text not null default 'pending' check (status in ('pending', 'accepted', 'revoked')),
@@ -957,10 +959,11 @@ create index if not exists idx_bank_transactions_bid on bank_transactions (bid_i
 insert into tab_permissions (role, tab, allowed)
 select r.role, t.tab, case
   when r.role = 'warranty' and t.tab not in ('warranty-request', 'chat') then false
+  when r.role = 'interior_designer' and t.tab <> 'interior-design' then false
   when r.role = 'contractor' and t.tab in ('interior-design', 'budget', 'cost', 'bids', 'payments', 'bank-transactions', 'deals', 'subcontractors', 'landscape', 'house-book') then false
   else true
 end
-from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty')) as r(role)
+from (values ('owner'), ('pm'), ('contractor'), ('developer'), ('warranty'), ('interior_designer')) as r(role)
 cross join (values ('plan'), ('rooms'), ('interior-design'), ('checklist'), ('budget'), ('cost'), ('bids'), ('payments'), ('bank-transactions'), ('files'), ('deals'), ('subcontractors'), ('certificate-of-occupancy'), ('landscape'), ('house-book'), ('chat'), ('warranty-request'), ('activity')) as t(tab)
 on conflict (role, tab) do nothing;
 

@@ -527,7 +527,7 @@ export interface CostBreakdownLine {
 // the (typically) single-project person it's meant for, even though it
 // means it can't be scoped to just one of several projects the same
 // account belongs to (see lib/permissions.ts's PROJECT_TABS comment).
-export type UserRole = "owner" | "pm" | "contractor" | "developer" | "warranty";
+export type UserRole = "owner" | "pm" | "contractor" | "developer" | "warranty" | "interior_designer";
 
 export interface Profile {
   id: string;

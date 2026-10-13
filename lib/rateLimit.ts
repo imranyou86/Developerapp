@@ -36,6 +36,7 @@ export const RATE_LIMITS: Record<string, { limit: number; windowSeconds: number 
   "edit-room-image": { limit: 15, windowSeconds: 3600 },
   "mood-board-generate": { limit: 30, windowSeconds: 3600 },
   "mood-board-export": { limit: 10, windowSeconds: 3600 },
+  "detect-mood-board-components": { limit: 20, windowSeconds: 3600 },
 };
 
 async function checkRateLimit(

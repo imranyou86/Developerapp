@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { useBackgroundTasks } from "@/components/BackgroundTasks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Modal } from "@/components/Modal";
 import { MoodBoardCanvas } from "@/components/MoodBoardCanvas";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { SIGNED_URL_TTL_SECONDS } from "@/lib/storageClient";
@@ -20,6 +21,12 @@ interface RoomOption {
 }
 
 type ItemType = MoodBoardItem["type"];
+
+interface DetectedComponent {
+  label: string;
+  dataUrl: string;
+  selected: boolean;
+}
 
 export function MoodBoardClient({
   projectId,
@@ -44,6 +51,9 @@ export function MoodBoardClient({
   const [deleting, setDeleting] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [detectingItemId, setDetectingItemId] = useState<string | null>(null);
+  const [detected, setDetected] = useState<DetectedComponent[] | null>(null);
+  const [addingDetected, setAddingDetected] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId) ?? null;
@@ -111,14 +121,14 @@ export function MoodBoardClient({
     return pub.signedUrl;
   }
 
-  async function uploadBlob(blob: Blob, ext: string): Promise<string> {
+  async function uploadBlob(blob: Blob, ext: string, suffix = "collage"): Promise<string> {
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) throw new Error("Not signed in.");
 
-    const path = `${user.id}/${projectId}/${selectedRoomId}-collage-${Date.now()}.${ext}`;
+    const path = `${user.id}/${projectId}/${selectedRoomId}-${suffix}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
     const { error: uploadError } = await supabase.storage.from("mood-board-photos").upload(path, blob, {
       contentType: blob.type,
     });
@@ -129,6 +139,15 @@ export function MoodBoardClient({
       .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
     if (signError || !pub) throw new Error(signError?.message ?? "Could not get a URL for the uploaded file.");
     return pub.signedUrl;
+  }
+
+  function dataUrlToBlob(dataUrl: string): Blob {
+    const [header, base64] = dataUrl.split(",");
+    const mime = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
   }
 
   async function handleAddItem(file: File) {
@@ -175,6 +194,68 @@ export function MoodBoardClient({
       return;
     }
     upsertLocalBoard(selectedRoomId, { items: nextItems });
+  }
+
+  // Reads an inspiration photo with Claude vision and crops out each
+  // distinct furniture/fixture/material it finds, for the person to pick
+  // from — see app/api/claude/detect-mood-board-components/route.ts.
+  // Nothing is added to the board until they confirm a selection below.
+  async function handleDetectComponents(item: MoodBoardItem) {
+    setDetectingItemId(item.id);
+    try {
+      await run(`mood-board-detect:${item.id}`, "Finding components in this photo…", async () => {
+        const res = await fetchWithRetry("/api/claude/detect-mood-board-components", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: item.storage_url }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Could not find components in this photo.");
+        if (!json.items || json.items.length === 0) {
+          notify("error", "Didn't find any distinct components in this photo.");
+          return;
+        }
+        setDetected((json.items as { label: string; dataUrl: string }[]).map((c) => ({ ...c, selected: true })));
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not find components in this photo.");
+    } finally {
+      setDetectingItemId(null);
+    }
+  }
+
+  async function handleAddDetectedComponents() {
+    if (!detected || !selectedRoom) return;
+    const chosen = detected.filter((c) => c.selected);
+    if (chosen.length === 0) {
+      setDetected(null);
+      return;
+    }
+    setAddingDetected(true);
+    try {
+      await run(`mood-board-add-detected:${selectedRoomId}`, `Adding ${chosen.length} material${chosen.length === 1 ? "" : "s"}…`, async () => {
+        const newItems: MoodBoardItem[] = [];
+        for (const c of chosen) {
+          const storageUrl = await uploadBlob(dataUrlToBlob(c.dataUrl), "jpg", "component");
+          newItems.push({ id: crypto.randomUUID(), type: "material", storage_url: storageUrl, label: c.label });
+        }
+        const nextItems = [...items, ...newItems];
+        const res = await saveMoodBoard(projectId, selectedRoomId, {
+          roomName: selectedRoom.name,
+          notes: board?.notes ?? null,
+          items: nextItems,
+          collageImageUrl: board?.collage_image_url ?? null,
+        });
+        if (!res.ok) throw new Error(res.error ?? "Could not save.");
+        upsertLocalBoard(selectedRoomId, { id: res.id, items: nextItems });
+        notify("success", `${chosen.length} material${chosen.length === 1 ? "" : "s"} added.`);
+        setDetected(null);
+      });
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Could not add components.");
+    } finally {
+      setAddingDetected(false);
+    }
   }
 
   // Persists a freeform arrangement from the canvas — called once at drag
@@ -424,13 +505,21 @@ export function MoodBoardClient({
                         {it.label}
                       </span>
                     )}
-                    <button
-                      type="button"
-                      className="absolute right-1 top-1 hidden rounded bg-black/60 px-1 py-0.5 text-[9px] text-white group-hover:block"
-                      onClick={() => handleRemoveItem(it.id)}
-                    >
-                      Remove
-                    </button>
+                    <div className="absolute right-1 top-1 hidden flex-col items-end gap-1 group-hover:flex">
+                      {it.type === "inspiration" && (
+                        <button
+                          type="button"
+                          className="rounded bg-black/60 px-1 py-0.5 text-[9px] text-white disabled:opacity-60"
+                          disabled={detectingItemId === it.id}
+                          onClick={() => handleDetectComponents(it)}
+                        >
+                          {detectingItemId === it.id ? "Finding…" : "Find materials"}
+                        </button>
+                      )}
+                      <button type="button" className="rounded bg-black/60 px-1 py-0.5 text-[9px] text-white" onClick={() => handleRemoveItem(it.id)}>
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -473,6 +562,55 @@ export function MoodBoardClient({
           collageImageUrl={board?.collage_image_url ?? null}
           onDownload={handleDownload}
         />
+      )}
+
+      {detected && (
+        <Modal
+          open
+          onClose={() => setDetected(null)}
+          title="Components found in this photo"
+          footer={
+            <>
+              <button type="button" className="btn-outline" disabled={addingDetected} onClick={() => setDetected(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={addingDetected || detected.every((c) => !c.selected)}
+                onClick={handleAddDetectedComponents}
+              >
+                {addingDetected ? "Adding…" : `Add selected (${detected.filter((c) => c.selected).length})`}
+              </button>
+            </>
+          }
+        >
+          <p className="mb-3 text-xs text-blueprint/50">
+            Uncheck anything you don&apos;t want — each one you keep is added as its own cropped material item.
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {detected.map((c, i) => (
+              <label
+                key={i}
+                className={`cursor-pointer overflow-hidden rounded-md border-2 ${c.selected ? "border-amber" : "border-transparent"}`}
+              >
+                <div className="relative aspect-square bg-concrete">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- data: URI crop, not a next/image remote source */}
+                  <img src={c.dataUrl} alt={c.label} className="h-full w-full object-cover" />
+                  <input
+                    type="checkbox"
+                    className="absolute right-1 top-1 h-4 w-4"
+                    checked={c.selected}
+                    onChange={() =>
+                      setDetected((prev) => (prev ? prev.map((x, xi) => (xi === i ? { ...x, selected: !x.selected } : x)) : prev))
+                    }
+                  />
+                </div>
+                <p className="truncate px-1 py-1 text-xs text-blueprint/70">{c.label}</p>
+              </label>
+            ))}
+          </div>
+        </Modal>
       )}
 
       <ConfirmDialog
