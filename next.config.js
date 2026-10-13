@@ -25,12 +25,8 @@ const nextConfig = {
     // even though local dev/build (full node_modules already on disk)
     // never surfaces it. Forcing every route to explicitly carry pdfkit's
     // and @react-pdf's full file trees works around that gap.
-    // lib/textPath.ts reads its bundled .ttf files (lib/fonts/*.ttf) via
-    // a static, literal fs.readFileSync path, which file-tracing should
-    // already follow on its own — but given the pdfkit gap right above,
-    // this is listed explicitly too rather than assumed.
     outputFileTracingIncludes: {
-      "**": ["./node_modules/pdfkit/js/**/*", "./node_modules/@react-pdf/**/*", "./lib/fonts/**/*"],
+      "**": ["./node_modules/pdfkit/js/**/*", "./node_modules/@react-pdf/**/*"],
     },
   },
 };

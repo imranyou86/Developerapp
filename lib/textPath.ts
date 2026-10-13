@@ -1,6 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import opentype from "opentype.js";
+import { caveatBold, playfairDisplayBold, arimoBold } from "@/lib/fonts/embedded";
 
 // Every piece of text in the generated mood board collage (lib/moodBoard.ts)
 // is rendered this way — as actual glyph OUTLINES, not an SVG <text>
@@ -12,15 +11,30 @@ import opentype from "opentype.js";
 // that failure mode was missed in earlier local smoke tests — it only
 // shows up where there's no font fallback to quietly catch the miss.
 //
-// Converting every string to glyph outlines (via opentype.js, reading a
-// bundled font file directly off disk) sidesteps the deployment's font
-// situation entirely: an SVG <path> is just vector geometry by the time it
-// reaches the rasterizer, nothing to look up. There is deliberately no
-// plain-<text> fallback path anymore — that was tried first and is
-// exactly what produced the tofu boxes in production.
+// Converting every string to glyph outlines (via opentype.js) sidesteps the
+// deployment's font situation entirely: an SVG <path> is just vector
+// geometry by the time it reaches the rasterizer, nothing to look up.
+// There is deliberately no plain-<text> fallback path anymore — that was
+// tried first and is exactly what produced the tofu boxes in production.
 //
-// Fonts bundled under lib/fonts/ (all SIL Open Font License, *-OFL.txt
-// alongside each):
+// The font bytes themselves come from lib/fonts/embedded.ts (base64
+// constants), not a separate .ttf read off disk at runtime — an earlier
+// version of this file did read the .ttf files directly via
+// fs.readFileSync(path.join(process.cwd(), "lib", "fonts", ...)), with
+// next.config.js's outputFileTracingIncludes explicitly listing
+// lib/fonts/**/* to make sure the binary files survived deployment. That
+// still weren't making it into the actual running deployment (confirmed:
+// the glyph-outline text rendered as blank/invisible, meaning loadFont()
+// was silently failing and returning null) — something about this
+// deployment's own build/bundle step wasn't carrying loose binary assets
+// through, whatever next's own tracing said should happen. Embedding the
+// bytes as a plain string constant sidesteps that whole class of bundling
+// problem: a JS/TS string is something every bundler already handles
+// correctly by construction.
+//
+// Fonts (all SIL Open Font License — the original .ttf files and each
+// font's *-OFL.txt stay in lib/fonts/ for reference/licensing, just no
+// longer read at runtime):
 //   - Caveat Bold      — "script": handwritten accents (a subtitle, the
 //                        materials-arrow label, swatch card text)
 //   - Playfair Display Bold — "serif": the bold headline (room name)
@@ -32,10 +46,10 @@ import opentype from "opentype.js";
 
 export type FontKey = "script" | "serif" | "sans";
 
-const FONT_FILES: Record<FontKey, string> = {
-  script: "Caveat-Bold.ttf",
-  serif: "PlayfairDisplay-Bold.ttf",
-  sans: "Arimo-Bold.ttf",
+const FONT_DATA: Record<FontKey, string> = {
+  script: caveatBold,
+  serif: playfairDisplayBold,
+  sans: arimoBold,
 };
 
 const cache = new Map<FontKey, opentype.Font | null>();
@@ -43,13 +57,13 @@ const cache = new Map<FontKey, opentype.Font | null>();
 function loadFont(key: FontKey): opentype.Font | null {
   if (cache.has(key)) return cache.get(key) ?? null;
   try {
-    const buf = fs.readFileSync(path.join(process.cwd(), "lib", "fonts", FONT_FILES[key]));
+    const buf = Buffer.from(FONT_DATA[key], "base64");
     const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
     const font = opentype.parse(arrayBuffer);
     cache.set(key, font);
     return font;
   } catch (err) {
-    console.error(`Could not load the bundled "${key}" font (${FONT_FILES[key]}):`, err);
+    console.error(`Could not decode the embedded "${key}" font:`, err);
     cache.set(key, null);
     return null;
   }

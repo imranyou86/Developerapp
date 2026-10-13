@@ -3939,3 +3939,52 @@ right above it, and explains both reports at once.
   is inferred from the person's screenshot plus this sandbox's own
   fonts being the one variable between then and now, not re-confirmed
   against the actual deployment target directly.
+
+## Mood Boards: font files weren't actually surviving deployment — embedded them directly instead of reading from disk
+
+The previous round's fix was the right idea (stop depending on the
+deployment having any system fonts) but the person's next screenshot
+showed the bug had only changed shape: every piece of text was now
+blank/invisible instead of tofu boxes, and most photo tiles were
+empty cream rectangles too. That's what it looks like when
+`lib/textPath.ts`'s `loadFont()` is silently failing and returning
+`null` — the "no `<text>` fallback" design from the previous round
+means a failed font load now draws nothing instead of reproducing the
+old bug, which is more correct but just as broken-looking.
+
+- **Root cause**: the bundled `lib/fonts/*.ttf` files were committed
+  to git and `next.config.js`'s `outputFileTracingIncludes` explicitly
+  listed `lib/fonts/**/*`, but something about this deployment's own
+  build/bundle step still wasn't carrying those loose binary files
+  into the actually-running function — `fs.readFileSync` for them was
+  failing at request time. This can't be fully root-caused without
+  access to the actual deployment platform/logs, which this session
+  doesn't have.
+- **Fix**: stopped depending on separately-bundled files entirely.
+  **New `lib/fonts/embedded.ts`** holds each font's raw bytes as a
+  base64 string constant, generated once from the `.ttf` files (which
+  stay in `lib/fonts/` purely for reference/licensing — see each
+  font's `*-OFL.txt`) and committed as generated source. `textPath.ts`
+  now does `Buffer.from(FONT_DATA[key], "base64")` instead of
+  `fs.readFileSync(...)` — a plain JS/TS string is something every
+  bundler already handles correctly by construction, so this removes
+  the whole class of "did the binary asset survive this particular
+  deployment's build step" uncertainty rather than chasing it further.
+  `next.config.js`'s `outputFileTracingIncludes` entry for
+  `lib/fonts/**/*` was removed since nothing reads those files at
+  runtime any more.
+- Server-side only — `lib/textPath.ts` is only ever imported by
+  `lib/moodBoard.ts`, which is only used from API routes, so the
+  ~640KB of embedded base64 text adds nothing to any client bundle;
+  confirmed the build's "First Load JS shared by all" size is
+  unchanged from before this change.
+- No schema/migration changes.
+- **Verified locally**: re-ran the same smoke-test harness, now
+  importing the embedded-base64 `lib/fonts/embedded.ts` instead of
+  reading `.ttf` files off disk, confirmed `opentype.parse()` decodes
+  all three fonts correctly from the base64 and the full board
+  composition renders identically to the previous (file-based) round
+  — reviewed as a PNG. This removes the *mechanism* that was most
+  likely failing, but — same caveat as every round of this feature —
+  isn't re-confirmed against the person's actual deployment target,
+  since this sandbox has no access to it.
