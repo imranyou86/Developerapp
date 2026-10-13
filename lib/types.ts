@@ -287,7 +287,12 @@ export interface LandscapeDesign {
 export interface MoodBoardItem {
   id: string;
   type: "inspiration" | "material";
-  storage_url: string;
+  // Null for a text-only material — e.g. one of the names Claude listed
+  // from "Find materials in this photo" (app/api/claude/detect-mood-board-
+  // components), which identifies components as a plain list rather than
+  // cropping them out of the photo. Rendered as a labeled swatch card
+  // instead of a photo tile wherever items are shown.
+  storage_url: string | null;
   label: string | null;
   // Freeform arrangement position, as fractions (0-1) of the mood board's
   // fixed-aspect canvas (see lib/moodBoardLayout.ts) — set once the board's

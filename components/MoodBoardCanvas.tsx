@@ -144,10 +144,18 @@ export function MoodBoardCanvas({
                 }}
                 onPointerDown={(e) => handleItemPointerDown(e, it)}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage URL, not a next/image remote source */}
-                <img src={it.storage_url} alt={it.label ?? it.type} className="h-full w-full object-cover" draggable={false} />
-                {it.label && (
-                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-1 text-[10px] text-white">{it.label}</span>
+                {it.storage_url ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage URL, not a next/image remote source */}
+                    <img src={it.storage_url} alt={it.label ?? it.type} className="h-full w-full object-cover" draggable={false} />
+                    {it.label && (
+                      <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-1 text-[10px] text-white">{it.label}</span>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-amber/10 p-2 text-center text-xs font-medium text-amber-dark">
+                    {it.label}
+                  </div>
                 )}
                 <div
                   className="absolute bottom-0 right-0 h-4 w-4 translate-x-1/2 translate-y-1/2 cursor-nwse-resize rounded-full border-2 border-white bg-blueprint shadow"

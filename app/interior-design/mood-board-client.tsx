@@ -24,7 +24,6 @@ type ItemType = MoodBoardItem["type"];
 
 interface DetectedComponent {
   label: string;
-  dataUrl: string;
   selected: boolean;
 }
 
@@ -141,15 +140,6 @@ export function MoodBoardClient({
     return pub.signedUrl;
   }
 
-  function dataUrlToBlob(dataUrl: string): Blob {
-    const [header, base64] = dataUrl.split(",");
-    const mime = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
-    const byteChars = atob(base64);
-    const bytes = new Uint8Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  }
-
   async function handleAddItem(file: File) {
     if (!selectedRoom) return;
     try {
@@ -196,11 +186,14 @@ export function MoodBoardClient({
     upsertLocalBoard(selectedRoomId, { items: nextItems });
   }
 
-  // Reads an inspiration photo with Claude vision and crops out each
-  // distinct furniture/fixture/material it finds, for the person to pick
-  // from — see app/api/claude/detect-mood-board-components/route.ts.
-  // Nothing is added to the board until they confirm a selection below.
+  // Reads an inspiration photo with Claude vision and lists the distinct
+  // furniture/fixture/material components it finds, for the person to pick
+  // from — see app/api/claude/detect-mood-board-components/route.ts. A
+  // plain text list, not cropped images: nothing is added to the board
+  // until a selection is confirmed below, and what gets added is a
+  // label-only material (no photo).
   async function handleDetectComponents(item: MoodBoardItem) {
+    if (!item.storage_url) return;
     setDetectingItemId(item.id);
     try {
       await run(`mood-board-detect:${item.id}`, "Finding components in this photo…", async () => {
@@ -215,7 +208,7 @@ export function MoodBoardClient({
           notify("error", "Didn't find any distinct components in this photo.");
           return;
         }
-        setDetected((json.items as { label: string; dataUrl: string }[]).map((c) => ({ ...c, selected: true })));
+        setDetected((json.items as { label: string }[]).map((c) => ({ ...c, selected: true })));
       });
     } catch (err) {
       notify("error", err instanceof Error ? err.message : "Could not find components in this photo.");
@@ -234,11 +227,12 @@ export function MoodBoardClient({
     setAddingDetected(true);
     try {
       await run(`mood-board-add-detected:${selectedRoomId}`, `Adding ${chosen.length} material${chosen.length === 1 ? "" : "s"}…`, async () => {
-        const newItems: MoodBoardItem[] = [];
-        for (const c of chosen) {
-          const storageUrl = await uploadBlob(dataUrlToBlob(c.dataUrl), "jpg", "component");
-          newItems.push({ id: crypto.randomUUID(), type: "material", storage_url: storageUrl, label: c.label });
-        }
+        const newItems: MoodBoardItem[] = chosen.map((c) => ({
+          id: crypto.randomUUID(),
+          type: "material",
+          storage_url: null,
+          label: c.label,
+        }));
         const nextItems = [...items, ...newItems];
         const res = await saveMoodBoard(projectId, selectedRoomId, {
           roomName: selectedRoom.name,
@@ -491,8 +485,14 @@ export function MoodBoardClient({
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
                 {items.map((it) => (
                   <div key={it.id} className="group relative aspect-square overflow-hidden rounded-md bg-concrete">
-                    {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage URL, not a next/image remote source */}
-                    <img src={it.storage_url} alt={it.label ?? it.type} className="h-full w-full object-cover" />
+                    {it.storage_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage URL, not a next/image remote source
+                      <img src={it.storage_url} alt={it.label ?? it.type} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-amber/10 p-2 text-center text-xs font-medium text-amber-dark">
+                        {it.label}
+                      </div>
+                    )}
                     <span
                       className={`absolute left-1 top-1 rounded px-1 text-[9px] font-medium text-white ${
                         it.type === "material" ? "bg-amber" : "bg-blueprint"
@@ -500,7 +500,7 @@ export function MoodBoardClient({
                     >
                       {it.type === "material" ? "Material" : "Inspo"}
                     </span>
-                    {it.label && (
+                    {it.label && it.storage_url && (
                       <span className="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[9px] text-white">
                         {it.label}
                       </span>
@@ -586,27 +586,25 @@ export function MoodBoardClient({
           }
         >
           <p className="mb-3 text-xs text-blueprint/50">
-            Uncheck anything you don&apos;t want — each one you keep is added as its own cropped material item.
+            Uncheck anything you don&apos;t want — each one you keep is added to this room&apos;s materials list.
           </p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
             {detected.map((c, i) => (
               <label
                 key={i}
-                className={`cursor-pointer overflow-hidden rounded-md border-2 ${c.selected ? "border-amber" : "border-transparent"}`}
+                className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                  c.selected ? "border-amber bg-amber/10 text-blueprint-dark" : "border-blueprint/10 text-blueprint/60"
+                }`}
               >
-                <div className="relative aspect-square bg-concrete">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- data: URI crop, not a next/image remote source */}
-                  <img src={c.dataUrl} alt={c.label} className="h-full w-full object-cover" />
-                  <input
-                    type="checkbox"
-                    className="absolute right-1 top-1 h-4 w-4"
-                    checked={c.selected}
-                    onChange={() =>
-                      setDetected((prev) => (prev ? prev.map((x, xi) => (xi === i ? { ...x, selected: !x.selected } : x)) : prev))
-                    }
-                  />
-                </div>
-                <p className="truncate px-1 py-1 text-xs text-blueprint/70">{c.label}</p>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0"
+                  checked={c.selected}
+                  onChange={() =>
+                    setDetected((prev) => (prev ? prev.map((x, xi) => (xi === i ? { ...x, selected: !x.selected } : x)) : prev))
+                  }
+                />
+                {c.label}
               </label>
             ))}
           </div>

@@ -3677,3 +3677,62 @@ update tab_permissions set allowed = false where role = 'interior_designer' and 
   `warranty`-role migration's exact precedent, but not run against a
   live Supabase project or exercised by actually signing in as the new
   role.
+
+## Mood Boards: list detected materials instead of cropping, and a more editorial collage design
+
+- **"Find materials" now lists components instead of cropping them.**
+  The cropped-close-up approach (previous section) often produced
+  ugly or mis-framed sub-images from a busy photo, and the actual goal
+  was just knowing what's in the shot, not a picture-of-a-picture. The
+  detection prompt in `app/api/claude/detect-mood-board-components`
+  now asks Claude for a plain `{ label }` per component (no bounding
+  boxes), and the picker modal in `mood-board-client.tsx` is a
+  checklist of names instead of an image grid. "Add selected" creates
+  `type: "material"` items with `storage_url: null` directly — nothing
+  is cropped, uploaded, or added to Storage for these.
+- **`MoodBoardItem.storage_url` is now `string | null`** (`lib/types.ts`)
+  to represent a text-only material. Every place an item is rendered —
+  the item grid and the freeform arrange canvas
+  (`components/MoodBoardCanvas.tsx`) — now shows a labeled card in the
+  item's own type color when there's no photo, instead of a photo
+  tile.
+- **Generated collage redesigned** (`lib/moodBoard.ts`) to move away
+  from the plain bordered-grid look toward the more editorial
+  reference the request included — scoped to what a deterministic
+  `sharp`+SVG pipeline can do reliably in this environment (no custom
+  script font, no arch-mask infrastructure), rather than attempting a
+  pixel match:
+  - Rounded-corner photo tiles with a soft, layered drop shadow
+    (stacked translucent rounded rects, not an SVG blur filter —
+    filter-primitive support varies across SVG rasterizers, plain
+    shapes don't) instead of the old hard colored border.
+  - A small rounded pill (dot + "INSPIRATION"/"MATERIAL") in each
+    photo tile's corner carries the type distinction the border used
+    to.
+  - Text-only material items render as a soft swatch card (word-wrapped
+    italic label, same shadow/corner treatment as a photo tile) right
+    in the layout, rather than being skipped or looking like an error.
+  - Editorial header: small letter-spaced "MOOD BOARD" kicker, bold
+    serif room name, italic project name/address, a thin rule
+    underneath.
+  - A **palette column** along the right edge — one circle per photo
+    tile's average color (sampled via a 4×4 `sharp` resize, not a
+    true dominant-color clustering, but a fast and good-enough stand-in
+    at this size), picked evenly across the board rather than just the
+    first few, so it reflects the whole board.
+  - Explicitly **not attempted**: arch-shaped photo masks, a
+    hand-drawn-style arrow/caption, or a literal script font — judged
+    too fragile for a serverless `sharp` pipeline with no guaranteed
+    custom font or mask assets, versus the above, which are plain
+    shapes and system/web-safe serif fonts.
+- No schema/migration changes — `MoodBoardItem` is a JSON shape inside
+  the existing `mood_boards.items jsonb` column, not its own table, so
+  a text-only item is just a new value for an existing field, not a
+  new column.
+- **Verified locally**: the full `composeMoodBoardCollage` pipeline
+  (shadows, rounded corners, pills, swatch cards, palette column,
+  header, overlapping tiles) was smoke-tested against solid-color test
+  images with a mocked `fetch`, rendered with the real `sharp`, and
+  reviewed as a PNG — not run against a live Claude key, so detection
+  accuracy on a real inspiration photo (as opposed to the list-vs-crop
+  code path itself) isn't confirmed end-to-end.
