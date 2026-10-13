@@ -3736,3 +3736,86 @@ update tab_permissions set allowed = false where role = 'interior_designer' and 
   reviewed as a PNG — not run against a live Claude key, so detection
   accuracy on a real inspiration photo (as opposed to the list-vs-crop
   code path itself) isn't confirmed end-to-end.
+
+## Mood Boards: arch/oval photo shapes, a hand-drawn arrow, and a real script font — closer to the person's reference
+
+The person shared a polished editorial moodboard template a second time
+and asked more directly for that specific look (arch/oval photo cuts,
+overlapping composition, a hand-drawn "Furnitures" arrow in script, a
+palette column). That's reason enough to revisit what the previous
+section called out of scope — this round actually attempts the pieces
+that are achievable without a fundamentally different capability:
+
+- **Shaped photo tiles** (`lib/moodBoard.ts`): the single largest
+  inspiration photo on a board gets an **arch** mask (doorway-style —
+  flat sides, rounded top); other inspiration photos alternate
+  **oval**/rounded; material photos stay plain rounded tiles (same
+  role as the small swatch photos in the reference). Shapes are
+  `sharp` mask composites (`blend: "dest-in"` against an SVG
+  ellipse/arch/rounded-rect) — pure geometry, no new capability.
+  The drop shadow for each tile now matches its own silhouette
+  (an elliptical shadow under an oval tile, an arch-shaped shadow
+  under an arch tile) instead of always being a rounded rect — this
+  needed its own bugfix: an SVG arc that overshoots a tile's
+  bounding box gets silently clipped when it's inside the tile's own
+  mask canvas, but not when the same math draws the (unclipped)
+  shadow on the full canvas, which first smoke-tested as a stray grey
+  crescent above the arch tile. Fixed by deriving the arch's radii
+  once and reusing them (plus padding) for the shadow, instead of
+  re-deriving from a padded width/height.
+- **A real script font, not a font-family guess.** A plain
+  `@font-face { src: url(data:...) }` embed was tested directly
+  against this app's `sharp`/librsvg SVG rendering and silently fell
+  back to a generic sans-serif — no error, just the wrong font, and
+  nothing to assume would work differently on whatever this app is
+  actually deployed to either. **New `lib/scriptFont.ts`** instead
+  converts the handful of script-styled strings (the project
+  name/address under the room title, and the "Materials" arrow label)
+  into their actual glyph **outlines** via `opentype.js`, reading a
+  bundled font file (`lib/fonts/Caveat-Bold.ttf`, SIL Open Font
+  License) directly off disk — by the time it reaches the SVG
+  rasterizer it's just `<path>` vector data, not a font lookup, so it
+  renders identically regardless of what fonts the deployment
+  environment happens to have. Falls back to a plain italic label if
+  the font file can't be read for some reason, rather than throwing.
+  `next.config.js`'s `outputFileTracingIncludes` (already needed for
+  pdfkit's own fonts — see the comment above it) was extended to
+  explicitly carry `lib/fonts/**` too, so the font file is guaranteed
+  to ship in the deployed serverless function.
+- **A hand-drawn-style arrow** points from a script "Materials" label
+  up at whichever material item (photo or text swatch) sits highest on
+  the board — skipped entirely when the board has no material items
+  yet. It's a quadratic curve that bows a fixed fraction of its own
+  length (not a straight line) with a simple two-stroke sketchy
+  arrowhead, rather than an icon asset or a font glyph.
+- Dropped the per-tile pill badge and photo caption strip from the
+  previous round — the reference has no per-photo labels at all, and
+  removing them reads cleaner with the new shapes. An item's label is
+  still visible in the app's own item grid/arrange canvas; the
+  exported collage is the polished presentation version, not the
+  working view.
+- **Still explicitly not attempted**: true transparent product-cutout
+  photos (the floating armchair/mirror in the reference, each sourced
+  as its own pre-cut product photo). That's a fundamentally different
+  capability — real background/subject removal (segmentation),
+  typically its own ML model or API — not something a styling change
+  to this `sharp`+SVG compositor can fake convincingly for an
+  arbitrary uploaded room photo. If this matters enough to pursue,
+  it'd be a separate feature (a background-removal API call per
+  photo) with its own cost/accuracy tradeoffs, not a tweak to this
+  code.
+- No schema/migration changes.
+- `npm install opentype.js` + `npm install -D @types/opentype.js`
+  added as dependencies — pure JS, no native/binary build step, so no
+  new deployment risk beyond the one normal npm package.
+- **Verified locally**: re-ran the same smoke-test harness as the
+  previous round (solid-color test images, mocked `fetch`, real
+  `sharp`) with arch/oval tiles, the script font path, and the arrow
+  all present on one board, including two overlapping/adjacent tiles
+  to confirm the new shapes composite correctly — reviewed as a PNG.
+  The `@font-face` failure above was also confirmed directly (rendered
+  with a data-URI-embedded font, inspected the output, saw the wrong
+  font) before switching to the glyph-outline approach, rather than
+  assumed. Not deployed anywhere live, so the `outputFileTracingIncludes`
+  fix is reasoned from this app's own pdfkit precedent, not re-verified
+  against an actual Vercel deploy.

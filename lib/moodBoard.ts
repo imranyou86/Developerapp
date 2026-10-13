@@ -1,5 +1,6 @@
 import sharp from "sharp";
-import { BOARD_WIDTH, BOARD_HEIGHT, assignDefaultPositions, type MoodBoardLayoutItem } from "@/lib/moodBoardLayout";
+import { BOARD_WIDTH, BOARD_HEIGHT, assignDefaultPositions, clamp, type MoodBoardLayoutItem } from "@/lib/moodBoardLayout";
+import { scriptText } from "@/lib/scriptFont";
 
 // Composes a room's uploaded inspiration photos and material swatches into
 // a single collage image — plain image composition via sharp, deliberately
@@ -21,12 +22,23 @@ import { BOARD_WIDTH, BOARD_HEIGHT, assignDefaultPositions, type MoodBoardLayout
 // board-components. A text-only item renders as a soft labeled card in
 // place of a photo tile, same rounded-corner/shadow treatment as a photo
 // so the board still reads as one cohesive layout either way.
+//
+// Styled after an editorial scrapbook-style moodboard reference the
+// person shared: arch/oval photo cuts instead of a uniform grid, a
+// hand-drawn-style arrow calling out the materials, a script accent
+// (lib/scriptFont.ts — real glyph outlines, not a font-family that may
+// not exist wherever this runs), and a dominant-color palette column.
+// NOT attempted: true transparent product-cutout photos (the floating
+// chair/mirror in the reference) — that needs real background removal
+// (subject segmentation), a different capability than this sharp+SVG
+// compositor, not just a styling change.
 
 const MARGIN = 32;
 const HEADER_HEIGHT = 118;
 const TILE_RADIUS = 14;
 const PALETTE_WIDTH = 100;
 const PALETTE_MAX_SWATCHES = 6;
+const ANNOTATION_STRIP = 80;
 // Caps how large one collage can get — a board with more items than this
 // still works, just only the first MAX_ITEMS are shown in the generated
 // image (every item is still kept and visible in the app's own list).
@@ -36,15 +48,12 @@ const COLORS = {
   background: "#FAF6F0",
   kicker: "#9A7B52",
   headerText: "#2B2420",
-  subtitle: "#7A7066",
+  subtitleScript: "#4A3F33",
   divider: "#E4DACB",
   swatchBg: "#F1E7D8",
   swatchText: "#5C4A2E",
-  pillBg: "rgba(255, 255, 255, 0.92)",
-  pillInspiration: "#2F5D8A",
-  pillMaterial: "#B9792F",
-  labelStrip: "rgba(32, 26, 20, 0.6)",
-  labelText: "#FFFFFF",
+  swatchBorder: "#B9792F",
+  annotationInk: "#221B14",
   shadow: "#140F0A",
 };
 
@@ -59,15 +68,24 @@ export interface MoodBoardCollageItem extends MoodBoardLayoutItem {
   label: string | null;
 }
 
+type TileShape = "rounded" | "oval" | "arch";
+
+interface PlacedItem {
+  item: MoodBoardCollageItem;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 interface RenderedTile {
   buffer: Buffer;
   left: number;
   top: number;
   width: number;
   height: number;
-  label: string | null;
   type: "inspiration" | "material";
-  hasPhoto: boolean;
+  shape: TileShape;
   avgColor: { r: number; g: number; b: number } | null;
 }
 
@@ -75,18 +93,9 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-// Rough char-width estimate for 14px sans-serif — good enough to keep a
-// long label from overflowing a small freeform tile's caption strip; no
-// need for exact text metrics here.
-function truncateLabel(label: string, tileWidthPx: number): string {
-  const maxChars = Math.max(3, Math.floor((tileWidthPx - 16) / 7.5));
-  if (label.length <= maxChars) return label;
-  return `${label.slice(0, maxChars - 1).trimEnd()}…`;
-}
-
 // Greedy word-wrap for the multi-line label inside a text-only swatch card
-// — the label is the whole content there (no caption strip to overflow),
-// so it needs to fit on 2-3 lines instead of being truncated to one.
+// — the label is the whole content there, so it needs to fit on 2-3 lines
+// instead of being truncated to one.
 function wrapLabel(label: string, maxCharsPerLine: number, maxLines = 3): string[] {
   const words = label.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -130,14 +139,49 @@ async function averageColor(raw: Buffer): Promise<{ r: number; g: number; b: num
   return { r: Math.round(r / pixelCount), g: Math.round(g / pixelCount), b: Math.round(b / pixelCount) };
 }
 
-// Photo tiles get their rounded corners from a soft-mask composite (a
-// plain rectangular photo can't express a border-radius on its own);
-// text-only swatch cards draw their own rounded rect directly in the SVG
-// they're rasterized from, so they don't need this step.
-async function roundPhotoCorners(buffer: Buffer, width: number, height: number): Promise<Buffer> {
-  const mask = Buffer.from(
-    `<svg width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="${TILE_RADIUS}" ry="${TILE_RADIUS}" fill="#fff"/></svg>`
-  );
+// The arc occupies exactly the top `ry` of the box (from y to y+ry) and
+// the flat sides run the rest of the way down to the bottom — so the
+// shape's true bounding box is exactly [x, y, x+2*rx, y+height], with no
+// part of the arc overshooting above y. That matters beyond just the
+// photo mask (which happens to get away with an overshoot, since the
+// mask's own raster canvas is exactly tile-sized and silently clips
+// anything outside it): the drop shadow below draws this same path
+// un-clipped on the full canvas, where an overshoot would show up as a
+// stray crescent above the tile. Explicit rx/ry (not re-derived from a
+// padded width/height) let the shadow pass in "this tile's real radii,
+// plus pad" and get a shadow that's a true uniform offset of the tile's
+// own outline.
+function archPathD(x: number, y: number, rx: number, ry: number, height: number): string {
+  const archBottom = y + ry;
+  const bottom = y + height;
+  const x2 = x + rx * 2;
+  return `M${x},${bottom} L${x},${archBottom} A${rx},${ry} 0 0 1 ${x2},${archBottom} L${x2},${bottom} Z`;
+}
+
+function archRadii(width: number, height: number): { rx: number; ry: number } {
+  const rx = width / 2;
+  const ry = Math.min(rx, height * 0.55);
+  return { rx, ry };
+}
+
+function shapeMaskMarkup(shape: TileShape, width: number, height: number): string {
+  if (shape === "oval") {
+    return `<ellipse cx="${width / 2}" cy="${height / 2}" rx="${width / 2}" ry="${height / 2}" fill="#fff"/>`;
+  }
+  if (shape === "arch") {
+    const { rx, ry } = archRadii(width, height);
+    return `<path d="${archPathD(0, 0, rx, ry, height)}" fill="#fff"/>`;
+  }
+  const r = Math.min(TILE_RADIUS, width / 2, height / 2);
+  return `<rect width="${width}" height="${height}" rx="${r}" ry="${r}" fill="#fff"/>`;
+}
+
+// Photo tiles get their shape from a mask composite (a plain rectangular
+// photo can't express an arch or an oval crop on its own); text-only
+// swatch cards draw their own rounded rect directly in the SVG they're
+// rasterized from, so they don't need this step.
+async function maskPhotoTile(buffer: Buffer, width: number, height: number, shape: TileShape): Promise<Buffer> {
+  const mask = Buffer.from(`<svg width="${width}" height="${height}">${shapeMaskMarkup(shape, width, height)}</svg>`);
   return sharp(buffer).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
 }
 
@@ -152,17 +196,17 @@ function buildSwatchTileSvg(label: string | null, width: number, height: number)
     .join("");
   return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" rx="${TILE_RADIUS}" ry="${TILE_RADIUS}" fill="${COLORS.swatchBg}"/>
-    <rect x="1" y="1" width="${width - 2}" height="${height - 2}" rx="${TILE_RADIUS - 1}" ry="${TILE_RADIUS - 1}" fill="none" stroke="${COLORS.pillMaterial}" stroke-opacity="0.35" stroke-width="1.5"/>
+    <rect x="1" y="1" width="${width - 2}" height="${height - 2}" rx="${TILE_RADIUS - 1}" ry="${TILE_RADIUS - 1}" fill="none" stroke="${COLORS.swatchBorder}" stroke-opacity="0.35" stroke-width="1.5"/>
     <text font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="${fontSize}" fill="${COLORS.swatchText}" text-anchor="middle">${tspans}</text>
   </svg>`);
 }
 
 // Soft, hand-rolled drop shadow (several stacked, slightly-offset
-// translucent rounded rects) instead of an SVG blur filter — filter
-// primitive support varies across SVG rasterizers, while plain shapes
-// render identically everywhere, and the sandbox-verified result reads as
-// a believable soft shadow at this scale.
-function buildShadowFragment(left: number, top: number, width: number, height: number): string {
+// translucent shapes matching the tile's own silhouette) instead of an
+// SVG blur filter — filter primitive support varies across SVG
+// rasterizers, while plain shapes render identically everywhere, and the
+// sandbox-verified result reads as a believable soft shadow at this scale.
+function buildShadowFragment(shape: TileShape, left: number, top: number, width: number, height: number): string {
   const steps = [
     { pad: 11, opacity: 0.04 },
     { pad: 8, opacity: 0.06 },
@@ -171,10 +215,21 @@ function buildShadowFragment(left: number, top: number, width: number, height: n
   ];
   const dy = 5;
   return steps
-    .map(
-      (s) =>
-        `<rect x="${left - s.pad}" y="${top - s.pad + dy}" width="${width + s.pad * 2}" height="${height + s.pad * 2}" rx="${TILE_RADIUS + s.pad}" fill="${COLORS.shadow}" opacity="${s.opacity}"/>`
-    )
+    .map((s) => {
+      if (shape === "oval") {
+        const rx = width / 2 + s.pad;
+        const ry = height / 2 + s.pad;
+        return `<ellipse cx="${left + width / 2}" cy="${top + height / 2 + dy}" rx="${rx}" ry="${ry}" fill="${COLORS.shadow}" opacity="${s.opacity}"/>`;
+      }
+      if (shape === "arch") {
+        const base = archRadii(width, height);
+        const rx = base.rx + s.pad;
+        const ry = base.ry + s.pad;
+        return `<path d="${archPathD(left - s.pad, top - s.pad + dy, rx, ry, height + s.pad * 2)}" fill="${COLORS.shadow}" opacity="${s.opacity}"/>`;
+      }
+      const r = Math.min(TILE_RADIUS, width / 2, height / 2) + s.pad;
+      return `<rect x="${left - s.pad}" y="${top - s.pad + dy}" width="${width + s.pad * 2}" height="${height + s.pad * 2}" rx="${r}" fill="${COLORS.shadow}" opacity="${s.opacity}"/>`;
+    })
     .join("");
 }
 
@@ -188,17 +243,29 @@ function buildCircleShadowFragment(cx: number, cy: number, radius: number): stri
   return steps.map((s) => `<circle cx="${cx}" cy="${cy + dy}" r="${radius + s.pad}" fill="${COLORS.shadow}" opacity="${s.opacity}"/>`).join("");
 }
 
-function buildPillFragment(left: number, top: number, type: "inspiration" | "material"): string {
-  const label = type === "material" ? "MATERIAL" : "INSPIRATION";
-  const dotColor = type === "material" ? COLORS.pillMaterial : COLORS.pillInspiration;
-  const pillWidth = 20 + label.length * 6.2;
-  const px = left + 10;
-  const py = top + 10;
-  return `<g>
-    <rect x="${px}" y="${py}" width="${pillWidth}" height="20" rx="10" fill="${COLORS.pillBg}"/>
-    <circle cx="${px + 11}" cy="${py + 10}" r="4" fill="${dotColor}"/>
-    <text x="${px + 20}" y="${py + 14}" font-family="sans-serif" font-size="9" font-weight="700" letter-spacing="0.5" fill="${dotColor}">${label}</text>
-  </g>`;
+// A gentle curved line (not a straight one) with a small sketchy two-stroke
+// arrowhead, instead of a rigid arrow marker — the curve bows a fixed
+// fraction of its own length perpendicular to its direction, which reads
+// as hand-drawn without depending on any font or icon asset.
+function buildArrowFragment(x1: number, y1: number, x2: number, y2: number, color: string): string {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  const bow = Math.min(40, len * 0.22);
+  const midX = (x1 + x2) / 2 + nx * bow;
+  const midY = (y1 + y2) / 2 + ny * bow;
+  const headLen = 11;
+  const spread = 6;
+  const leftX = x2 - ux * headLen - uy * spread;
+  const leftY = y2 - uy * headLen + ux * spread;
+  const rightX = x2 - ux * headLen + uy * spread;
+  const rightY = y2 - uy * headLen - ux * spread;
+  return `<path d="M${x1},${y1} Q${midX},${midY} ${x2},${y2}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M${x2},${y2} L${leftX},${leftY} M${x2},${y2} L${rightX},${rightY}" stroke="${color}" stroke-width="2.2" stroke-linecap="round" fill="none"/>`;
 }
 
 export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, rawItems: MoodBoardCollageItem[]): Promise<Buffer> {
@@ -206,31 +273,59 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
     throw new Error("No items to compose into a mood board yet.");
   }
   const capped = rawItems.slice(0, MAX_ITEMS);
-  const items = assignDefaultPositions(capped);
+  const positioned = assignDefaultPositions(capped);
 
-  const boardAreaWidth = BOARD_WIDTH + PALETTE_WIDTH;
-  const canvasWidth = boardAreaWidth + MARGIN * 2;
-  const canvasHeight = HEADER_HEIGHT + BOARD_HEIGHT + MARGIN * 2;
+  const placed: PlacedItem[] = positioned.map((item) => ({
+    item,
+    left: MARGIN + Math.round(item.x * BOARD_WIDTH),
+    top: HEADER_HEIGHT + MARGIN + Math.round(item.y * BOARD_HEIGHT),
+    width: Math.max(40, Math.round(item.width * BOARD_WIDTH)),
+    height: Math.max(40, Math.round(item.height * BOARD_HEIGHT)),
+  }));
+
+  // One signature "arch" tile — the largest inspiration photo, same
+  // feature-image role the arch cut plays in the reference — plus an oval
+  // cut on every other remaining inspiration photo for variety. Material
+  // photos stay plain rounded tiles, same role as the small swatch photos
+  // in the reference.
+  const inspirationPhotoIdx = placed
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.item.type === "inspiration" && p.item.url);
+  const shapes = new Map<number, TileShape>();
+  if (inspirationPhotoIdx.length > 0) {
+    let archIdx = inspirationPhotoIdx[0].i;
+    let archArea = 0;
+    for (const { p, i } of inspirationPhotoIdx) {
+      const area = p.width * p.height;
+      if (area > archArea) {
+        archArea = area;
+        archIdx = i;
+      }
+    }
+    shapes.set(archIdx, "arch");
+    let ovalToggle = false;
+    for (const { i } of inspirationPhotoIdx) {
+      if (i === archIdx) continue;
+      shapes.set(i, ovalToggle ? "rounded" : "oval");
+      ovalToggle = !ovalToggle;
+    }
+  }
 
   const tiles: RenderedTile[] = await Promise.all(
-    items.map(async (item) => {
-      const left = MARGIN + Math.round(item.x * BOARD_WIDTH);
-      const top = HEADER_HEIGHT + MARGIN + Math.round(item.y * BOARD_HEIGHT);
-      const width = Math.max(40, Math.round(item.width * BOARD_WIDTH));
-      const height = Math.max(40, Math.round(item.height * BOARD_HEIGHT));
-
+    placed.map(async ({ item, left, top, width, height }, i) => {
       if (item.url) {
+        const shape = shapes.get(i) ?? "rounded";
         const raw = await fetchRawImage(item.url);
         const [resized, avgColor] = await Promise.all([
           sharp(raw).rotate().resize({ width, height, fit: "cover" }).jpeg({ quality: 88 }).toBuffer(),
           averageColor(raw),
         ]);
-        const buffer = await roundPhotoCorners(resized, width, height);
-        return { buffer, left, top, width, height, label: item.label, type: item.type, hasPhoto: true, avgColor };
+        const buffer = await maskPhotoTile(resized, width, height, shape);
+        return { buffer, left, top, width, height, type: item.type, shape, avgColor };
       }
 
       const buffer = buildSwatchTileSvg(item.label, width, height);
-      return { buffer, left, top, width, height, label: item.label, type: item.type, hasPhoto: false, avgColor: null };
+      return { buffer, left, top, width, height, type: item.type, shape: "rounded" as TileShape, avgColor: null };
     })
   );
 
@@ -248,8 +343,24 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
     }
   }
 
+  // A hand-drawn-style arrow calling out the materials — pointing from a
+  // script "Materials" label up at whichever material item (photo or
+  // text swatch) sits highest on the board, same device the reference
+  // uses for "Furnitures". Skipped entirely when the board has no
+  // material items yet, rather than pointing at nothing.
+  const materialTiles = tiles.filter((t) => t.type === "material");
+  const hasAnnotation = materialTiles.length > 0;
+  let annotationTarget: RenderedTile | null = null;
+  if (hasAnnotation) {
+    annotationTarget = materialTiles.reduce((best, t) => (t.top < best.top || (t.top === best.top && t.left < best.left) ? t : best));
+  }
+
+  const boardAreaWidth = BOARD_WIDTH + PALETTE_WIDTH;
+  const canvasWidth = boardAreaWidth + MARGIN * 2;
+  const canvasHeight = HEADER_HEIGHT + BOARD_HEIGHT + MARGIN * 2 + (hasAnnotation ? ANNOTATION_STRIP : 0);
+
   const headerTitleY = header.projectName ? 76 : 80;
-  const headerSubtitleY = headerTitleY + 24;
+  const headerSubtitleY = headerTitleY + 30;
 
   const paletteCx = MARGIN + boardAreaWidth - PALETTE_WIDTH / 2;
   const paletteRadius = 17;
@@ -257,63 +368,44 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
   const paletteTotalHeight = paletteColors.length > 0 ? (paletteColors.length - 1) * paletteGap : 0;
   const paletteStartY = HEADER_HEIGHT + MARGIN + (BOARD_HEIGHT - paletteTotalHeight) / 2;
 
-  const paletteSvg =
-    paletteColors.length > 0
-      ? `<text x="${paletteCx}" y="${paletteStartY - paletteRadius - 16}" font-family="sans-serif" font-size="10" font-weight="700" letter-spacing="2" fill="${COLORS.kicker}" text-anchor="middle">PALETTE</text>
-      ${paletteColors
-        .map((c, i) => {
-          const cy = paletteStartY + i * paletteGap;
-          const fill = `rgb(${c.r}, ${c.g}, ${c.b})`;
-          return `${buildCircleShadowFragment(paletteCx, cy, paletteRadius)}
-            <circle cx="${paletteCx}" cy="${cy}" r="${paletteRadius}" fill="${fill}"/>
-            <circle cx="${paletteCx}" cy="${cy}" r="${paletteRadius}" fill="none" stroke="#FFFFFF" stroke-width="2"/>`;
-        })
-        .join("")}`
-      : "";
+  const paletteSvg = paletteColors
+    .map((c, i) => {
+      const cy = paletteStartY + i * paletteGap;
+      const fill = `rgb(${c.r}, ${c.g}, ${c.b})`;
+      return `${buildCircleShadowFragment(paletteCx, cy, paletteRadius)}
+        <circle cx="${paletteCx}" cy="${cy}" r="${paletteRadius}" fill="${fill}"/>
+        <circle cx="${paletteCx}" cy="${cy}" r="${paletteRadius}" fill="none" stroke="#FFFFFF" stroke-width="2"/>`;
+    })
+    .join("");
+
+  let annotationSvg = "";
+  if (hasAnnotation && annotationTarget) {
+    const labelY = HEADER_HEIGHT + MARGIN + BOARD_HEIGHT + 52;
+    const { markup, width: labelWidth } = scriptText("Materials", MARGIN, labelY, 38, COLORS.annotationInk, "start");
+    const startX = MARGIN + labelWidth + 14;
+    const startY = labelY - 14;
+    const endX = clamp(annotationTarget.left + annotationTarget.width / 2, annotationTarget.left + 12, annotationTarget.left + annotationTarget.width - 12);
+    const endY = annotationTarget.top + annotationTarget.height - 6;
+    annotationSvg = `${markup}${buildArrowFragment(startX, startY, endX, endY, COLORS.annotationInk)}`;
+  }
+
+  const subtitle = header.projectName ? scriptText(header.projectName, MARGIN, headerSubtitleY, 22, COLORS.subtitleScript, "start") : null;
 
   const backgroundSvg = `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="${COLORS.background}"/>
     <text x="${MARGIN}" y="32" font-family="sans-serif" font-size="11" font-weight="700" letter-spacing="3" fill="${COLORS.kicker}">MOOD BOARD</text>
     <text x="${MARGIN}" y="${headerTitleY}" font-family="Georgia, 'Times New Roman', serif" font-size="32" font-weight="700" fill="${COLORS.headerText}">${escapeXml(header.roomName.toUpperCase())}</text>
-    ${
-      header.projectName
-        ? `<text x="${MARGIN}" y="${headerSubtitleY}" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="15" fill="${COLORS.subtitle}">${escapeXml(header.projectName)}</text>`
-        : ""
-    }
+    ${subtitle ? subtitle.markup : ""}
     <line x1="${MARGIN}" y1="${HEADER_HEIGHT - 16}" x2="${canvasWidth - MARGIN}" y2="${HEADER_HEIGHT - 16}" stroke="${COLORS.divider}" stroke-width="1"/>
-    ${tiles.map((t) => buildShadowFragment(t.left, t.top, t.width, t.height)).join("")}
+    ${tiles.map((t) => buildShadowFragment(t.shape, t.left, t.top, t.width, t.height)).join("")}
     ${paletteSvg}
-  </svg>`;
-
-  // A second, transparent SVG layer composited ON TOP of the photo tiles —
-  // the type pill and caption need to render above the photos, not under
-  // them. Captions sit inside each tile's own bottom strip (not below the
-  // tile) so they can never overlap a neighboring tile regardless of how
-  // tightly the board's been arranged. Swatch cards already carry their
-  // label as their whole content, so they skip both.
-  const overlaySvg = `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
-    ${tiles
-      .filter((t) => t.hasPhoto)
-      .map((t) => buildPillFragment(t.left, t.top, t.type))
-      .join("")}
-    ${tiles
-      .filter((t) => t.hasPhoto && t.label)
-      .map((t) => {
-        const stripHeight = Math.min(26, t.height * 0.3);
-        return `<rect x="${t.left}" y="${t.top + t.height - stripHeight}" width="${t.width}" height="${stripHeight}" fill="${COLORS.labelStrip}"/>
-          <text x="${t.left + t.width / 2}" y="${t.top + t.height - stripHeight / 2 + 5}" font-family="sans-serif" font-size="14" fill="${COLORS.labelText}" text-anchor="middle">${escapeXml(truncateLabel(t.label as string, t.width))}</text>`;
-      })
-      .join("")}
+    ${annotationSvg}
   </svg>`;
 
   return sharp({
     create: { width: canvasWidth, height: canvasHeight, channels: 3, background: COLORS.background },
   })
-    .composite([
-      { input: Buffer.from(backgroundSvg), top: 0, left: 0 },
-      ...tiles.map((t) => ({ input: t.buffer, top: t.top, left: t.left })),
-      { input: Buffer.from(overlaySvg), top: 0, left: 0 },
-    ])
+    .composite([{ input: Buffer.from(backgroundSvg), top: 0, left: 0 }, ...tiles.map((t) => ({ input: t.buffer, top: t.top, left: t.left }))])
     .png()
     .toBuffer();
 }
