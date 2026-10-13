@@ -3988,3 +3988,64 @@ old bug, which is more correct but just as broken-looking.
   likely failing, but — same caveat as every round of this feature —
   isn't re-confirmed against the person's actual deployment target,
   since this sandbox has no access to it.
+
+## Mood Boards: found the real bug — a CJS/ESM default-import interop issue with opentype.js
+
+The embedded-fonts fix above was confirmed deployed (commit SHA
+matched), but text was still blank. This time the person pulled the
+actual Vercel Runtime Logs (added in the previous round specifically
+to make this possible), which gave an exact answer instead of another
+guess:
+
+```
+TypeError: Cannot read properties of undefined (reading 'parse')
+    at /var/task/.next/server/chunks/7448.js:...
+```
+
+- **Root cause, confirmed directly against the compiled production
+  bundle**: `lib/textPath.ts` imported opentype.js as
+  `import opentype from "opentype.js"` (a default import). Next's
+  production bundler compiled every call site to
+  `Q.default.parse(...)` — but opentype.js's CommonJS module has no
+  actual `default` property (`parse`, `Font`, etc. sit directly on
+  `module.exports`), so `Q.default` was `undefined`, and every call
+  threw. The embedded font **data** was never the problem — the
+  decoded buffer length logged exactly right (28604 for Arimo,
+  matching the real file) — the function call on the next line was
+  what failed, silently caught by the very try/catch meant to make
+  failures visible, which is exactly why the symptom looked identical
+  to the previous round's "data isn't arriving" bug even though the
+  actual cause had moved.
+- **Why local testing never caught it**: every smoke test in this
+  feature ran the `.ts` files directly through plain Node (or Node's
+  `--experimental-strip-types`), which resolves `import opentype from
+  "opentype.js"` completely differently than Next's own webpack-based
+  production bundler does. The bug only existed in the specific
+  combination of "this package's CJS export shape" + "Next's
+  production bundler's default-import interop for that shape" —
+  invisible to every test that doesn't go through that exact bundler.
+  Confirmed by actually inspecting `lib/textPath.ts`'s own compiled
+  output in `.next/server/chunks/` after a local `next build`, not
+  just assumed from the stack trace.
+- **Fix**: switched to a **named import** —
+  `import { parse, type Font, type PathCommand } from "opentype.js"`
+  — which Next's bundler compiles to a direct property read (confirmed
+  in the rebuilt chunk: the call site is now `(0, Q.<alias>)(...)`,
+  no `.default` anywhere). Named imports from a CJS module map
+  directly to properties read off the required module object; the
+  default-import form is what synthesizes the (here, nonexistent)
+  `.default` wrapper that broke.
+- No schema/migration changes.
+- **Verified**: this is the first round of this particular bug class
+  that was checked against the actual thing that broke, not just
+  against a local Node script — ran a full local `next build` after
+  the fix and grepped the freshly compiled `lib/textPath.ts` chunk to
+  confirm the `.default.parse` call site is gone, replaced by a direct
+  property call. Also re-ran the smoke-test harness (with a small
+  Node-ESM-compatible import shim, since Node's own native ESM loader
+  resolves this package's named exports differently than Next's
+  bundler does — a harness limitation, not a bug) using the exact room
+  name from the person's own error log ("Powder Room (Main House)"),
+  confirming it now renders in full. Not re-deployed to the person's
+  actual Vercel instance by this session — that still needs their
+  confirmation.

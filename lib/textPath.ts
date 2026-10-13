@@ -1,4 +1,4 @@
-import opentype from "opentype.js";
+import { parse as parseFont, type Font, type PathCommand } from "opentype.js";
 import { caveatBold, playfairDisplayBold, arimoBold } from "@/lib/fonts/embedded";
 
 // Every piece of text in the generated mood board collage (lib/moodBoard.ts)
@@ -43,6 +43,23 @@ import { caveatBold, playfairDisplayBold, arimoBold } from "@/lib/fonts/embedded
 //     GSUB table hits an opentype.js shaping code path ("substFormat: 2
 //     ... not yet supported") that throws outright, confirmed directly
 //     against the bundled Inter-Bold.ttf before switching to Arimo.)
+//
+// Imported as NAMED exports (`import { parse, type Font } from
+// "opentype.js"`), not `import opentype from "opentype.js"` — confirmed,
+// from an actual production stack trace, that the default-import form
+// compiles (via Next's production bundler) to a call shaped like
+// `Q.default.parse(...)`, expecting a `.default` property that this CJS
+// package's module.exports doesn't actually have, so it was `undefined`
+// at runtime and every call threw "Cannot read properties of undefined
+// (reading 'parse')" — silently caught by the try/catch below, which is
+// what made every piece of text disappear despite the embedded font data
+// itself loading correctly (right base64 length, decoded fine). This
+// local sandbox's own tests never caught it because they ran the .ts
+// files directly through plain Node (or ts-node-style stripping), never
+// through Next's actual webpack production bundle — the one place this
+// particular interop bug could show up. Named imports map directly to
+// properties read off the module object, without that extra `.default`
+// indirection, so they don't have this failure mode.
 
 export type FontKey = "script" | "serif" | "sans";
 
@@ -52,14 +69,14 @@ const FONT_DATA: Record<FontKey, string> = {
   sans: arimoBold,
 };
 
-const cache = new Map<FontKey, opentype.Font | null>();
+const cache = new Map<FontKey, Font | null>();
 
 // Logged once per font per cold start, deliberately not gated behind a
 // debug flag — this is the one place a production failure here has
 // otherwise been silent (text just doesn't appear, nothing throws up to
-// the caller), and that silence is exactly what made the last two rounds
+// the caller), and that silence is exactly what made the earlier rounds
 // of this bug hard to pin down from outside the deployment.
-function loadFont(key: FontKey): opentype.Font | null {
+function loadFont(key: FontKey): Font | null {
   if (cache.has(key)) return cache.get(key) ?? null;
   const base64 = FONT_DATA[key];
   try {
@@ -68,7 +85,7 @@ function loadFont(key: FontKey): opentype.Font | null {
       `textPath: loading "${key}" — base64 string length ${base64.length}, decoded buffer ${buf.length} bytes`
     );
     const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-    const font = opentype.parse(arrayBuffer);
+    const font = parseFont(arrayBuffer);
     console.log(`textPath: "${key}" parsed ok — ${font.glyphs.length} glyphs, unitsPerEm ${font.unitsPerEm}`);
     cache.set(key, font);
     return font;
@@ -108,7 +125,7 @@ function formatNum(n: number): string {
 // rest of the string renders as corrupted/missing glyphs. Always including
 // an explicit space between every number, as below, sidesteps the whole
 // bug class rather than working around this one instance of it.
-function commandsToPathData(commands: opentype.PathCommand[]): string {
+function commandsToPathData(commands: PathCommand[]): string {
   const parts: string[] = [];
   for (const c of commands) {
     switch (c.type) {
