@@ -1,0 +1,156 @@
+import fs from "node:fs";
+import path from "node:path";
+import opentype from "opentype.js";
+
+// Every piece of text in the generated mood board collage (lib/moodBoard.ts)
+// is rendered this way — as actual glyph OUTLINES, not an SVG <text>
+// element with a font-family — because a real deployment of this app was
+// found to have NO usable fonts available to its sharp/librsvg SVG
+// rasterizer at all: even a plain `<text font-family="sans-serif">`
+// rendered as empty tofu boxes. This sandbox's own dev container has
+// DejaVu/Liberation/Inter etc. installed system-wide, which is exactly why
+// that failure mode was missed in earlier local smoke tests — it only
+// shows up where there's no font fallback to quietly catch the miss.
+//
+// Converting every string to glyph outlines (via opentype.js, reading a
+// bundled font file directly off disk) sidesteps the deployment's font
+// situation entirely: an SVG <path> is just vector geometry by the time it
+// reaches the rasterizer, nothing to look up. There is deliberately no
+// plain-<text> fallback path anymore — that was tried first and is
+// exactly what produced the tofu boxes in production.
+//
+// Fonts bundled under lib/fonts/ (all SIL Open Font License, *-OFL.txt
+// alongside each):
+//   - Caveat Bold      — "script": handwritten accents (a subtitle, the
+//                        materials-arrow label, swatch card text)
+//   - Playfair Display Bold — "serif": the bold headline (room name)
+//   - Arimo Bold       — "sans": small/functional text (kicker, tags).
+//     (Inter — this app's own UI font — was tried first and rejected: its
+//     GSUB table hits an opentype.js shaping code path ("substFormat: 2
+//     ... not yet supported") that throws outright, confirmed directly
+//     against the bundled Inter-Bold.ttf before switching to Arimo.)
+
+export type FontKey = "script" | "serif" | "sans";
+
+const FONT_FILES: Record<FontKey, string> = {
+  script: "Caveat-Bold.ttf",
+  serif: "PlayfairDisplay-Bold.ttf",
+  sans: "Arimo-Bold.ttf",
+};
+
+const cache = new Map<FontKey, opentype.Font | null>();
+
+function loadFont(key: FontKey): opentype.Font | null {
+  if (cache.has(key)) return cache.get(key) ?? null;
+  try {
+    const buf = fs.readFileSync(path.join(process.cwd(), "lib", "fonts", FONT_FILES[key]));
+    const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    const font = opentype.parse(arrayBuffer);
+    cache.set(key, font);
+    return font;
+  } catch (err) {
+    console.error(`Could not load the bundled "${key}" font (${FONT_FILES[key]}):`, err);
+    cache.set(key, null);
+    return null;
+  }
+}
+
+export interface TextPathResult {
+  markup: string;
+  width: number;
+}
+
+// Round to 2 decimal places, but never let a value that rounds to "-0"
+// render as a bare "-0"/"0" — formats every number as its own token with
+// an explicit leading space, never relying on a minus sign to double as
+// the separator between numbers the way `path.toPathData()` does.
+function formatNum(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  return rounded === 0 ? "0" : String(rounded);
+}
+
+// Serializes a glyph path ourselves instead of calling opentype.js's own
+// `toPathData()` — confirmed directly (against the bundled Arimo-Bold.ttf,
+// rendering "Travertine floor tile") that it has a real bug: when a
+// coordinate rounds to exactly "-0" at the requested precision, the minus
+// sign disappears, and since toPathData() omits the space before a
+// negative number (using the "-" itself as an implicit separator between
+// numbers), losing that sign also silently drops the separator — two
+// numbers run together into one malformed token, the argument count for
+// that command (and everything after it in the path) desyncs, and the
+// rest of the string renders as corrupted/missing glyphs. Always including
+// an explicit space between every number, as below, sidesteps the whole
+// bug class rather than working around this one instance of it.
+function commandsToPathData(commands: opentype.PathCommand[]): string {
+  const parts: string[] = [];
+  for (const c of commands) {
+    switch (c.type) {
+      case "M":
+        parts.push(`M ${formatNum(c.x)} ${formatNum(c.y)}`);
+        break;
+      case "L":
+        parts.push(`L ${formatNum(c.x)} ${formatNum(c.y)}`);
+        break;
+      case "Q":
+        parts.push(`Q ${formatNum(c.x1)} ${formatNum(c.y1)} ${formatNum(c.x)} ${formatNum(c.y)}`);
+        break;
+      case "C":
+        parts.push(`C ${formatNum(c.x1)} ${formatNum(c.y1)} ${formatNum(c.x2)} ${formatNum(c.y2)} ${formatNum(c.x)} ${formatNum(c.y)}`);
+        break;
+      case "Z":
+        parts.push("Z");
+        break;
+    }
+  }
+  return parts.join(" ");
+}
+
+// `x` is always the LEFT edge regardless of anchor — for "middle"/"end"
+// the caller gets the actual rendered width back to do their own layout
+// math (centering, arrow start points) rather than this function guessing
+// what they need. `tracking` adds fixed extra space (px, at this
+// `fontSize`) between every character — opentype.js's getPath has no
+// built-in letter-spacing, so wide-tracked text (the "MOOD BOARD" kicker)
+// is laid out one glyph at a time.
+export function textPath(
+  key: FontKey,
+  text: string,
+  x: number,
+  y: number,
+  fontSize: number,
+  fill: string,
+  anchor: "start" | "middle" | "end" = "start",
+  tracking = 0
+): TextPathResult {
+  const font = loadFont(key);
+  if (!font) {
+    // No usable fallback font exists in the environment that made this
+    // function necessary in the first place — an empty result (nothing
+    // drawn) is the honest outcome here, not a <text> element that would
+    // just reproduce the original tofu-box bug.
+    return { markup: "", width: 0 };
+  }
+
+  if (tracking === 0) {
+    const width = font.getAdvanceWidth(text, fontSize);
+    const originX = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+    const glyphPath = font.getPath(text, originX, y, fontSize);
+    return { markup: `<path d="${commandsToPathData(glyphPath.commands)}" fill="${fill}"/>`, width };
+  }
+
+  const chars = Array.from(text);
+  let width = 0;
+  for (const ch of chars) {
+    width += font.getAdvanceWidth(ch, fontSize) + tracking;
+  }
+  width -= tracking; // no trailing tracking after the last character
+
+  let cursor = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+  let markup = "";
+  for (const ch of chars) {
+    const glyphPath = font.getPath(ch, cursor, y, fontSize);
+    markup += `<path d="${commandsToPathData(glyphPath.commands)}" fill="${fill}"/>`;
+    cursor += font.getAdvanceWidth(ch, fontSize) + tracking;
+  }
+  return { markup, width };
+}

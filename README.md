@@ -3860,3 +3860,82 @@ silhouette near the corners):
   tiles, no tag on the unlabeled mirror tile or the text-only swatch
   cards, room name confirmed present with and without a project name
   set — reviewed as PNGs.
+
+## Mood Boards: every piece of text was actually rendering as tofu boxes on a real deployment — found and fixed
+
+The person sent a screenshot of an actual generated board: every piece
+of text — the "MOOD BOARD" kicker, the room name, the project
+subtitle, the "Materials" arrow label — showed as empty tofu boxes
+(□□□). That's a different, more fundamental bug than the labels report
+right above it, and explains both reports at once.
+
+- **Root cause**: the deployment's `sharp`/librsvg SVG rasterizer has
+  **no usable fonts available at all** — not even a generic
+  fallback for `font-family="sans-serif"`. This sandbox's own dev
+  container has DejaVu/Liberation/Inter etc. installed system-wide,
+  which is exactly why every earlier smoke test in this feature looked
+  fine locally and never caught it — there was always a fallback font
+  quietly catching the miss here, and evidently none on the real
+  target. The two previous rounds' "convert script text to glyph
+  outlines" fix (for the subtitle and the "Materials" label) was the
+  right idea but too narrow — every *other* string in the collage
+  (`<text font-family="...">`) was still depending on a system font
+  that isn't actually there.
+- **Fix**: eliminated every remaining `<text>` element from
+  `lib/moodBoard.ts` — the kicker, the room name title, the swatch
+  card body text, and the small photo-tile tag — converting all of
+  them to glyph outlines the same way, via the renamed/generalized
+  **`lib/textPath.ts`** (was `lib/scriptFont.ts`). It now loads three
+  bundled fonts instead of one: **Caveat Bold** ("script" — the
+  subtitle, the "Materials" label, swatch card text), **Playfair
+  Display Bold** ("serif" — the room name headline), and **Arimo
+  Bold** ("sans" — the kicker, the small photo tags). Confirmed
+  `grep -n "<text" lib/moodBoard.ts` now returns nothing. There's also
+  deliberately no plain-`<text>` fallback left anywhere in this path
+  any more — that was the exact thing that just failed in production,
+  so falling back to it on a font-load error would silently reproduce
+  the same bug; an empty (nothing drawn) result is the honest outcome
+  if a bundled font file itself somehow can't be read.
+- **Inter was tried first and rejected.** This app's own UI font
+  seemed like the obvious sans-serif choice, but parsing
+  `Inter-Bold.ttf` with `opentype.js` throws outright —
+  `substitutionType : 62 lookupType: 6 - substFormat: 2 is not yet
+  supported` — a GSUB table feature `opentype.js` doesn't implement.
+  Confirmed directly before switching to **Arimo** (Arial-metric-
+  compatible, no such table), which parses and renders cleanly.
+- **A second, nastier bug found and fixed along the way**: even with
+  real fonts bundled, one tag's text ("Travertine floor tile") was
+  rendering as just "Tra" — silently corrupted, not tofu. Root-caused
+  to a genuine bug in `opentype.js`'s own `Path.toPathData()`: when a
+  glyph coordinate rounds to exactly `-0` at the requested decimal
+  precision, the minus sign disappears — and `toPathData()` omits the
+  space before a negative number, using the `-` itself as the implicit
+  separator between numbers. Losing that sign also silently drops the
+  separator, so two numbers run together into one malformed token, a
+  curve command ends up with the wrong number of arguments, and the
+  rest of the path desyncs and renders as garbage. Fixed by writing a
+  small serializer (`commandsToPathData` in `lib/textPath.ts`) that
+  walks `path.commands` itself and always emits an explicit space
+  between every number — confirmed fixed by re-rendering the exact
+  string that triggered it.
+- Google Fonts' modern CDN only serves variable-font files for Inter/
+  Playfair Display (which `opentype.js` can't resolve to a specific
+  weight) — the two new static Bold `.ttf` files were fetched via
+  Google Fonts' legacy `css?family=` endpoint with an old-Android
+  user agent, the known trick for getting a direct static-TTF link
+  instead of a variable font or a (useless-to-us) WOFF2/EOT.
+  `next.config.js`'s `outputFileTracingIncludes` for `lib/fonts/**`
+  (added two rounds ago) already covers these two new files with no
+  further change needed — confirmed both show up in `.next`'s
+  `*.nft.json` trace output for the relevant routes after a build.
+- No schema/migration changes.
+- **Verified locally**: re-ran the smoke-test harness with the exact
+  real-world string that triggered the corruption bug
+  ("Travertine floor tile" on a tag), confirmed it now renders in full
+  rather than truncating to "Tra"; re-ran the full board composition
+  and confirmed the kicker, room name, subtitle, swatch text, tags,
+  and arrow label are all present and legible in the output PNG. Not
+  deployed anywhere live, so the "no system fonts at all" root cause
+  is inferred from the person's screenshot plus this sandbox's own
+  fonts being the one variable between then and now, not re-confirmed
+  against the actual deployment target directly.

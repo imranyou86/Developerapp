@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { BOARD_WIDTH, BOARD_HEIGHT, assignDefaultPositions, clamp, type MoodBoardLayoutItem } from "@/lib/moodBoardLayout";
-import { scriptText } from "@/lib/scriptFont";
+import { textPath } from "@/lib/textPath";
 
 // Composes a room's uploaded inspiration photos and material swatches into
 // a single collage image — plain image composition via sharp, deliberately
@@ -89,10 +89,6 @@ interface RenderedTile {
   avgColor: { r: number; g: number; b: number } | null;
   label: string | null;
   hasPhoto: boolean;
-}
-
-function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 // Greedy word-wrap for the multi-line label inside a text-only swatch card
@@ -193,13 +189,13 @@ function buildSwatchTileSvg(label: string | null, width: number, height: number)
   const lines = wrapLabel(label ?? "Material", maxCharsPerLine);
   const lineHeight = fontSize * 1.3;
   const startY = height / 2 - ((lines.length - 1) * lineHeight) / 2;
-  const tspans = lines
-    .map((line, i) => `<tspan x="${width / 2}" y="${startY + i * lineHeight}">${escapeXml(line)}</tspan>`)
+  const linesMarkup = lines
+    .map((line, i) => textPath("serif", line, width / 2, startY + i * lineHeight, fontSize, COLORS.swatchText, "middle").markup)
     .join("");
   return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" rx="${TILE_RADIUS}" ry="${TILE_RADIUS}" fill="${COLORS.swatchBg}"/>
     <rect x="1" y="1" width="${width - 2}" height="${height - 2}" rx="${TILE_RADIUS - 1}" ry="${TILE_RADIUS - 1}" fill="none" stroke="${COLORS.swatchBorder}" stroke-opacity="0.35" stroke-width="1.5"/>
-    <text font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="${fontSize}" fill="${COLORS.swatchText}" text-anchor="middle">${tspans}</text>
+    ${linesMarkup}
   </svg>`);
 }
 
@@ -249,14 +245,21 @@ function truncateLabel(label: string, maxChars: number): string {
 function buildTagFragment(left: number, top: number, width: number, height: number, label: string): string {
   const text = truncateLabel(label, 20);
   const fontSize = 10;
-  const tagWidth = Math.min(132, Math.max(40, text.length * 6 + 18));
   const tagHeight = 20;
+  const padX = 10;
+  // Measured against the real bundled font rather than an estimated
+  // char-width — the tag can be sized exactly instead of guessed-and-
+  // padded.
+  const { markup, width: textWidth } = textPath("sans", text, 0, 0, fontSize, COLORS.headerText, "start");
+  const tagWidth = Math.min(132, textWidth + padX * 2);
   const px = left + width - tagWidth - 6;
   const py = top + height - tagHeight - 6;
+  const textX = px + tagWidth / 2 - textWidth / 2;
+  const textY = py + tagHeight / 2 + 3.5;
   return `<g>
     <rect x="${px + 1}" y="${py + 2}" width="${tagWidth}" height="${tagHeight}" rx="${tagHeight / 2}" fill="${COLORS.shadow}" opacity="0.12"/>
     <rect x="${px}" y="${py}" width="${tagWidth}" height="${tagHeight}" rx="${tagHeight / 2}" fill="rgba(255,255,255,0.95)"/>
-    <text x="${px + tagWidth / 2}" y="${py + tagHeight / 2 + 3.5}" font-family="sans-serif" font-size="${fontSize}" fill="${COLORS.headerText}" text-anchor="middle">${escapeXml(text)}</text>
+    <g transform="translate(${textX}, ${textY})">${markup}</g>
   </g>`;
 }
 
@@ -419,7 +422,7 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
   let annotationSvg = "";
   if (hasAnnotation && annotationTarget) {
     const labelY = HEADER_HEIGHT + MARGIN + BOARD_HEIGHT + 52;
-    const { markup, width: labelWidth } = scriptText("Materials", MARGIN, labelY, 38, COLORS.annotationInk, "start");
+    const { markup, width: labelWidth } = textPath("script", "Materials", MARGIN, labelY, 38, COLORS.annotationInk, "start");
     const startX = MARGIN + labelWidth + 14;
     const startY = labelY - 14;
     const endX = clamp(annotationTarget.left + annotationTarget.width / 2, annotationTarget.left + 12, annotationTarget.left + annotationTarget.width - 12);
@@ -427,12 +430,14 @@ export async function composeMoodBoardCollage(header: MoodBoardCollageHeader, ra
     annotationSvg = `${markup}${buildArrowFragment(startX, startY, endX, endY, COLORS.annotationInk)}`;
   }
 
-  const subtitle = header.projectName ? scriptText(header.projectName, MARGIN, headerSubtitleY, 22, COLORS.subtitleScript, "start") : null;
+  const subtitle = header.projectName ? textPath("script", header.projectName, MARGIN, headerSubtitleY, 22, COLORS.subtitleScript, "start") : null;
+  const kicker = textPath("sans", "MOOD BOARD", MARGIN, 32, 11, COLORS.kicker, "start", 3);
+  const title = textPath("serif", header.roomName.toUpperCase(), MARGIN, headerTitleY, 32, COLORS.headerText, "start");
 
   const backgroundSvg = `<svg width="${canvasWidth}" height="${canvasHeight}" xmlns="http://www.w3.org/2000/svg">
     <rect width="100%" height="100%" fill="${COLORS.background}"/>
-    <text x="${MARGIN}" y="32" font-family="sans-serif" font-size="11" font-weight="700" letter-spacing="3" fill="${COLORS.kicker}">MOOD BOARD</text>
-    <text x="${MARGIN}" y="${headerTitleY}" font-family="Georgia, 'Times New Roman', serif" font-size="32" font-weight="700" fill="${COLORS.headerText}">${escapeXml(header.roomName.toUpperCase())}</text>
+    ${kicker.markup}
+    ${title.markup}
     ${subtitle ? subtitle.markup : ""}
     <line x1="${MARGIN}" y1="${HEADER_HEIGHT - 16}" x2="${canvasWidth - MARGIN}" y2="${HEADER_HEIGHT - 16}" stroke="${COLORS.divider}" stroke-width="1"/>
     ${tiles.map((t) => buildShadowFragment(t.shape, t.left, t.top, t.width, t.height)).join("")}
