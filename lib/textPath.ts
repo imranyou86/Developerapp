@@ -54,16 +54,29 @@ const FONT_DATA: Record<FontKey, string> = {
 
 const cache = new Map<FontKey, opentype.Font | null>();
 
+// Logged once per font per cold start, deliberately not gated behind a
+// debug flag — this is the one place a production failure here has
+// otherwise been silent (text just doesn't appear, nothing throws up to
+// the caller), and that silence is exactly what made the last two rounds
+// of this bug hard to pin down from outside the deployment.
 function loadFont(key: FontKey): opentype.Font | null {
   if (cache.has(key)) return cache.get(key) ?? null;
+  const base64 = FONT_DATA[key];
   try {
-    const buf = Buffer.from(FONT_DATA[key], "base64");
+    const buf = Buffer.from(base64, "base64");
+    console.log(
+      `textPath: loading "${key}" — base64 string length ${base64.length}, decoded buffer ${buf.length} bytes`
+    );
     const arrayBuffer = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
     const font = opentype.parse(arrayBuffer);
+    console.log(`textPath: "${key}" parsed ok — ${font.glyphs.length} glyphs, unitsPerEm ${font.unitsPerEm}`);
     cache.set(key, font);
     return font;
   } catch (err) {
-    console.error(`Could not decode the embedded "${key}" font:`, err);
+    console.error(
+      `textPath: COULD NOT decode/parse the embedded "${key}" font (base64 string length ${base64.length}):`,
+      err
+    );
     cache.set(key, null);
     return null;
   }
@@ -142,29 +155,41 @@ export function textPath(
     // function necessary in the first place — an empty result (nothing
     // drawn) is the honest outcome here, not a <text> element that would
     // just reproduce the original tofu-box bug.
+    console.error(`textPath: "${key}" font unavailable (failed to load) — rendering "${text}" as nothing.`);
     return { markup: "", width: 0 };
   }
 
-  if (tracking === 0) {
-    const width = font.getAdvanceWidth(text, fontSize);
-    const originX = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
-    const glyphPath = font.getPath(text, originX, y, fontSize);
-    return { markup: `<path d="${commandsToPathData(glyphPath.commands)}" fill="${fill}"/>`, width };
-  }
+  try {
+    if (tracking === 0) {
+      const width = font.getAdvanceWidth(text, fontSize);
+      const originX = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+      const glyphPath = font.getPath(text, originX, y, fontSize);
+      const d = commandsToPathData(glyphPath.commands);
+      if (!d) console.error(`textPath: "${key}" produced an empty path for "${text}" (${glyphPath.commands.length} commands).`);
+      return { markup: `<path d="${d}" fill="${fill}"/>`, width };
+    }
 
-  const chars = Array.from(text);
-  let width = 0;
-  for (const ch of chars) {
-    width += font.getAdvanceWidth(ch, fontSize) + tracking;
-  }
-  width -= tracking; // no trailing tracking after the last character
+    const chars = Array.from(text);
+    let width = 0;
+    for (const ch of chars) {
+      width += font.getAdvanceWidth(ch, fontSize) + tracking;
+    }
+    width -= tracking; // no trailing tracking after the last character
 
-  let cursor = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
-  let markup = "";
-  for (const ch of chars) {
-    const glyphPath = font.getPath(ch, cursor, y, fontSize);
-    markup += `<path d="${commandsToPathData(glyphPath.commands)}" fill="${fill}"/>`;
-    cursor += font.getAdvanceWidth(ch, fontSize) + tracking;
+    let cursor = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+    let markup = "";
+    for (const ch of chars) {
+      const glyphPath = font.getPath(ch, cursor, y, fontSize);
+      markup += `<path d="${commandsToPathData(glyphPath.commands)}" fill="${fill}"/>`;
+      cursor += font.getAdvanceWidth(ch, fontSize) + tracking;
+    }
+    return { markup, width };
+  } catch (err) {
+    // Render nothing for just this one string rather than letting an
+    // exception here fail the entire collage — but log loudly, since a
+    // silent catch here is exactly the kind of thing that made the last
+    // two rounds of this bug invisible from outside the deployment.
+    console.error(`textPath: threw while rendering "${text}" with "${key}":`, err);
+    return { markup: "", width: 0 };
   }
-  return { markup, width };
 }
